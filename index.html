@@ -1,10 +1,266 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
-<title>養鶏場通知システム</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>養鶏場 停電・通電通知システム</title>
+<meta name="theme-color" content="#1f4e79">
+
+<style>
+body{
+  margin:0;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  background:#f4f7fb;
+  color:#1f2937;
+}
+header{
+  background:linear-gradient(135deg,#1f4e79,#0f766e);
+  color:white;
+  padding:45px 20px;
+  text-align:center;
+}
+header h1{
+  font-size:28px;
+  margin:0 0 10px;
+}
+header p{
+  margin:0;
+  font-size:16px;
+}
+.container{
+  max-width:900px;
+  margin:auto;
+  padding:20px;
+}
+.card{
+  background:white;
+  border-radius:18px;
+  padding:22px;
+  margin-bottom:18px;
+  box-shadow:0 4px 12px rgba(0,0,0,.08);
+}
+h2{
+  margin-top:0;
+  color:#1f4e79;
+}
+.btn{
+  display:block;
+  width:100%;
+  padding:16px;
+  border:none;
+  border-radius:12px;
+  font-size:17px;
+  font-weight:bold;
+  margin:10px 0;
+  color:white;
+}
+.red{background:#dc2626;}
+.green{background:#16a34a;}
+.blue{background:#2563eb;}
+.gray{background:#475569;}
+input,textarea{
+  width:100%;
+  box-sizing:border-box;
+  padding:13px;
+  margin:8px 0;
+  border-radius:10px;
+  border:1px solid #cbd5e1;
+  font-size:15px;
+}
+.status{
+  background:#ecfdf5;
+  border-left:6px solid #16a34a;
+  padding:14px;
+  border-radius:12px;
+}
+.warn{
+  background:#fff7ed;
+  border-left:6px solid #f97316;
+  padding:14px;
+  border-radius:12px;
+}
+.flow{
+  text-align:center;
+  line-height:2;
+  font-weight:bold;
+}
+.price{
+  font-size:30px;
+  font-weight:bold;
+  color:#dc2626;
+}
+table{
+  width:100%;
+  border-collapse:collapse;
+}
+td,th{
+  border:1px solid #cbd5e1;
+  padding:10px;
+}
+th{
+  background:#e0f2fe;
+}
+footer{
+  text-align:center;
+  padding:30px;
+  color:#64748b;
+}
+</style>
 </head>
+
 <body>
-<h1>🐔養鶏場停電・通電通知システム</h1>
-<p>サイト構築中</p>
+
+<header>
+  <h1>🐔 養鶏場 停電・通電通知システム</h1>
+  <p>停電発生をスマホへ即通知。24時間365日、自動監視。</p>
+</header>
+
+<div class="container">
+
+<div class="card">
+  <h2>🚨 このシステムでできること</h2>
+  <p>停電監視装置から送られてくるメールを自動で確認し、停電・通電をスマホに通知します。</p>
+  <div class="status">
+    ✅ 停電発生時：緊急通知<br>
+    ✅ 通電復旧時：復旧通知<br>
+    ✅ パソコンを開いていなくても監視可能
+  </div>
+</div>
+
+<div class="card">
+  <h2>📱 通知テスト</h2>
+  <p>導入後、ボタン1つで通知が届くか確認できます。</p>
+  <button class="btn red" onclick="testPowerOutage()">🚨 停電通知を試験する</button>
+  <button class="btn green" onclick="testPowerRestore()">✅ 通電通知を試験する</button>
+  <p id="testResult"></p>
+</div>
+
+<div class="card">
+  <h2>🔐 ログイン・識別コード</h2>
+  <p>Googleアカウント本人確認と、管理者が発行する識別コードで利用者を確認します。</p>
+  <input id="licenseCode" placeholder="識別コードを入力 例：A001-X8K2-2027">
+  <button class="btn blue" onclick="checkLicense()">利用開始</button>
+  <p id="licenseResult"></p>
+</div>
+
+<div class="card">
+  <h2>📅 契約情報</h2>
+  <div class="status">
+    契約者：サンプル養鶏場<br>
+    契約期限：2027/06/10<br>
+    残り日数：365日
+  </div>
+</div>
+
+<div class="card">
+  <h2>⚙️ 仕組み</h2>
+  <div class="flow">
+    停電監視装置<br>⬇<br>
+    Gmail<br>⬇<br>
+    Google Apps Script<br>⬇<br>
+    Pushover<br>⬇<br>
+    スマートフォン通知
+  </div>
+</div>
+
+<div class="card">
+  <h2>📖 使い方</h2>
+  <ol>
+    <li>Pushoverアプリをインストール</li>
+    <li>Pushoverアカウントを作成</li>
+    <li>User Keyを取得</li>
+    <li>管理者へUser Keyを送る</li>
+    <li>通知テストを実行</li>
+    <li>利用開始</li>
+  </ol>
+</div>
+
+<div class="card">
+  <h2>👤 管理者画面</h2>
+  <p>管理者コードを入力すると、管理者用メニューを表示します。</p>
+  <input id="adminCode" placeholder="管理者コードを入力">
+  <button class="btn gray" onclick="adminLogin()">管理者ログイン</button>
+  <div id="adminPanel" style="display:none;">
+    <h3>管理メニュー</h3>
+    <button class="btn blue" onclick="createCode()">識別コードを発行</button>
+    <p id="newCode"></p>
+    <table>
+      <tr><th>農場名</th><th>期限</th><th>状態</th></tr>
+      <tr><td>サンプル養鶏場</td><td>2027/06/10</td><td>有効</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>💰 利用料金</h2>
+  <p class="price">年額 ¥12,000</p>
+  <p>※料金はサンプルです。正式料金は導入時に決定します。</p>
+</div>
+
+<div class="card">
+  <h2>📩 お問い合わせ</h2>
+  <input placeholder="お名前">
+  <input placeholder="農場名">
+  <input placeholder="メールアドレス">
+  <textarea rows="4" placeholder="お問い合わせ内容"></textarea>
+  <button class="btn blue" onclick="sendContact()">送信</button>
+</div>
+
+<div class="card">
+  <h2>⚠️ 注意事項</h2>
+  <div class="warn">
+    このシステムは停電監視装置から送信されるメールを基に動作します。<br>
+    監視装置がメール送信できない状態では通知できません。<br>
+    定期的な動作確認を推奨します。
+  </div>
+</div>
+
+</div>
+
+<footer>
+  © 養鶏場 停電・通電通知システム
+</footer>
+
+<script>
+function testPowerOutage(){
+  document.getElementById("testResult").innerHTML =
+  "🚨 停電通知テストを実行しました。※現在は表示のみです。";
+}
+
+function testPowerRestore(){
+  document.getElementById("testResult").innerHTML =
+  "✅ 通電通知テストを実行しました。※現在は表示のみです。";
+}
+
+function checkLicense(){
+  const code = document.getElementById("licenseCode").value;
+  if(code === "A001-X8K2-2027"){
+    document.getElementById("licenseResult").innerHTML =
+    "✅ 有効な識別コードです。利用を開始できます。";
+  }else{
+    document.getElementById("licenseResult").innerHTML =
+    "❌ 識別コードが正しくありません。";
+  }
+}
+
+function adminLogin(){
+  const code = document.getElementById("adminCode").value;
+  if(code === "ADMIN-2026"){
+    document.getElementById("adminPanel").style.display = "block";
+  }else{
+    alert("管理者コードが違います");
+  }
+}
+
+function createCode(){
+  const code = "A" + Math.floor(Math.random()*900+100) + "-X" + Math.floor(Math.random()*9000+1000) + "-2027";
+  document.getElementById("newCode").innerHTML = "発行コード：" + code;
+}
+
+function sendContact(){
+  alert("お問い合わせ内容を受け付けました。※現在は表示のみです。");
+}
+</script>
+
 </body>
 </html>
