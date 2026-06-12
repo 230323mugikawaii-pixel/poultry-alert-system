@@ -3,71 +3,86 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>養鶏場 停電・通電通知システム</title>
+<title>養鶏場通知システム</title>
+
 <style>
 body{
   margin:0;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  background:#f3f6fa;
-  color:#1f2937;
-  padding-bottom:85px;
+  background:#eef3f8;
+  color:#102033;
+  padding-bottom:90px;
 }
-header{
-  background:linear-gradient(135deg,#155e75,#0f766e);
-  color:white;
-  padding:42px 20px;
-  text-align:center;
-}
-header h1{font-size:30px;margin:0 0 12px;}
-header p{font-size:16px;margin:0;font-weight:bold;}
 
-section{
-  display:none;
-  padding:22px;
+header{
+  background:linear-gradient(135deg,#0f5f73,#0b8f75);
+  color:white;
+  padding:34px 20px 42px;
+  text-align:center;
+  border-bottom-left-radius:28px;
+  border-bottom-right-radius:28px;
 }
-section.active{display:block;}
+
+header h1{
+  margin:0;
+  font-size:30px;
+  line-height:1.35;
+}
+
+header p{
+  margin-top:12px;
+  font-weight:bold;
+}
+
+.page{
+  display:none;
+  padding:20px;
+}
+
+.page.active{
+  display:block;
+}
 
 .card{
   background:white;
-  border-radius:22px;
+  border-radius:24px;
   padding:22px;
-  margin-bottom:20px;
-  box-shadow:0 5px 14px rgba(0,0,0,.08);
+  margin-bottom:18px;
+  box-shadow:0 8px 22px rgba(0,0,0,.08);
 }
+
+.status-card{
+  background:#ecfdf5;
+  border:2px solid #22c55e;
+  border-radius:22px;
+  padding:20px;
+  font-weight:bold;
+  font-size:18px;
+}
+
 h2{
   color:#174a75;
-  font-size:27px;
+  font-size:26px;
+  margin-top:0;
 }
+
 p,li{
   font-size:17px;
   line-height:1.7;
   font-weight:600;
 }
-.status{
-  background:#e9f9ef;
-  border-left:8px solid #22c55e;
-  padding:16px;
-  border-radius:15px;
-  font-size:18px;
-  font-weight:bold;
-}
-.warn{
-  background:#fff7ed;
-  border-left:8px solid #f97316;
-  padding:16px;
-  border-radius:15px;
-  font-weight:bold;
-}
-button{
+
+.big-btn{
   width:100%;
-  padding:17px;
   border:none;
-  border-radius:16px;
+  border-radius:18px;
+  padding:18px;
   color:white;
-  font-size:18px;
+  font-size:20px;
   font-weight:bold;
   margin:10px 0;
 }
+
 .red{background:#dc2626;}
 .green{background:#16a34a;}
 .blue{background:#2563eb;}
@@ -77,23 +92,26 @@ input,textarea{
   width:100%;
   box-sizing:border-box;
   padding:15px;
-  border-radius:14px;
+  border-radius:15px;
   border:1px solid #cbd5e1;
   margin:8px 0;
   font-size:16px;
 }
+
 .flow{
   text-align:center;
-  font-size:20px;
+  font-size:19px;
+  line-height:2.1;
   font-weight:bold;
-  line-height:2;
 }
+
 .price{
-  font-size:34px;
+  font-size:36px;
   color:#dc2626;
   font-weight:bold;
 }
-.bottom-nav{
+
+.nav{
   position:fixed;
   bottom:0;
   left:0;
@@ -101,25 +119,28 @@ input,textarea{
   background:white;
   display:flex;
   justify-content:space-around;
-  border-top:1px solid #ddd;
-  box-shadow:0 -4px 12px rgba(0,0,0,.12);
+  padding:8px 0 14px;
+  box-shadow:0 -5px 18px rgba(0,0,0,.15);
   z-index:999;
 }
-.nav-btn{
-  flex:1;
-  padding:10px 4px;
-  text-align:center;
+
+.nav button{
+  background:none;
+  border:none;
+  color:#475569;
   font-size:12px;
   font-weight:bold;
-  color:#475569;
+  flex:1;
 }
-.nav-btn span{
+
+.nav span{
   display:block;
-  font-size:24px;
+  font-size:25px;
+  margin-bottom:3px;
 }
-.nav-btn.active{
+
+.nav button.active{
   color:#0f766e;
-  background:#ecfdf5;
 }
 </style>
 </head>
@@ -128,18 +149,51 @@ input,textarea{
 
 <header>
   <h1>🐔 養鶏場<br>停電・通電通知システム</h1>
-  <p>停電発生をスマホへ即通知。24時間365日、自動監視。</p>
+  <p>24時間365日、自動監視</p>
 </header>
 
-<section id="home" class="active">
+<section id="home" class="page active">
+  <div class="card">
+    <h2>🟢 監視状態</h2>
+    <div class="status-card">
+      現在：監視準備中<br>
+      最終確認：未接続<br>
+      通知先：未設定
+    </div>
+  </div>
+
   <div class="card">
     <h2>🚨 このシステムでできること</h2>
-    <p>停電監視装置から送られてくるメールを自動で確認し、停電・通電をスマホに通知します。</p>
-    <div class="status">
+    <p>停電監視装置から送られるメールを自動確認し、停電・通電をスマホに通知します。</p>
+    <div class="status-card">
       ✅ 停電発生時：緊急通知<br>
       ✅ 通電復旧時：復旧通知<br>
       ✅ パソコン不要で監視可能
     </div>
+  </div>
+</section>
+
+<section id="test" class="page">
+  <div class="card">
+    <h2>📱 通知テスト</h2>
+    <p>導入後、ボタン1つで通知が届くか確認できます。</p>
+    <button class="big-btn red" onclick="testOutage()">🚨 停電通知を試験する</button>
+    <button class="big-btn green" onclick="testRestore()">✅ 通電通知を試験する</button>
+    <p id="testResult"></p>
+  </div>
+</section>
+
+<section id="manual" class="page">
+  <div class="card">
+    <h2>📖 使い方</h2>
+    <ol>
+      <li>Pushoverをインストール</li>
+      <li>アカウントを作成</li>
+      <li>User Keyを取得</li>
+      <li>管理者へ送付</li>
+      <li>通知テストを実行</li>
+      <li>利用開始</li>
+    </ol>
   </div>
 
   <div class="card">
@@ -154,50 +208,17 @@ input,textarea{
   </div>
 </section>
 
-<section id="test">
+<section id="contract" class="page">
   <div class="card">
-    <h2>📱 通知テスト</h2>
-    <p>導入後、ボタン1つで通知が届くか確認できます。</p>
-    <button class="red" onclick="testOutage()">🚨 停電通知を試験する</button>
-    <button class="green" onclick="testRestore()">✅ 通電通知を試験する</button>
-    <p id="testResult"></p>
-  </div>
-</section>
-
-<section id="manual">
-  <div class="card">
-    <h2>📖 使い方</h2>
-    <ol>
-      <li>Pushoverをインストール</li>
-      <li>アカウント作成</li>
-      <li>User Keyを取得</li>
-      <li>管理者へ送付</li>
-      <li>通知テストを実行</li>
-      <li>利用開始</li>
-    </ol>
-  </div>
-
-  <div class="card">
-    <h2>⚠️ 注意事項</h2>
-    <div class="warn">
-      停電監視装置がメール送信できない状態では通知できません。<br>
-      定期的な動作確認をおすすめします。
-    </div>
-  </div>
-</section>
-
-<section id="account">
-  <div class="card">
-    <h2>🔐 ログイン・識別コード</h2>
-    <p>管理者が発行する識別コードで利用者を確認します。</p>
+    <h2>🔐 識別コード</h2>
     <input id="licenseCode" placeholder="識別コード 例：A001-X8K2-2027">
-    <button class="blue" onclick="checkLicense()">利用開始</button>
+    <button class="big-btn blue" onclick="checkLicense()">利用開始</button>
     <p id="licenseResult"></p>
   </div>
 
   <div class="card">
     <h2>📅 契約情報</h2>
-    <div class="status">
+    <div class="status-card">
       契約者：サンプル養鶏場<br>
       契約期限：2027/06/10<br>
       残り日数：365日
@@ -205,7 +226,7 @@ input,textarea{
   </div>
 </section>
 
-<section id="contact">
+<section id="price" class="page">
   <div class="card">
     <h2>💰 利用料金</h2>
     <p class="price">年額 ¥12,000</p>
@@ -218,34 +239,36 @@ input,textarea{
     <input placeholder="農場名">
     <input placeholder="メールアドレス">
     <textarea rows="4" placeholder="お問い合わせ内容"></textarea>
-    <button class="blue" onclick="sendContact()">送信</button>
+    <button class="big-btn blue" onclick="sendContact()">送信</button>
   </div>
 </section>
 
-<div class="bottom-nav">
-  <div class="nav-btn active" onclick="showPage('home',this)">
+<div class="nav">
+  <button class="active" onclick="showPage('home',this)">
     <span>🏠</span>ホーム
-  </div>
-  <div class="nav-btn" onclick="showPage('test',this)">
-    <span>📱</span>テスト
-  </div>
-  <div class="nav-btn" onclick="showPage('manual',this)">
+  </button>
+  <button onclick="showPage('test',this)">
+    <span>🔔</span>通知
+  </button>
+  <button onclick="showPage('manual',this)">
     <span>📖</span>使い方
-  </div>
-  <div class="nav-btn" onclick="showPage('account',this)">
-    <span>🔐</span>契約
-  </div>
-  <div class="nav-btn" onclick="showPage('contact',this)">
-    <span>📩</span>料金
-  </div>
+  </button>
+  <button onclick="showPage('contract',this)">
+    <span>🔑</span>契約
+  </button>
+  <button onclick="showPage('price',this)">
+    <span>💰</span>料金
+  </button>
 </div>
 
 <script>
 function showPage(id,btn){
-  document.querySelectorAll("section").forEach(s=>s.classList.remove("active"));
+  document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
   document.getElementById(id).classList.add("active");
-  document.querySelectorAll(".nav-btn").forEach(b=>b.classList.remove("active"));
+
+  document.querySelectorAll(".nav button").forEach(b=>b.classList.remove("active"));
   btn.classList.add("active");
+
   window.scrollTo(0,0);
 }
 
@@ -260,11 +283,14 @@ function testRestore(){
 }
 
 function checkLicense(){
-  const code=document.getElementById("licenseCode").value;
-  if(code==="A001-X8K2-2027"){
-    document.getElementById("licenseResult").innerHTML="✅ 有効な識別コードです。";
+  const code = document.getElementById("licenseCode").value;
+
+  if(code === "A001-X8K2-2027"){
+    document.getElementById("licenseResult").innerHTML =
+    "✅ 有効な識別コードです。";
   }else{
-    document.getElementById("licenseResult").innerHTML="❌ 識別コードが正しくありません。";
+    document.getElementById("licenseResult").innerHTML =
+    "❌ 識別コードが正しくありません。";
   }
 }
 
