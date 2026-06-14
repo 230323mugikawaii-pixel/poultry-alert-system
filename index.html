@@ -137,17 +137,19 @@ Pushover<br>⬇<br>
 
 <script>
 const GAS_URL = "https://script.google.com/macros/s/AKfycbwdi8ma6y7SXJ1ahlsmpMI_OuCVfilgJ1lJsQQydwEEGYSo-BWW73f0w-QUHav-ax_jDA/exec";
+
 function showPage(id, btn){
   document.querySelectorAll(".page").forEach(function(page){
     page.classList.remove("active");
   });
+
   document.getElementById(id).classList.add("active");
 
   document.querySelectorAll(".nav button").forEach(function(button){
     button.classList.remove("active");
   });
-  btn.classList.add("active");
 
+  btn.classList.add("active");
   window.scrollTo(0,0);
 }
 
@@ -165,3 +167,14 @@ function sendTest(type){
     document.getElementById("testResult").innerHTML = "✅ 通電通知を送信しました。";
   }
 }
+
+function checkLicense(){
+  var code = document.getElementById("licenseCode").value;
+
+  if(code === "A001-X8K2-2027"){
+    document.getElementById("licenseResult").innerHTML = "✅ 有効な識別コードです。";
+  }else{
+    document.getElementById("licenseResult").innerHTML = "❌ 識別コードが正しくありません。";
+  }
+}
+</script>
