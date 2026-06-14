@@ -5,27 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>養鶏場通知システム</title>
 <style>
-body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#eef3f8;color:#102033;padding-bottom:90px;}
-header{background:linear-gradient(135deg,#0f5f73,#0b8f75);color:white;padding:34px 20px 42px;text-align:center;border-bottom-left-radius:28px;border-bottom-right-radius:28px;}
-header h1{margin:0;font-size:30px;line-height:1.35;}
-header p{font-weight:bold;}
-.page{display:none;padding:20px;}
-.page.active{display:block;}
-.card{background:white;border-radius:24px;padding:22px;margin-bottom:18px;box-shadow:0 8px 22px rgba(0,0,0,.08);}
-h2{color:#174a75;font-size:26px;margin-top:0;}
-p,li{font-size:17px;line-height:1.7;font-weight:600;}
-.status{background:#ecfdf5;border:2px solid #22c55e;border-radius:22px;padding:20px;font-weight:bold;font-size:18px;}
-.btn{width:100%;border:none;border-radius:18px;padding:18px;color:white;font-size:20px;font-weight:bold;margin:10px 0;}
-.red{background:#dc2626;}
-.green{background:#16a34a;}
-.blue{background:#2563eb;}
-input,textarea{width:100%;box-sizing:border-box;padding:15px;border-radius:15px;border:1px solid #cbd5e1;margin:8px 0;font-size:16px;}
-.flow{text-align:center;font-size:19px;line-height:2.1;font-weight:bold;}
-.price{font-size:36px;color:#dc2626;font-weight:bold;}
-.nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:8px 0 14px;box-shadow:0 -5px 18px rgba(0,0,0,.15);z-index:999;}
-.nav button{background:none;border:none;color:#475569;font-size:12px;font-weight:bold;flex:1;}
-.nav span{display:block;font-size:25px;margin-bottom:3px;}
-.nav button.active{color:#0f766e;}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#eef3f8;color:#102033;padding-bottom:95px}
+header{background:linear-gradient(135deg,#0f5f73,#0b8f75);color:white;padding:36px 20px 44px;text-align:center;border-bottom-left-radius:28px;border-bottom-right-radius:28px}
+header h1{margin:0;font-size:30px;line-height:1.35}
+header p{font-weight:bold;font-size:16px}
+.page{display:none;padding:20px}
+.page.active{display:block}
+.card{background:white;border-radius:24px;padding:24px;margin-bottom:20px;box-shadow:0 8px 22px rgba(0,0,0,.08)}
+h2{color:#174a75;font-size:28px;margin-top:0}
+p,li{font-size:17px;line-height:1.7;font-weight:700}
+.status{background:#ecfdf5;border:3px solid #22c55e;border-radius:24px;padding:20px;font-size:18px;font-weight:bold}
+.btn{width:100%;border:none;border-radius:18px;padding:18px;color:white;font-size:20px;font-weight:bold;margin:10px 0}
+.red{background:#dc2626}
+.green{background:#16a34a}
+.blue{background:#2563eb}
+.gray{background:#475569}
+input,textarea{width:100%;box-sizing:border-box;padding:15px;border-radius:15px;border:1px solid #cbd5e1;margin:8px 0;font-size:16px}
+.flow{text-align:center;font-size:20px;line-height:2.1;font-weight:bold}
+.price{font-size:36px;color:#dc2626;font-weight:bold}
+.nav{position:fixed;bottom:0;left:0;right:0;background:white;display:flex;justify-content:space-around;padding:9px 0 15px;box-shadow:0 -5px 18px rgba(0,0,0,.15);z-index:999}
+.nav button{background:none;border:none;color:#475569;font-size:13px;font-weight:bold;flex:1}
+.nav span{display:block;font-size:27px;margin-bottom:3px}
+.nav button.active{color:#0f766e}
 </style>
 </head>
 
@@ -59,7 +60,7 @@ input,textarea{width:100%;box-sizing:border-box;padding:15px;border-radius:15px;
 
 <section id="test" class="page">
 <div class="card">
-<h2>📱 通知テスト</h2>
+<h2>🔔 通知テスト</h2>
 <p>ボタンを押すとApps Script経由でPushover通知を送ります。</p>
 <button class="btn red" onclick="sendTest('outage')">🚨 停電通知を試験する</button>
 <button class="btn green" onclick="sendTest('restore')">✅ 通電通知を試験する</button>
@@ -93,7 +94,7 @@ Pushover<br>⬇<br>
 
 <section id="contract" class="page">
 <div class="card">
-<h2>🔐 識別コード</h2>
+<h2>🔑 識別コード</h2>
 <input id="licenseCode" placeholder="識別コード 例：A001-X8K2-2027">
 <button class="btn blue" onclick="checkLicense()">利用開始</button>
 <p id="licenseResult"></p>
@@ -135,33 +136,44 @@ Pushover<br>⬇<br>
 </div>
 
 <script>
-const GAS_URL =const GAS_URL = "https://script.google.com/macros/s/AKfycbwdi8ma6y7SXJ1ahIsmpMI_OuCVfiIgJllJsQQydwEEGYS0-BWW73f0w-QUHav-ax_jDA/exec";
+const GAS_URL = "https://script.google.com/macros/s/〜〜〜/exec";
+function showPage(id, btn){
+  document.querySelectorAll(".page").forEach(function(page){
+    page.classList.remove("active");
+  });
+  document.getElementById(id).classList.add("active");
 
-function showPage(id,btn){
-document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
-document.getElementById(id).classList.add("active");
-document.querySelectorAll(".nav button").forEach(b=>b.classList.remove("active"));
-btn.classList.add("active");
-window.scrollTo(0,0);
+  document.querySelectorAll(".nav button").forEach(function(button){
+    button.classList.remove("active");
+  });
+  btn.classList.add("active");
+
+  window.scrollTo(0,0);
 }
 
 function sendTest(type){
-document.getElementById("testResult").innerHTML = "送信中...";
+  document.getElementById("testResult").innerHTML = "送信中...";
 
-fetch(GAS_URL + "?type=" + type)
-.then(() => {
-document.getElementById("testResult").innerHTML =
-type === "outage" ? "🚨 停電通知を送信しました。" : "✅ 通電通知を送信しました。";
-})
-.catch(() => {
-document.getElementById("testResult").innerHTML = "❌ 送信に失敗しました。";
-});
+  fetch(GAS_URL + "?type=" + type)
+    .then(function(){
+      if(type === "outage"){
+        document.getElementById("testResult").innerHTML = "🚨 停電通知を送信しました。";
+      }else{
+        document.getElementById("testResult").innerHTML = "✅ 通電通知を送信しました。";
+      }
+    })
+    .catch(function(){
+      document.getElementById("testResult").innerHTML = "❌ 送信に失敗しました。";
+    });
 }
 
 function checkLicense(){
-const code=document.getElementById("licenseCode").value;
-document.getElementById("licenseResult").innerHTML =
-code==="A001-X8K2-2027" ? "✅ 有効な識別コードです。" : "❌ 識別コードが正しくありません。";
+  const code = document.getElementById("licenseCode").value;
+  if(code === "A001-X8K2-2027"){
+    document.getElementById("licenseResult").innerHTML = "✅ 有効な識別コードです。";
+  }else{
+    document.getElementById("licenseResult").innerHTML = "❌ 識別コードが正しくありません。";
+  }
 }
 </script>
 
