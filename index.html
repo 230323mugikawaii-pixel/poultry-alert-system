@@ -154,28 +154,14 @@ function showPage(id, btn){
 function sendTest(type){
   document.getElementById("testResult").innerHTML = "送信中...";
 
-  fetch(GAS_URL + "?type=" + type)
-    .then(function(){
-      if(type === "outage"){
-        document.getElementById("testResult").innerHTML = "🚨 停電通知を送信しました。";
-      }else{
-        document.getElementById("testResult").innerHTML = "✅ 通電通知を送信しました。";
-      }
-    })
-    .catch(function(){
-      document.getElementById("testResult").innerHTML = "❌ 送信に失敗しました。";
-    });
-}
+  fetch(GAS_URL + "?type=" + type, {
+    method: "GET",
+    mode: "no-cors"
+  });
 
-function checkLicense(){
-  const code = document.getElementById("licenseCode").value;
-  if(code === "A001-X8K2-2027"){
-    document.getElementById("licenseResult").innerHTML = "✅ 有効な識別コードです。";
+  if(type === "outage"){
+    document.getElementById("testResult").innerHTML = "🚨 停電通知を送信しました。";
   }else{
-    document.getElementById("licenseResult").innerHTML = "❌ 識別コードが正しくありません。";
+    document.getElementById("testResult").innerHTML = "✅ 通電通知を送信しました。";
   }
 }
-</script>
-
-</body>
-</html>
