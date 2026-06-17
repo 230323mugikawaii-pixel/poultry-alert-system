@@ -9,25 +9,25 @@
 body{
   margin:0;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  background:#f4f7f8;
+  background:#eef4f2;
   color:#102033;
   padding-bottom:90px;
 }
 header{
-  background:linear-gradient(135deg,#0f766e,#15803d);
-  color:white;
+  background:#ffffff;
+  padding:28px 20px;
   text-align:center;
-  padding:34px 16px;
-  border-bottom-left-radius:28px;
-  border-bottom-right-radius:28px;
+  border-bottom:1px solid #dbe5e2;
 }
 header h1{
   margin:0;
-  font-size:30px;
+  font-size:28px;
+  color:#0f766e;
 }
 header p{
+  margin:8px 0 0;
   font-weight:bold;
-  font-size:16px;
+  color:#475569;
 }
 .page{
   display:none;
@@ -38,23 +38,32 @@ header p{
 }
 .card{
   background:white;
-  border-radius:24px;
+  border-radius:22px;
   padding:24px;
   margin-bottom:18px;
-  box-shadow:0 6px 18px rgba(0,0,0,.08);
+  box-shadow:0 5px 18px rgba(0,0,0,.08);
 }
 h2{
   margin-top:0;
-  color:#174a75;
+  font-size:26px;
+  color:#0f172a;
 }
-.status{
-  background:#ecfdf5;
-  border-left:8px solid #22c55e;
-  padding:18px;
-  border-radius:16px;
-  font-size:18px;
+.small{
+  color:#64748b;
   font-weight:bold;
-  line-height:1.9;
+  line-height:1.7;
+}
+.info{
+  background:#f0fdfa;
+  border-radius:18px;
+  padding:18px;
+  font-weight:bold;
+  line-height:2;
+}
+.price{
+  font-size:34px;
+  font-weight:bold;
+  color:#dc2626;
 }
 .btn{
   width:100%;
@@ -79,8 +88,8 @@ input,textarea{
   font-size:17px;
 }
 #testResult{
-  font-size:18px;
   font-weight:bold;
+  font-size:18px;
 }
 .nav{
   position:fixed;
@@ -90,13 +99,12 @@ input,textarea{
   background:white;
   display:flex;
   box-shadow:0 -4px 14px rgba(0,0,0,.15);
-  z-index:999;
 }
 .nav button{
   flex:1;
   border:none;
   background:white;
-  color:#475569;
+  color:#64748b;
   padding:12px 4px 16px;
   font-size:14px;
   font-weight:bold;
@@ -107,7 +115,7 @@ input,textarea{
 }
 .nav span{
   display:block;
-  font-size:26px;
+  font-size:27px;
 }
 </style>
 </head>
@@ -115,26 +123,14 @@ input,textarea{
 <body>
 
 <header>
-  <h1>🐔 養鶏場通知システム</h1>
-  <p>停電・通電をスマホに通知</p>
+  <h1>養鶏場通知システム</h1>
+  <p>停電・通電をスマホへ通知</p>
 </header>
 
-<section id="user" class="page active">
-  <div class="card">
-    <h2>👤 ユーザー情報</h2>
-    <div class="status">
-      農場名：サンプル養鶏場<br>
-      パスワード：123456<br>
-      契約期限：2027/06/10<br>
-      状態：利用中
-    </div>
-  </div>
-</section>
-
-<section id="test" class="page">
+<section id="notify" class="page active">
   <div class="card">
     <h2>🔔 通知テスト</h2>
-    <p>通知が届くか確認できます。</p>
+    <p class="small">通知が正しく届くか確認できます。</p>
 
     <button class="btn green" onclick="sendTest('restore')">
       ✅ 通電テスト
@@ -145,6 +141,24 @@ input,textarea{
     </button>
 
     <p id="testResult"></p>
+  </div>
+</section>
+
+<section id="contract" class="page">
+  <div class="card">
+    <h2>📄 契約情報</h2>
+    <div class="info">
+      農場名：サンプル養鶏場<br>
+      パスワード：123456<br>
+      契約期限：2027/06/10<br>
+      状態：利用中
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>💰 利用料金</h2>
+    <p class="price">年額 ¥12,000</p>
+    <p class="small">※料金はサンプルです。</p>
   </div>
 </section>
 
@@ -164,12 +178,12 @@ input,textarea{
 </section>
 
 <div class="nav">
-  <button class="active" onclick="showPage('user',this)">
-    <span>👤</span>情報
+  <button class="active" onclick="showPage('notify',this)">
+    <span>🔔</span>通知
   </button>
 
-  <button onclick="showPage('test',this)">
-    <span>🔔</span>テスト
+  <button onclick="showPage('contract',this)">
+    <span>📄</span>契約
   </button>
 
   <button onclick="showPage('contact',this)">
