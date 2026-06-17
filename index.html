@@ -167,10 +167,10 @@ function sendTest(type){
     mode: "no-cors"
   });
 
-  if(type === "outage"){
-    document.getElementById("testResult").innerHTML = "🚨 停電通知を送信しました。";
-  }else{
+  if(type === "restore"){
     document.getElementById("testResult").innerHTML = "✅ 通電通知を送信しました。";
+  }else{
+    document.getElementById("testResult").innerHTML = "🚨 停電通知を送信しました。";
   }
 }
 
