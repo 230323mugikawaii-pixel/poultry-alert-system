@@ -139,18 +139,24 @@ Pushover<br>⬇<br>
 const GAS_URL = "https://script.google.com/macros/s/AKfycbwdi8ma6y7SXJ1ahIsmpMl_OuCVfiIgJllJsQQydwEEGYSo-BWW73f0w-QUHav-ax_jDA/exec";
 
 function showPage(id, btn){
-  document.querySelectorAll(".page").forEach(function(page){
+  document.querySelectorAll(".page").forEach(page => {
     page.classList.remove("active");
   });
 
-  document.getElementById(id).classList.add("active");
+  const page = document.getElementById(id);
+  if(page){
+    page.classList.add("active");
+  }
 
-  document.querySelectorAll(".nav button").forEach(function(button){
+  document.querySelectorAll(".nav button").forEach(button => {
     button.classList.remove("active");
   });
 
-  btn.classList.add("active");
-  window.scrollTo(0,0);
+  if(btn){
+    btn.classList.add("active");
+  }
+
+  window.scrollTo(0, 0);
 }
 
 function sendTest(type){
@@ -169,7 +175,7 @@ function sendTest(type){
 }
 
 function checkLicense(){
-  var code = document.getElementById("licenseCode").value;
+  const code = document.getElementById("licenseCode").value;
 
   if(code === "A001-X8K2-2027"){
     document.getElementById("licenseResult").innerHTML = "✅ 有効な識別コードです。";
