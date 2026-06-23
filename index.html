@@ -4,80 +4,68 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>養鶏場通知システム</title>
+<meta name="theme-color" content="#dc2626">
 
 <style>
 body{
   margin:0;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  background:#eef4f2;
+  background:#f4f7f8;
   color:#102033;
   padding-bottom:90px;
 }
 header{
-  background:#ffffff;
-  padding:28px 20px;
+  background:white;
+  padding:24px 16px;
   text-align:center;
-  border-bottom:1px solid #dbe5e2;
+  border-bottom:1px solid #e2e8f0;
 }
 header h1{
   margin:0;
-  font-size:28px;
   color:#0f766e;
+  font-size:28px;
 }
-header p{
-  margin:8px 0 0;
-  font-weight:bold;
-  color:#475569;
-}
-.page{
-  display:none;
-  padding:20px;
-}
-.page.active{
-  display:block;
-}
+.page{display:none;padding:18px;}
+.page.active{display:block;}
 .card{
   background:white;
   border-radius:22px;
-  padding:24px;
+  padding:22px;
   margin-bottom:18px;
-  box-shadow:0 5px 18px rgba(0,0,0,.08);
+  box-shadow:0 6px 18px rgba(0,0,0,.08);
 }
-h2{
-  margin-top:0;
-  font-size:26px;
-  color:#0f172a;
-}
-.small{
-  color:#64748b;
-  font-weight:bold;
-  line-height:1.7;
-}
+h2{margin-top:0;}
 .info{
-  background:#f0fdfa;
+  background:#ecfdf5;
   border-radius:18px;
   padding:18px;
   font-weight:bold;
   line-height:2;
 }
-.price{
+.remain{
+  background:#fee2e2;
+  color:#dc2626;
   font-size:34px;
   font-weight:bold;
-  color:#dc2626;
+  text-align:center;
+  padding:18px;
+  border-radius:18px;
+  margin-bottom:15px;
 }
 .btn{
   width:100%;
   border:none;
   border-radius:18px;
   padding:20px;
-  margin:12px 0;
+  margin:10px 0;
   color:white;
   font-size:22px;
   font-weight:bold;
 }
-.green{background:#16a34a;}
 .red{background:#dc2626;}
+.green{background:#16a34a;}
 .blue{background:#2563eb;}
+.dark{background:#111827;}
 input,textarea{
   width:100%;
   box-sizing:border-box;
@@ -87,10 +75,6 @@ input,textarea{
   border-radius:14px;
   font-size:17px;
 }
-#testResult{
-  font-weight:bold;
-  font-size:18px;
-}
 .nav{
   position:fixed;
   bottom:0;
@@ -99,6 +83,7 @@ input,textarea{
   background:white;
   display:flex;
   box-shadow:0 -4px 14px rgba(0,0,0,.15);
+  z-index:999;
 }
 .nav button{
   flex:1;
@@ -117,30 +102,57 @@ input,textarea{
   display:block;
   font-size:27px;
 }
+#alarmScreen{
+  display:none;
+  position:fixed;
+  inset:0;
+  background:#dc2626;
+  color:white;
+  z-index:9999;
+  text-align:center;
+  padding:40px 20px;
+}
+#alarmScreen h1{
+  font-size:42px;
+  margin-top:60px;
+}
+#alarmScreen p{
+  font-size:22px;
+  font-weight:bold;
+}
+.stopBtn{
+  background:white;
+  color:#dc2626;
+  border:none;
+  border-radius:22px;
+  padding:24px;
+  font-size:26px;
+  font-weight:bold;
+  width:90%;
+  margin-top:40px;
+}
 </style>
 </head>
 
 <body>
 
 <header>
-  <h1>養鶏場通知システム</h1>
+  <h1>🐔 養鶏場通知システム</h1>
   <p>停電・通電をスマホへ通知</p>
 </header>
 
 <section id="notify" class="page active">
   <div class="card">
     <h2>🔔 通知テスト</h2>
-    <p class="small">通知が正しく届くか確認できます。</p>
-
-    <button class="btn green" onclick="sendTest('restore')">
-      ✅ 通電テスト
-    </button>
-
-    <button class="btn red" onclick="sendTest('outage')">
-      🚨 停電テスト
-    </button>
-
+    <button class="btn green" onclick="sendTest('restore')">✅ 通電テスト</button>
+    <button class="btn red" onclick="sendTest('outage')">🚨 停電テスト</button>
     <p id="testResult"></p>
+  </div>
+
+  <div class="card">
+    <h2>🚨 停電警報画面</h2>
+    <p>停電時にこの画面を開くと、停止ボタンを押すまで警報音を鳴らせます。</p>
+    <button class="btn red" onclick="startLocalAlarm()">警報画面を開く</button>
   </div>
 </section>
 
@@ -148,51 +160,49 @@ input,textarea{
   <div class="card">
     <h2>📄 契約情報</h2>
 
-<div class="info">
+    <div class="remain">残り365日</div>
 
-<span style="color:#dc2626;font-size:28px;font-weight:bold;">
-残り日数：365日
-</span><br>
-
-農場名：サンプル養鶏場<br>
-パスワード：123456<br>
-契約期限：2027/06/10<br>
-
-状態：利用中
-
-</div>
+    <div class="info">
+      農場名：サンプル養鶏場<br>
+      パスワード：123456<br>
+      契約期限：2027/06/10<br>
+      状態：利用中
+    </div>
+  </div>
 
   <div class="card">
     <h2>💰 利用料金</h2>
-    <p class="price">年額 ¥12,000</p>
-    <p class="small">※料金はサンプルです。</p>
+    <div class="info">
+      年額：12,000円<br>
+      Pushover：買い切り料金が別途必要
+    </div>
   </div>
 </section>
 
 <section id="contact" class="page">
   <div class="card">
     <h2>📩 お問い合わせ</h2>
-
     <input placeholder="お名前">
     <input placeholder="農場名">
     <input placeholder="メールアドレス">
     <textarea rows="5" placeholder="お問い合わせ内容"></textarea>
-
-    <button class="btn blue" onclick="alert('お問い合わせを受け付けました。')">
-      送信
-    </button>
+    <button class="btn blue" onclick="alert('お問い合わせを受け付けました。')">送信</button>
   </div>
 </section>
+
+<div id="alarmScreen">
+  <h1>🚨 停電発生 🚨</h1>
+  <p>確認するまで警報音が鳴ります</p>
+  <button class="stopBtn" onclick="stopLocalAlarm()">停止する</button>
+</div>
 
 <div class="nav">
   <button class="active" onclick="showPage('notify',this)">
     <span>🔔</span>通知
   </button>
-
   <button onclick="showPage('contract',this)">
     <span>📄</span>契約
   </button>
-
   <button onclick="showPage('contact',this)">
     <span>📩</span>問合せ
   </button>
@@ -201,18 +211,16 @@ input,textarea{
 <script>
 const GAS_URL = "https://script.google.com/macros/s/AKfycbwdi8ma6y7SXJ1ahIsmpMI_OuCVfiIgJllJsQQydwEEGYSo-BWW73fOw-QUHav-ax_jDA/exec";
 
-function showPage(id, btn){
-  document.querySelectorAll(".page").forEach(function(page){
-    page.classList.remove("active");
-  });
+let alarmTimer = null;
+let audioCtx = null;
 
+function showPage(id, btn){
+  document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
   document.getElementById(id).classList.add("active");
 
-  document.querySelectorAll(".nav button").forEach(function(button){
-    button.classList.remove("active");
-  });
-
+  document.querySelectorAll(".nav button").forEach(b => b.classList.remove("active"));
   btn.classList.add("active");
+
   window.scrollTo(0,0);
 }
 
@@ -220,14 +228,57 @@ function sendTest(type){
   document.getElementById("testResult").innerHTML = "送信中...";
 
   fetch(GAS_URL + "?type=" + type, {
-    method: "GET",
-    mode: "no-cors"
+    method:"GET",
+    mode:"no-cors"
   });
 
   if(type === "restore"){
     document.getElementById("testResult").innerHTML = "✅ 通電通知を送信しました。";
   }else{
     document.getElementById("testResult").innerHTML = "🚨 停電通知を送信しました。";
+    startLocalAlarm();
+  }
+}
+
+function beep(){
+  if(!audioCtx){
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+
+  osc.type = "square";
+  osc.frequency.value = 900;
+  gain.gain.value = 0.7;
+
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+
+  osc.start();
+  setTimeout(() => osc.stop(), 600);
+}
+
+function startLocalAlarm(){
+  document.getElementById("alarmScreen").style.display = "block";
+
+  beep();
+
+  if(alarmTimer){
+    clearInterval(alarmTimer);
+  }
+
+  alarmTimer = setInterval(() => {
+    beep();
+  }, 1000);
+}
+
+function stopLocalAlarm(){
+  document.getElementById("alarmScreen").style.display = "none";
+
+  if(alarmTimer){
+    clearInterval(alarmTimer);
+    alarmTimer = null;
   }
 }
 </script>
