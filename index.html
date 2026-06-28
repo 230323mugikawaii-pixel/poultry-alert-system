@@ -3,133 +3,225 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>養鶏場通知システム</title>
-<meta name="theme-color" content="#dc2626">
+<title>Call Now</title>
 
 <style>
+*{box-sizing:border-box}
 body{
   margin:0;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  background:#f4f7f8;
-  color:#102033;
-  padding-bottom:90px;
+  background:#f5f8fc;
+  color:#0f172a;
 }
 header{
-  background:white;
-  padding:24px 16px;
-  text-align:center;
-  border-bottom:1px solid #e2e8f0;
-}
-header h1{
-  margin:0;
-  color:#0f766e;
-  font-size:28px;
-}
-.page{display:none;padding:18px;}
-.page.active{display:block;}
-.card{
-  background:white;
-  border-radius:22px;
-  padding:22px;
-  margin-bottom:18px;
-  box-shadow:0 6px 18px rgba(0,0,0,.08);
-}
-h2{margin-top:0;}
-.info{
-  background:#ecfdf5;
-  border-radius:18px;
-  padding:18px;
-  font-weight:bold;
-  line-height:2;
-}
-.remain{
-  background:#fee2e2;
-  color:#dc2626;
-  font-size:34px;
-  font-weight:bold;
-  text-align:center;
-  padding:18px;
-  border-radius:18px;
-  margin-bottom:15px;
-}
-.btn{
-  width:100%;
-  border:none;
-  border-radius:18px;
-  padding:20px;
-  margin:10px 0;
-  color:white;
-  font-size:22px;
-  font-weight:bold;
-}
-.red{background:#dc2626;}
-.green{background:#16a34a;}
-.blue{background:#2563eb;}
-.dark{background:#111827;}
-input,textarea{
-  width:100%;
-  box-sizing:border-box;
-  padding:16px;
-  margin:9px 0;
-  border:1px solid #cbd5e1;
-  border-radius:14px;
-  font-size:17px;
-}
-.nav{
-  position:fixed;
-  bottom:0;
-  left:0;
-  right:0;
+  height:64px;
   background:white;
   display:flex;
-  box-shadow:0 -4px 14px rgba(0,0,0,.15);
-  z-index:999;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 40px;
+  border-bottom:1px solid #e5e7eb;
 }
-.nav button{
-  flex:1;
-  border:none;
-  background:white;
-  color:#64748b;
-  padding:12px 4px 16px;
-  font-size:14px;
-  font-weight:bold;
+.logo{
+  font-size:24px;
+  font-weight:800;
+  color:#075bbb;
 }
-.nav button.active{
-  color:#0f766e;
-  background:#ecfdf5;
+nav a{
+  margin:0 14px;
+  font-weight:700;
+  cursor:pointer;
 }
-.nav span{
-  display:block;
-  font-size:27px;
-}
-#alarmScreen{
-  display:none;
-  position:fixed;
-  inset:0;
-  background:#dc2626;
+.login{
+  background:#075bbb;
   color:white;
-  z-index:9999;
-  text-align:center;
-  padding:40px 20px;
-}
-#alarmScreen h1{
-  font-size:42px;
-  margin-top:60px;
-}
-#alarmScreen p{
-  font-size:22px;
-  font-weight:bold;
-}
-.stopBtn{
-  background:white;
-  color:#dc2626;
   border:none;
-  border-radius:22px;
+  padding:12px 28px;
+  border-radius:10px;
+  font-weight:800;
+}
+.hero{
+  display:grid;
+  grid-template-columns:1.1fr .9fr;
+  gap:30px;
+  padding:60px 70px 40px;
+  background:white;
+}
+.hero h1{
+  font-size:72px;
+  margin:0;
+  color:#075bbb;
+}
+.hero h2{
+  font-size:30px;
+}
+.hero p{
+  font-size:18px;
+  line-height:1.8;
+}
+.btn{
+  border:none;
+  border-radius:12px;
+  padding:16px 28px;
+  font-size:17px;
+  font-weight:800;
+  margin:8px;
+  cursor:pointer;
+}
+.primary{background:#075bbb;color:white}
+.outline{background:white;color:#075bbb;border:2px solid #075bbb}
+.phone{
+  width:260px;
+  height:360px;
+  background:#075bbb;
+  color:white;
+  border-radius:34px;
+  margin:auto;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  box-shadow:0 20px 45px rgba(0,0,0,.25);
+  transform:rotate(8deg);
+}
+.phone .icon{font-size:70px}
+.features{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:1px;
+  margin:0 70px 40px;
+  background:#dbeafe;
+  border-radius:18px;
+  overflow:hidden;
+}
+.feature{
+  background:#eff6ff;
   padding:24px;
-  font-size:26px;
-  font-weight:bold;
-  width:90%;
-  margin-top:40px;
+  text-align:center;
+  font-weight:700;
+}
+.feature span{font-size:40px;display:block}
+.app{
+  display:grid;
+  grid-template-columns:230px 1fr;
+  min-height:640px;
+  margin:40px;
+  background:white;
+  border-radius:20px;
+  overflow:hidden;
+  box-shadow:0 8px 30px rgba(0,0,0,.08);
+}
+.sidebar{
+  background:linear-gradient(#075bbb,#003c8f);
+  color:white;
+  padding:28px 18px;
+}
+.sidebar h2{margin-top:0}
+.sidebtn{
+  width:100%;
+  background:transparent;
+  color:white;
+  border:none;
+  padding:15px;
+  text-align:left;
+  border-radius:12px;
+  font-size:16px;
+  font-weight:800;
+  margin:5px 0;
+}
+.sidebtn.active,.sidebtn:hover{background:rgba(255,255,255,.18)}
+.page{display:none;padding:36px}
+.page.active{display:block}
+.cards{
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:22px;
+}
+.card{
+  background:white;
+  border:1px solid #e5e7eb;
+  border-radius:18px;
+  padding:26px;
+  box-shadow:0 5px 18px rgba(0,0,0,.06);
+}
+.status{
+  font-size:40px;
+  font-weight:900;
+  color:#16a34a;
+}
+.big{
+  font-size:42px;
+  font-weight:900;
+}
+.progress{
+  height:12px;
+  background:#e5e7eb;
+  border-radius:20px;
+  overflow:hidden;
+}
+.progress div{
+  width:6%;
+  height:100%;
+  background:#075bbb;
+}
+.test-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:24px;
+}
+.test-card{
+  border:1px solid #e5e7eb;
+  border-radius:18px;
+  padding:30px;
+  text-align:center;
+}
+.red{background:#ef4444;color:white}
+.green{background:#16a34a;color:white}
+table{
+  width:100%;
+  border-collapse:collapse;
+}
+td{
+  padding:15px;
+  border-bottom:1px solid #e5e7eb;
+}
+td:first-child{
+  color:#64748b;
+  font-weight:800;
+}
+input,textarea{
+  width:100%;
+  padding:14px;
+  margin:8px 0 18px;
+  border:1px solid #cbd5e1;
+  border-radius:10px;
+  font-size:16px;
+}
+footer{
+  text-align:center;
+  color:#64748b;
+  padding:30px;
+}
+.mobile-note{display:none}
+
+@media(max-width:800px){
+  header{padding:0 18px}
+  nav{display:none}
+  .hero{grid-template-columns:1fr;padding:36px 24px}
+  .hero h1{font-size:48px}
+  .phone{width:200px;height:300px}
+  .features{grid-template-columns:1fr;margin:20px}
+  .app{grid-template-columns:1fr;margin:20px}
+  .sidebar{
+    display:flex;
+    overflow-x:auto;
+    gap:6px;
+  }
+  .sidebar h2{display:none}
+  .sidebtn{min-width:120px;text-align:center}
+  .cards,.test-grid{grid-template-columns:1fr}
+  .page{padding:22px}
+  .mobile-note{display:block}
 }
 </style>
 </head>
@@ -137,149 +229,153 @@ input,textarea{
 <body>
 
 <header>
-  <h1>🐔 養鶏場通知システム</h1>
-  <p>停電・通電をスマホへ通知</p>
+  <div class="logo">📞 Call Now</div>
+  <nav>
+    <a onclick="showPage('home',null)">ホーム</a>
+    <a onclick="showPage('test',null)">通知テスト</a>
+    <a onclick="showPage('contract',null)">契約情報</a>
+    <a onclick="showPage('contact',null)">お問い合わせ</a>
+  </nav>
+  <button class="login">ログイン</button>
 </header>
 
-<section id="notify" class="page active">
-  <div class="card">
-    <h2>🔔 通知テスト</h2>
-    <button class="btn green" onclick="sendTest('restore')">✅ 通電テスト</button>
-    <button class="btn red" onclick="sendTest('outage')">🚨 停電テスト</button>
-    <p id="testResult"></p>
+<section class="hero">
+  <div>
+    <h1>Call Now</h1>
+    <h2>メールを、確実な電話へ。</h2>
+    <p>
+      大切な通知を電話でお知らせします。<br>
+      電話に出るだけで、重要な情報を見逃しません。
+    </p>
+    <button class="btn primary" onclick="showPage('test',null)">今すぐ始める</button>
+    <button class="btn outline" onclick="showPage('home',null)">サービスについて</button>
   </div>
 
-  <div class="card">
-    <h2>🚨 停電警報画面</h2>
-    <p>停電時にこの画面を開くと、停止ボタンを押すまで警報音を鳴らせます。</p>
-    <button class="btn red" onclick="startLocalAlarm()">警報画面を開く</button>
-  </div>
-</section>
-
-<section id="contract" class="page">
-  <div class="card">
-    <h2>📄 契約情報</h2>
-
-    <div class="remain">残り365日</div>
-
-    <div class="info">
-      農場名：サンプル養鶏場<br>
-      パスワード：123456<br>
-      契約期限：2027/06/10<br>
-      状態：利用中
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>💰 利用料金</h2>
-    <div class="info">
-      年額：12,000円<br>
-      Pushover：買い切り料金が別途必要
-    </div>
+  <div class="phone">
+    <div class="icon">📞</div>
+    <h2>Call Now</h2>
+    <p>着信中...</p>
   </div>
 </section>
 
-<section id="contact" class="page">
-  <div class="card">
-    <h2>📩 お問い合わせ</h2>
-    <input placeholder="お名前">
-    <input placeholder="農場名">
-    <input placeholder="メールアドレス">
-    <textarea rows="5" placeholder="お問い合わせ内容"></textarea>
-    <button class="btn blue" onclick="alert('お問い合わせを受け付けました。')">送信</button>
-  </div>
+<section class="features">
+  <div class="feature"><span>📞</span>電話でお知らせ<br>重要な通知を電話で通知</div>
+  <div class="feature"><span>🔁</span>自動で繰り返し<br>応答まで5秒ごとに再発信</div>
+  <div class="feature"><span>⏱</span>自動で終了<br>応答後3秒で終了</div>
+  <div class="feature"><span>✉️</span>メールで確認<br>詳細はメールで確認</div>
 </section>
 
-<div id="alarmScreen">
-  <h1>🚨 停電発生 🚨</h1>
-  <p>確認するまで警報音が鳴ります</p>
-  <button class="stopBtn" onclick="stopLocalAlarm()">停止する</button>
-</div>
+<section class="app">
+  <div class="sidebar">
+    <h2>📞 Call Now</h2>
+    <button class="sidebtn active" onclick="showPage('home',this)">🏠 ホーム</button>
+    <button class="sidebtn" onclick="showPage('test',this)">📞 通知テスト</button>
+    <button class="sidebtn" onclick="showPage('contract',this)">📄 契約情報</button>
+    <button class="sidebtn" onclick="showPage('contact',this)">✉️ お問い合わせ</button>
+  </div>
 
-<div class="nav">
-  <button class="active" onclick="showPage('notify',this)">
-    <span>🔔</span>通知
-  </button>
-  <button onclick="showPage('contract',this)">
-    <span>📄</span>契約
-  </button>
-  <button onclick="showPage('contact',this)">
-    <span>📩</span>問合せ
-  </button>
-</div>
+  <main>
+    <section id="home" class="page active">
+      <h1>ホーム</h1>
+      <div class="cards">
+        <div class="card">
+          <h2>サービス状況</h2>
+          <div class="status">✅ 正常</div>
+          <p>すべてのシステムは正常に稼働しています。</p>
+        </div>
+        <div class="card">
+          <h2>契約情報</h2>
+          <p>契約プラン：スタンダードプラン</p>
+          <p>契約開始日：2026年5月1日</p>
+          <p>契約終了日：2027年4月30日</p>
+          <button class="btn primary" onclick="showPage('contract',null)">契約情報を確認</button>
+        </div>
+        <div class="card">
+          <h2>今月の通知テスト回数</h2>
+          <div class="big">3 <span style="font-size:22px">/ 50回</span></div>
+          <div class="progress"><div></div></div>
+          <p>残り47回</p>
+        </div>
+        <div class="card">
+          <h2>お知らせ</h2>
+          <p>・システムメンテナンスのお知らせ</p>
+          <p>・新機能追加のお知らせ</p>
+          <p>・契約更新のお願い</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="test" class="page">
+      <h1>通知テスト</h1>
+      <p>登録されている電話番号にテスト電話を発信します。</p>
+      <div class="test-grid">
+        <div class="test-card">
+          <h2>⚡ 停電テスト</h2>
+          <p>停電通知のテスト電話を発信します。</p>
+          <button class="btn red" onclick="testCall('停電')">停電テストを実行</button>
+        </div>
+        <div class="test-card">
+          <h2>⚡ 通電テスト</h2>
+          <p>通電通知のテスト電話を発信します。</p>
+          <button class="btn green" onclick="testCall('通電')">通電テストを実行</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>今月の利用状況</h2>
+        <div class="big">3 <span style="font-size:22px">/ 50回</span></div>
+        <div class="progress"><div></div></div>
+        <p id="testResult">※毎月1日に回数がリセットされます。</p>
+      </div>
+    </section>
+
+    <section id="contract" class="page">
+      <h1>契約情報</h1>
+      <div class="card">
+        <table>
+          <tr><td>会社名</td><td>山田農場</td></tr>
+          <tr><td>担当者名</td><td>山田 太郎</td></tr>
+          <tr><td>電話番号</td><td>090-1234-5678</td></tr>
+          <tr><td>メールアドレス</td><td>yamada@example.com</td></tr>
+          <tr><td>契約プラン</td><td>スタンダードプラン</td></tr>
+          <tr><td>契約開始日</td><td>2026年5月1日</td></tr>
+          <tr><td>契約終了日</td><td>2027年4月30日</td></tr>
+          <tr><td>残り日数</td><td style="color:#16a34a;font-weight:900">364日</td></tr>
+        </table>
+        <button class="btn primary">契約情報を編集</button>
+      </div>
+    </section>
+
+    <section id="contact" class="page">
+      <h1>お問い合わせ</h1>
+      <div class="card">
+        <input placeholder="お名前">
+        <input placeholder="会社名">
+        <input placeholder="メールアドレス">
+        <textarea rows="6" placeholder="お問い合わせ内容"></textarea>
+        <button class="btn primary" onclick="alert('お問い合わせを受け付けました。')">送信する</button>
+      </div>
+    </section>
+  </main>
+</section>
+
+<footer>
+  © 2026 Call Now. All rights reserved.
+</footer>
 
 <script>
-const GAS_URL = "https://script.google.com/macros/s/AKfycbwdi8ma6y7SXJ1ahIsmpMI_OuCVfiIgJllJsQQydwEEGYSo-BWW73fOw-QUHav-ax_jDA/exec";
-
-let alarmTimer = null;
-let audioCtx = null;
-
 function showPage(id, btn){
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
   document.getElementById(id).classList.add("active");
 
-  document.querySelectorAll(".nav button").forEach(b => b.classList.remove("active"));
-  btn.classList.add("active");
+  document.querySelectorAll(".sidebtn").forEach(b => b.classList.remove("active"));
+  if(btn) btn.classList.add("active");
 
   window.scrollTo(0,0);
 }
 
-function sendTest(type){
-  document.getElementById("testResult").innerHTML = "送信中...";
-
-  fetch(GAS_URL + "?type=" + type, {
-    method:"GET",
-    mode:"no-cors"
-  });
-
-  if(type === "restore"){
-    document.getElementById("testResult").innerHTML = "✅ 通電通知を送信しました。";
-  }else{
-    document.getElementById("testResult").innerHTML = "🚨 停電通知を送信しました。";
-    startLocalAlarm();
-  }
-}
-
-function beep(){
-  if(!audioCtx){
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-
-  osc.type = "square";
-  osc.frequency.value = 900;
-  gain.gain.value = 0.7;
-
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-
-  osc.start();
-  setTimeout(() => osc.stop(), 600);
-}
-
-function startLocalAlarm(){
-  document.getElementById("alarmScreen").style.display = "block";
-
-  beep();
-
-  if(alarmTimer){
-    clearInterval(alarmTimer);
-  }
-
-  alarmTimer = setInterval(() => {
-    beep();
-  }, 1000);
-}
-
-function stopLocalAlarm(){
-  document.getElementById("alarmScreen").style.display = "none";
-
-  if(alarmTimer){
-    clearInterval(alarmTimer);
-    alarmTimer = null;
-  }
+function testCall(type){
+  document.getElementById("testResult").innerText =
+    type + "テスト電話を発信しました。※今は見た目だけです";
 }
 </script>
 
