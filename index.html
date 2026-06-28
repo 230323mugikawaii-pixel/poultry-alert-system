@@ -24,7 +24,7 @@ header{
 }
 .logo{
   font-size:24px;
-  font-weight:800;
+  font-weight:900;
   color:#075bbb;
 }
 nav a{
@@ -52,9 +52,7 @@ nav a{
   margin:0;
   color:#075bbb;
 }
-.hero h2{
-  font-size:30px;
-}
+.hero h2{font-size:30px}
 .hero p{
   font-size:18px;
   line-height:1.8;
@@ -100,7 +98,10 @@ nav a{
   text-align:center;
   font-weight:700;
 }
-.feature span{font-size:40px;display:block}
+.feature span{
+  font-size:40px;
+  display:block;
+}
 .app{
   display:grid;
   grid-template-columns:230px 1fr;
@@ -129,8 +130,13 @@ nav a{
   font-weight:800;
   margin:5px 0;
 }
-.sidebtn.active,.sidebtn:hover{background:rgba(255,255,255,.18)}
-.page{display:none;padding:36px}
+.sidebtn.active,.sidebtn:hover{
+  background:rgba(255,255,255,.18);
+}
+.page{
+  display:none;
+  padding:36px;
+}
 .page.active{display:block}
 .cards{
   display:grid;
@@ -197,13 +203,33 @@ input,textarea{
   border-radius:10px;
   font-size:16px;
 }
+.modal{
+  display:none;
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.45);
+  z-index:9999;
+  align-items:center;
+  justify-content:center;
+  padding:20px;
+}
+.modalBox{
+  background:white;
+  width:100%;
+  max-width:420px;
+  border-radius:22px;
+  padding:28px;
+  box-shadow:0 20px 50px rgba(0,0,0,.25);
+}
+.modalBox h2{
+  margin-top:0;
+  color:#075bbb;
+}
 footer{
   text-align:center;
   color:#64748b;
   padding:30px;
 }
-.mobile-note{display:none}
-
 @media(max-width:800px){
   header{padding:0 18px}
   nav{display:none}
@@ -212,16 +238,11 @@ footer{
   .phone{width:200px;height:300px}
   .features{grid-template-columns:1fr;margin:20px}
   .app{grid-template-columns:1fr;margin:20px}
-  .sidebar{
-    display:flex;
-    overflow-x:auto;
-    gap:6px;
-  }
+  .sidebar{display:flex;overflow-x:auto;gap:6px}
   .sidebar h2{display:none}
   .sidebtn{min-width:120px;text-align:center}
   .cards,.test-grid{grid-template-columns:1fr}
   .page{padding:22px}
-  .mobile-note{display:block}
 }
 </style>
 </head>
@@ -236,7 +257,7 @@ footer{
     <a onclick="showPage('contract',null)">契約情報</a>
     <a onclick="showPage('contact',null)">お問い合わせ</a>
   </nav>
-  <button class="login">ログイン</button>
+  <button class="login" onclick="openLogin()">ログイン</button>
 </header>
 
 <section class="hero">
@@ -247,7 +268,7 @@ footer{
       大切な通知を電話でお知らせします。<br>
       電話に出るだけで、重要な情報を見逃しません。
     </p>
-    <button class="btn primary" onclick="showPage('test',null)">今すぐ始める</button>
+    <button class="btn primary" onclick="openLogin()">今すぐ始める</button>
     <button class="btn outline" onclick="showPage('home',null)">サービスについて</button>
   </div>
 
@@ -358,6 +379,17 @@ footer{
   </main>
 </section>
 
+<div id="loginModal" class="modal">
+  <div class="modalBox">
+    <h2>ログイン</h2>
+    <input id="loginEmail" placeholder="メールアドレス">
+    <input id="loginPassword" placeholder="パスワード" type="password">
+    <button class="btn primary" onclick="login()">ログイン</button>
+    <button class="btn outline" onclick="closeLogin()">閉じる</button>
+    <p id="loginResult"></p>
+  </div>
+</div>
+
 <footer>
   © 2026 Call Now. All rights reserved.
 </footer>
@@ -376,6 +408,33 @@ function showPage(id, btn){
 function testCall(type){
   document.getElementById("testResult").innerText =
     type + "テスト電話を発信しました。※今は見た目だけです";
+}
+
+function openLogin(){
+  document.getElementById("loginModal").style.display = "flex";
+}
+
+function closeLogin(){
+  document.getElementById("loginModal").style.display = "none";
+}
+
+function login(){
+  const email = document.getElementById("loginEmail").value;
+  const password = document.getElementById("loginPassword").value;
+
+  if(email === "" || password === ""){
+    document.getElementById("loginResult").innerText =
+      "メールアドレスとパスワードを入力してください。";
+    return;
+  }
+
+  localStorage.setItem("callnow_login","true");
+  localStorage.setItem("callnow_email",email);
+
+  document.getElementById("loginResult").innerText =
+    "ログインしました。";
+
+  setTimeout(closeLogin,800);
 }
 </script>
 
