@@ -1,162 +1,1051 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Call Now</title>
+  <meta charset="UTF-8">
 
-<link rel="stylesheet" href="css/style.css">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+  >
 
+  <meta name="theme-color" content="#0862c7">
+
+  <title>Call Now</title>
+
+  <!-- デザイン用CSS -->
+  <link rel="stylesheet" href="css/style.css">
 </head>
 
 <body>
 
-<header>
-  <div class="logo">📞 Call Now</div>
-  <nav>
-    <a onclick="showPage('home',null)">ホーム</a>
-    <a onclick="showPage('test',null)">通知テスト</a>
-    <a onclick="showPage('contract',null)">契約情報</a>
-    <a onclick="showPage('contact',null)">お問い合わせ</a>
-  </nav>
-  <button class="login" onclick="openLogin()">ログイン</button>
-</header>
+  <!-- ========================================
+       トップページ
+  ========================================= -->
 
-<section class="hero">
-  <div>
-    <h1>Call Now</h1>
-    <h2>メールを、確実な電話へ。</h2>
-    <p>
-      大切な通知を電話でお知らせします。<br>
-      電話に出るだけで、重要な情報を見逃しません。
-    </p>
-    <button class="btn primary" onclick="openLogin()">今すぐ始める</button>
-    <button class="btn outline" onclick="showPage('home',null)">サービスについて</button>
+  <div id="landingScreen">
+
+    <header class="landing-header">
+
+      <div class="landing-logo">
+        🔔 Call Now
+      </div>
+
+    </header>
+
+
+    <main>
+
+      <section class="hero">
+
+        <div class="hero-text">
+
+          <h1>
+            Call Now
+          </h1>
+
+          <h2>
+            メールを、確実な音へ。
+          </h2>
+
+          <p>
+            大切なメール通知を、見逃しにくい音へ変換します。<br>
+            停止ボタンを押すまで、繰り返し通知します。
+          </p>
+
+
+          <div class="hero-buttons">
+
+            <button
+              type="button"
+              class="btn primary"
+              onclick="startSignup()"
+            >
+              今すぐ始める
+            </button>
+
+
+            <button
+              type="button"
+              class="btn outline"
+              onclick="scrollToService()"
+            >
+              サービスについて
+            </button>
+
+          </div>
+
+        </div>
+
+
+        <div class="notification-card">
+
+          <div class="notification-icon">
+            🔔
+          </div>
+
+          <h2>
+            Call Now
+          </h2>
+
+          <p>
+            通知中...
+          </p>
+
+        </div>
+
+      </section>
+
+
+      <!-- サービス紹介 -->
+
+      <section
+        id="serviceSection"
+        class="features"
+      >
+
+        <article class="feature">
+
+          <span>
+            🔔
+          </span>
+
+          <h3>
+            音でお知らせ
+          </h3>
+
+          <p>
+            重要な通知を大きな音でお知らせします。
+          </p>
+
+        </article>
+
+
+        <article class="feature">
+
+          <span>
+            🔁
+          </span>
+
+          <h3>
+            自動で繰り返し
+          </h3>
+
+          <p>
+            停止するまで繰り返し通知します。
+          </p>
+
+        </article>
+
+
+        <article class="feature">
+
+          <span>
+            ⏱️
+          </span>
+
+          <h3>
+            確認して終了
+          </h3>
+
+          <p>
+            停止ボタンを押すと通知を終了します。
+          </p>
+
+        </article>
+
+
+        <article class="feature">
+
+          <span>
+            ✉️
+          </span>
+
+          <h3>
+            メールで確認
+          </h3>
+
+          <p>
+            詳しい内容は受信したメールで確認できます。
+          </p>
+
+        </article>
+
+      </section>
+
+    </main>
+
+
+    <footer>
+      © 2026 Call Now. All rights reserved.
+    </footer>
+
   </div>
 
-  <div class="phone">
-    <div class="icon">📞</div>
-    <h2>Call Now</h2>
-    <p>着信中...</p>
-  </div>
-</section>
 
-<section class="features">
-  <div class="feature"><span>📞</span>電話でお知らせ<br>重要な通知を電話で通知</div>
-  <div class="feature"><span>🔁</span>自動で繰り返し<br>応答まで5秒ごとに再発信</div>
-  <div class="feature"><span>⏱</span>自動で終了<br>応答後3秒で終了</div>
-  <div class="feature"><span>✉️</span>メールで確認<br>詳細はメールで確認</div>
-</section>
 
-<section class="app">
-  <div class="sidebar">
-    <h2>📞 Call Now</h2>
-    <button class="sidebtn active" onclick="showPage('home',this)">🏠 ホーム</button>
-    <button class="sidebtn" onclick="showPage('test',this)">📞 通知テスト</button>
-    <button class="sidebtn" onclick="showPage('contract',this)">📄 契約情報</button>
-    <button class="sidebtn" onclick="showPage('contact',this)">✉️ お問い合わせ</button>
-  </div>
+  <!-- ========================================
+       キーワード設定画面
+  ========================================= -->
 
-  <main>
-    <section id="home" class="page active">
-      <h1>ホーム</h1>
-      <div class="cards">
-        <div class="card">
-          <h2>サービス状況</h2>
-          <div class="status">✅ 正常</div>
-          <p>すべてのシステムは正常に稼働しています。</p>
+  <section
+    id="setupScreen"
+    class="flow-screen hidden"
+  >
+
+    <div class="flow-container">
+
+      <button
+        type="button"
+        class="back-button"
+        onclick="handleSetupBack()"
+      >
+        ← 戻る
+      </button>
+
+
+      <p
+        id="setupStepLabel"
+        class="step-label"
+      >
+        STEP 1 / 2
+      </p>
+
+
+      <h1 id="setupTitle">
+        通知キーワードを設定
+      </h1>
+
+
+      <p
+        id="setupDescription"
+        class="description"
+      >
+        登録した言葉がメールに含まれていた場合に通知します。
+        基本料金には3個までのキーワードが含まれます。
+      </p>
+
+
+      <!-- 基本プラン -->
+
+      <div class="plan-card">
+
+        <div class="plan-header">
+
+          <div>
+
+            <p class="small-label">
+              基本プラン
+            </p>
+
+            <h2>
+              スタンダードプラン
+            </h2>
+
+          </div>
+
+
+          <strong>
+            年額6,000円
+          </strong>
+
         </div>
-        <div class="card">
-          <h2>契約情報</h2>
-          <p>契約プラン：スタンダードプラン</p>
-          <p>契約開始日：2026年5月1日</p>
-          <p>契約終了日：2027年4月30日</p>
-          <button class="btn primary" onclick="showPage('contract',null)">契約情報を確認</button>
-        </div>
-        <div class="card">
-          <h2>今月の通知テスト回数</h2>
-          <div class="big">3 <span style="font-size:22px">/ 50回</span></div>
-          <div class="progress"><div></div></div>
-          <p>残り47回</p>
-        </div>
-        <div class="card">
-          <h2>お知らせ</h2>
-          <p>・システムメンテナンスのお知らせ</p>
-          <p>・新機能追加のお知らせ</p>
-          <p>・契約更新のお願い</p>
-        </div>
+
+
+        <p>
+          3キーワードまで基本料金に含まれます。<br>
+          4個目以降は、1個につき年額1,000円追加されます。
+        </p>
+
       </div>
-    </section>
 
-    <section id="test" class="page">
-      <h1>通知テスト</h1>
-      <p>登録されている電話番号にテスト電話を発信します。</p>
-      <div class="test-grid">
-        <div class="test-card">
-          <h2>⚡ 停電テスト</h2>
-          <p>停電通知のテスト電話を発信します。</p>
-          <button class="btn red" onclick="testCall('停電')">停電テストを実行</button>
+
+      <!-- キーワード入力 -->
+
+      <div class="keyword-section">
+
+        <div class="section-title-row">
+
+          <h2>
+            登録キーワード
+          </h2>
+
+          <span id="keywordCount">
+            3個
+          </span>
+
         </div>
-        <div class="test-card">
-          <h2>⚡ 通電テスト</h2>
-          <p>通電通知のテスト電話を発信します。</p>
-          <button class="btn green" onclick="testCall('通電')">通電テストを実行</button>
+
+
+        <div id="keywordInputs"></div>
+
+
+        <button
+          type="button"
+          class="btn outline full-width"
+          onclick="addKeyword()"
+        >
+          ＋ キーワードを追加
+        </button>
+
+      </div>
+
+
+      <!-- 料金表示 -->
+
+      <div class="price-card">
+
+        <div class="price-row">
+
+          <span>
+            基本料金
+          </span>
+
+          <strong>
+            6,000円
+          </strong>
+
         </div>
-      </div>
-      <div class="card">
-        <h2>今月の利用状況</h2>
-        <div class="big">3 <span style="font-size:22px">/ 50回</span></div>
-        <div class="progress"><div></div></div>
-        <p id="testResult">※毎月1日に回数がリセットされます。</p>
-      </div>
-    </section>
 
-    <section id="contract" class="page">
-      <h1>契約情報</h1>
-      <div class="card">
-        <table>
-          <tr><td>会社名</td><td>山田農場</td></tr>
-          <tr><td>担当者名</td><td>山田 太郎</td></tr>
-          <tr><td>電話番号</td><td>090-1234-5678</td></tr>
-          <tr><td>メールアドレス</td><td>yamada@example.com</td></tr>
-          <tr><td>契約プラン</td><td>スタンダードプラン</td></tr>
-          <tr><td>契約開始日</td><td>2026年5月1日</td></tr>
-          <tr><td>契約終了日</td><td>2027年4月30日</td></tr>
-          <tr><td>残り日数</td><td style="color:#16a34a;font-weight:900">364日</td></tr>
-        </table>
-        <button class="btn primary">契約情報を編集</button>
-      </div>
-    </section>
 
-    <section id="contact" class="page">
-      <h1>お問い合わせ</h1>
-      <div class="card">
-        <input placeholder="お名前">
-        <input placeholder="会社名">
-        <input placeholder="メールアドレス">
-        <textarea rows="6" placeholder="お問い合わせ内容"></textarea>
-        <button class="btn primary" onclick="alert('お問い合わせを受け付けました。')">送信する</button>
-      </div>
-    </section>
-  </main>
-</section>
+        <div class="price-row">
 
-<div id="loginModal" class="modal">
-  <div class="modalBox">
-    <h2>ログイン</h2>
-    <input id="loginEmail" placeholder="メールアドレス">
-    <input id="loginPassword" placeholder="パスワード" type="password">
-    <button class="btn primary" onclick="login()">ログイン</button>
-    <button class="btn outline" onclick="closeLogin()">閉じる</button>
-    <p id="loginResult"></p>
-  </div>
+          <span>
+            追加キーワード
+          </span>
+
+          <strong id="extraPrice">
+            0円
+          </strong>
+
+        </div>
+
+
+        <hr>
+
+
+        <div class="price-row total-row">
+
+          <span>
+            合計年額
+          </span>
+
+          <strong id="totalPrice">
+            6,000円
+          </strong>
+
+        </div>
+
+
+        <p class="monthly-price">
+          月換算：約
+          <span id="monthlyPrice">
+            500
+          </span>
+          円
+        </p>
+
+      </div>
+
+
+      <p
+        id="setupError"
+        class="error-message"
+        aria-live="polite"
+      ></p>
+
+
+<button
+  id="setupContinueButton"
+  type="button"
+  class="btn primary full-width"
+  onclick="continueFromSetup()"
+>
+  決済内容を確認
+</button>
+
+    </div>
+
+  </section>
+
+
+
+  <!-- ========================================
+       決済確認画面
+  ========================================= -->
+
+  <section
+    id="paymentScreen"
+    class="flow-screen hidden"
+  >
+
+    <div class="flow-container">
+
+      <button
+        type="button"
+        class="back-button"
+        onclick="backToSetup()"
+      >
+        ← 戻る
+      </button>
+
+
+      <p class="step-label">
+        STEP 2 / 2
+      </p>
+
+
+      <h1>
+        決済内容を確認
+      </h1>
+
+
+      <div class="payment-card">
+
+        <h2>
+          スタンダードプラン
+        </h2>
+
+
+        <div class="payment-detail">
+
+          <span>
+            登録キーワード
+          </span>
+
+          <strong id="paymentKeywordCount">
+            3個
+          </strong>
+
+        </div>
+
+
+        <div
+          id="paymentKeywords"
+          class="payment-keywords"
+        ></div>
+
+
+        <div class="payment-detail">
+
+          <span>
+            契約期間
+          </span>
+
+          <strong>
+            1年間
+          </strong>
+
+        </div>
+
+
+        <div class="payment-detail total-payment">
+
+          <span>
+            お支払い金額
+          </span>
+
+          <strong id="paymentTotal">
+            6,000円
+          </strong>
+
+        </div>
+
+      </div>
+
+
+      <div class="notice-box">
+
+        <strong>
+          現在は試作版です
+        </strong>
+
+        <p>
+          このボタンでは実際の料金は発生しません。
+          正式な決済機能は、公開後に接続します。
+        </p>
+
+      </div>
+
+
+      <button
+        type="button"
+        class="btn primary full-width"
+        onclick="completeDemoPayment()"
+      >
+        決済を完了して次へ
+      </button>
+
+    </div>
+
+  </section>
+
+
+
+  <!-- ========================================
+       Googleアカウント選択画面
+  ========================================= -->
+
+  <section
+    id="googleScreen"
+    class="flow-screen hidden"
+  >
+
+    <div class="flow-container">
+
+      <button
+        type="button"
+        class="back-button"
+        onclick="backFromGoogle()"
+      >
+        ← キーワード設定へ戻る
+      </button>
+
+
+      <p class="step-label">
+        アカウント確認
+      </p>
+
+
+      <h1>
+        Googleアカウントを選択
+      </h1>
+
+
+      <p class="description">
+        Gmailの通知を確認するGoogleアカウントを選択します。
+      </p>
+
+
+      <!-- 前回利用したGoogleアカウント -->
+
+      <div
+        id="savedGoogleAccountCard"
+        class="google-account-card hidden"
+      >
+
+        <div class="account-avatar">
+          G
+        </div>
+
+
+        <div class="account-details">
+
+          <strong>
+            前回使用したアカウント
+          </strong>
+
+          <span id="savedGoogleEmail"></span>
+
+        </div>
+
+
+        <button
+          type="button"
+          class="account-select-button"
+          onclick="useSavedGoogleAccount()"
+        >
+          選択
+        </button>
+
+      </div>
+
+
+      <!-- 別アカウント -->
+
+      <div class="google-card">
+
+        <div class="google-logo">
+          G
+        </div>
+
+
+        <div class="google-card-content">
+
+          <h2>
+            別のGoogleアカウントを使用
+          </h2>
+
+
+          <p>
+            現在は試作版のため、本物のGoogle認証画面ではありません。
+            入力したメールアドレスを選択済みアカウントとして保存します。
+          </p>
+
+
+          <label for="googleEmail">
+            Googleメールアドレス
+          </label>
+
+
+          <input
+            id="googleEmail"
+            type="email"
+            placeholder="example@gmail.com"
+            autocomplete="email"
+          >
+
+
+          <p
+            id="googleError"
+            class="error-message"
+            aria-live="polite"
+          ></p>
+
+
+          <button
+            type="button"
+            class="google-button"
+            onclick="completeGoogleLogin()"
+          >
+            このGoogleアカウントで続行
+          </button>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </section>
+
+
+
+  <!-- ========================================
+       管理画面
+  ========================================= -->
+
+  <section
+    id="appScreen"
+    class="app-screen hidden"
+  >
+
+    <header class="app-header">
+
+      <div class="app-logo">
+        🔔 Call Now
+      </div>
+
+
+      <div class="app-actions">
+
+        <button
+          type="button"
+          class="logout-button"
+          onclick="logout()"
+        >
+          ログアウト
+        </button>
+
+
+        <div class="app-status">
+          監視中
+        </div>
+
+      </div>
+
+    </header>
+
+
+    <main class="app-main">
+
+
+      <!-- ホーム -->
+
+      <section
+        id="homePage"
+        class="app-page active"
+      >
+
+        <h1>
+          ホーム
+        </h1>
+
+
+        <div class="dashboard-grid">
+
+          <article class="card">
+
+            <h2>
+              サービス状況
+            </h2>
+
+
+            <div class="status-display">
+              ✅ 正常
+            </div>
+
+
+            <p id="serviceStatusDescription">
+              すべてのシステムは正常に稼働しています。
+            </p>
+
+          </article>
+
+
+          <article class="card">
+
+            <h2>
+              接続中のGoogleアカウント
+            </h2>
+
+
+            <p id="connectedGoogleAccount">
+              未選択
+            </p>
+
+          </article>
+
+
+          <article class="card">
+
+            <h2>
+              お知らせ
+            </h2>
+
+
+            <p>
+              ・システムメンテナンスのお知らせ
+            </p>
+
+            <p>
+              ・新機能追加のお知らせ
+            </p>
+
+            <p>
+              ・契約更新のお願い
+            </p>
+
+          </article>
+
+        </div>
+
+      </section>
+
+
+
+      <!-- 通知テスト -->
+
+      <section
+        id="testPage"
+        class="app-page"
+      >
+
+        <h1>
+          通知テスト
+        </h1>
+
+
+        <p>
+          登録している端末へテスト通知を送ります。
+        </p>
+
+
+        <div
+          id="testKeywordCards"
+          class="test-grid"
+        ></div>
+
+
+        <article class="card">
+
+          <div class="test-notice">
+  <p>
+    テストを実行してから、登録している端末へメールが届くまで、
+    最大で1分かかります。
+  </p>
 </div>
 
-<footer>
-  © 2026 Call Now. All rights reserved.
-</footer>
 
-<script src="js/app.js"></script>
+
+
+      <!-- 契約情報 -->
+
+      <section
+        id="contractPage"
+        class="app-page"
+      >
+
+        <h1>
+          契約情報
+        </h1>
+
+
+        <article class="card contract-table">
+
+          <div class="contract-row">
+
+            <span>
+              契約プラン
+            </span>
+
+            <strong>
+              スタンダードプラン
+            </strong>
+
+          </div>
+
+
+          <div class="contract-row">
+
+            <span>
+              契約開始日
+            </span>
+
+            <strong id="contractStartDate">
+              ―
+            </strong>
+
+          </div>
+
+
+          <div class="contract-row">
+
+            <span>
+              契約終了日
+            </span>
+
+            <strong id="contractEndDate">
+              ―
+            </strong>
+
+          </div>
+
+
+          <div class="contract-row">
+
+            <span>
+              残り日数
+            </span>
+
+            <strong id="remainingDays">
+              ―
+            </strong>
+
+          </div>
+
+
+          <div class="contract-row">
+
+            <span>
+              キーワード数
+            </span>
+
+            <strong id="contractKeywordCount">
+              3個
+            </strong>
+
+          </div>
+
+
+          <div class="contract-row">
+
+            <span>
+              更新料金
+            </span>
+
+            <strong id="contractPrice">
+              6,000円
+            </strong>
+
+          </div>
+
+
+          <button
+            id="renewContractButton"
+            type="button"
+            class="btn primary full-width renewal-button"
+            onclick="renewContract()"
+          >
+            契約期限を1年間延長
+          </button>
+
+        </article>
+
+      </section>
+
+
+
+      <!-- キーワード設定 -->
+
+      <section
+        id="keywordPage"
+        class="app-page"
+      >
+
+        <h1>
+          キーワード設定
+        </h1>
+
+
+        <p>
+          現在、通知対象として登録されているキーワードです。
+        </p>
+
+
+        <article class="card">
+
+          <div id="savedKeywordList"></div>
+
+
+          <button
+            type="button"
+            class="btn outline full-width"
+            onclick="openKeywordEdit()"
+          >
+            キーワードを編集
+          </button>
+
+        </article>
+
+      </section>
+
+
+
+      <!-- お問い合わせ -->
+
+      <section
+        id="contactPage"
+        class="app-page"
+      >
+
+        <h1>
+          お問い合わせ
+        </h1>
+
+
+        <article class="card contact-form">
+
+          <label for="contactName">
+            お名前
+          </label>
+
+          <input
+            id="contactName"
+            type="text"
+          >
+
+
+          <label for="contactCompany">
+            会社名・農場名
+          </label>
+
+          <input
+            id="contactCompany"
+            type="text"
+          >
+
+
+          <label for="contactEmail">
+            メールアドレス
+          </label>
+
+          <input
+            id="contactEmail"
+            type="email"
+          >
+
+
+          <label for="contactMessage">
+            お問い合わせ内容
+          </label>
+
+          <textarea
+            id="contactMessage"
+            rows="6"
+          ></textarea>
+
+
+          <button
+            type="button"
+            class="btn primary full-width"
+            onclick="sendContact()"
+          >
+            お問い合わせを送信
+          </button>
+
+        </article>
+
+      </section>
+
+    </main>
+
+
+
+    <!-- 下部の5タブ -->
+
+    <nav class="bottom-tabs">
+
+      <button
+        type="button"
+        class="tab-button active"
+        onclick="showAppPage('homePage', this)"
+      >
+        <span>🏠</span>
+        <small>ホーム</small>
+      </button>
+
+
+      <button
+        type="button"
+        class="tab-button"
+        onclick="showAppPage('testPage', this)"
+      >
+        <span>🔔</span>
+        <small>テスト</small>
+      </button>
+
+
+      <button
+        type="button"
+        class="tab-button"
+        onclick="showAppPage('contractPage', this)"
+      >
+        <span>📄</span>
+        <small>契約</small>
+      </button>
+
+
+      <button
+        type="button"
+        class="tab-button"
+        onclick="showAppPage('keywordPage', this)"
+      >
+        <span>🔑</span>
+        <small>キーワード</small>
+      </button>
+
+
+      <button
+        type="button"
+        class="tab-button"
+        onclick="showAppPage('contactPage', this)"
+      >
+        <span>✉️</span>
+        <small>連絡</small>
+      </button>
+
+    </nav>
+
+  </section>
+
+
+
+  <!-- 動作用JavaScript -->
+
+<script src="js/app.js?v=3"></script>
+<script>
+  window.openKeywordEdit = function () {
+    setupMode = "edit";
+
+    showOnlyScreen("setupScreen");
+    renderKeywordInputs();
+    updateSetupScreenText();
+
+    window.scrollTo({
+      top: 0
+    });
+  };
+</script>
 
 </body>
-</html>
+</html> 

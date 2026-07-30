@@ -1,238 +1,1379 @@
-*{box-sizing:border-box}
-body{
-  margin:0;
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  background:#f5f8fc;
-  color:#0f172a;
+:root {
+  --blue: #0862c7;
+  --blue-dark: #044b9a;
+  --blue-light: #edf5ff;
+  --background: #f4f7fb;
+  --text: #101828;
+  --subtext: #667085;
+  --border: #d9e2ef;
+  --green: #18a957;
+  --red: #e13d3d;
+  --white: #ffffff;
 }
-header{
-  height:64px;
-  background:white;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding:0 40px;
-  border-bottom:1px solid #e5e7eb;
+
+
+/* ========================================
+   全体設定
+======================================== */
+
+* {
+  box-sizing: border-box;
 }
-.logo{
-  font-size:24px;
-  font-weight:900;
-  color:#075bbb;
+
+html {
+  scroll-behavior: smooth;
 }
-nav a{
-  margin:0 14px;
-  font-weight:700;
-  cursor:pointer;
+
+body {
+  margin: 0;
+
+  color: var(--text);
+  background: var(--background);
+
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "Hiragino Sans",
+    "Yu Gothic",
+    sans-serif;
 }
-.login{
-  background:#075bbb;
-  color:white;
-  border:none;
-  padding:12px 28px;
-  border-radius:10px;
-  font-weight:800;
+
+button,
+input,
+textarea {
+  font: inherit;
 }
-.hero{
-  display:grid;
-  grid-template-columns:1.1fr .9fr;
-  gap:30px;
-  padding:60px 70px 40px;
-  background:white;
+
+button {
+  cursor: pointer;
 }
-.hero h1{
-  font-size:72px;
-  margin:0;
-  color:#075bbb;
+
+.hidden {
+  display: none !important;
 }
-.hero h2{font-size:30px}
-.hero p{
-  font-size:18px;
-  line-height:1.8;
+
+
+/* ========================================
+   共通ボタン
+======================================== */
+
+.btn {
+  border: none;
+
+  border-radius: 16px;
+
+  padding: 16px 24px;
+
+  font-size: 16px;
+  font-weight: 800;
+
+  transition:
+    transform 0.15s,
+    background 0.15s,
+    opacity 0.15s;
 }
-.btn{
-  border:none;
-  border-radius:12px;
-  padding:16px 28px;
-  font-size:17px;
-  font-weight:800;
-  margin:8px;
-  cursor:pointer;
+
+.btn:active {
+  transform: scale(0.98);
 }
-.primary{background:#075bbb;color:white}
-.outline{background:white;color:#075bbb;border:2px solid #075bbb}
-.phone{
-  width:260px;
-  height:360px;
-  background:#075bbb;
-  color:white;
-  border-radius:34px;
-  margin:auto;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-  box-shadow:0 20px 45px rgba(0,0,0,.25);
-  transform:rotate(8deg);
+
+.btn.primary {
+  color: var(--white);
+  background: var(--blue);
 }
-.phone .icon{font-size:70px}
-.features{
-  display:grid;
-  grid-template-columns:repeat(4,1fr);
-  gap:1px;
-  margin:0 70px 40px;
-  background:#dbeafe;
-  border-radius:18px;
-  overflow:hidden;
+
+.btn.primary:hover {
+  background: var(--blue-dark);
 }
-.feature{
-  background:#eff6ff;
-  padding:24px;
-  text-align:center;
-  font-weight:700;
+
+.btn.outline {
+  color: var(--blue);
+  background: var(--white);
+
+  border: 3px solid var(--blue);
 }
-.feature span{
-  font-size:40px;
-  display:block;
+
+.btn.outline:hover {
+  background: var(--blue-light);
 }
-.app{
-  display:grid;
-  grid-template-columns:230px 1fr;
-  min-height:640px;
-  margin:40px;
-  background:white;
-  border-radius:20px;
-  overflow:hidden;
-  box-shadow:0 8px 30px rgba(0,0,0,.08);
+
+.full-width {
+  width: 100%;
 }
-.sidebar{
-  background:linear-gradient(#075bbb,#003c8f);
-  color:white;
-  padding:28px 18px;
+
+
+/* ========================================
+   トップページ
+======================================== */
+
+#landingScreen {
+  min-height: 100vh;
+
+  background: var(--white);
 }
-.sidebar h2{margin-top:0}
-.sidebtn{
-  width:100%;
-  background:transparent;
-  color:white;
-  border:none;
-  padding:15px;
-  text-align:left;
-  border-radius:12px;
-  font-size:16px;
-  font-weight:800;
-  margin:5px 0;
+
+.landing-header {
+  position: sticky;
+
+  top: 0;
+  z-index: 20;
+
+  padding: 20px 6%;
+
+  background:
+    rgba(255, 255, 255, 0.96);
+
+  border-bottom:
+    1px solid var(--border);
+
+  backdrop-filter: blur(12px);
 }
-.sidebtn.active,.sidebtn:hover{
-  background:rgba(255,255,255,.18);
+
+.landing-logo {
+  color: var(--blue);
+
+  font-size: 28px;
+  font-weight: 900;
 }
-.page{
-  display:none;
-  padding:36px;
+
+.hero {
+  display: grid;
+
+  grid-template-columns:
+    1fr 0.8fr;
+
+  align-items: center;
+
+  gap: 60px;
+
+  min-height: 700px;
+
+  padding: 80px 7%;
 }
-.page.active{display:block}
-.cards{
-  display:grid;
-  grid-template-columns:repeat(2,1fr);
-  gap:22px;
+
+.hero-text h1 {
+  margin: 0;
+
+  color: var(--blue);
+
+  font-size:
+    clamp(60px, 9vw, 110px);
+
+  line-height: 1;
 }
-.card{
-  background:white;
-  border:1px solid #e5e7eb;
-  border-radius:18px;
-  padding:26px;
-  box-shadow:0 5px 18px rgba(0,0,0,.06);
+
+.hero-text h2 {
+  margin:
+    50px 0 28px;
+
+  font-size:
+    clamp(31px, 4vw, 58px);
 }
-.status{
-  font-size:40px;
-  font-weight:900;
-  color:#16a34a;
+
+.hero-text p {
+  margin: 0;
+
+  font-size:
+    clamp(18px, 2vw, 28px);
+
+  font-weight: 700;
+
+  line-height: 1.9;
 }
-.big{
-  font-size:42px;
-  font-weight:900;
+
+.hero-buttons {
+  display: flex;
+
+  flex-wrap: wrap;
+
+  gap: 18px;
+
+  margin-top: 40px;
 }
-.progress{
-  height:12px;
-  background:#e5e7eb;
-  border-radius:20px;
-  overflow:hidden;
+
+.notification-card {
+  display: flex;
+
+  min-height: 500px;
+
+  flex-direction: column;
+
+  align-items: center;
+  justify-content: center;
+
+  transform: rotate(7deg);
+
+  color: var(--white);
+
+  background:
+    linear-gradient(
+      150deg,
+      #1976d8,
+      #034893
+    );
+
+  border-radius: 48px;
+
+  box-shadow:
+    0 30px 70px
+    rgba(4, 75, 154, 0.32);
 }
-.progress div{
-  width:6%;
-  height:100%;
-  background:#075bbb;
+
+.notification-icon {
+  font-size: 100px;
 }
-.test-grid{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:24px;
+
+.notification-card h2 {
+  margin:
+    35px 0;
+
+  font-size: 50px;
 }
-.test-card{
-  border:1px solid #e5e7eb;
-  border-radius:18px;
-  padding:30px;
-  text-align:center;
+
+.notification-card p {
+  margin: 0;
+
+  font-size: 30px;
+  font-weight: 800;
 }
-.red{background:#ef4444;color:white}
-.green{background:#16a34a;color:white}
-table{
-  width:100%;
-  border-collapse:collapse;
+
+
+/* ========================================
+   サービス紹介
+======================================== */
+
+.features {
+  display: grid;
+
+  grid-template-columns:
+    repeat(4, 1fr);
+
+  max-width: 1180px;
+
+  margin: auto;
+
+  padding:
+    70px 30px 120px;
+
+  gap: 2px;
 }
-td{
-  padding:15px;
-  border-bottom:1px solid #e5e7eb;
+
+.feature {
+  padding:
+    42px 24px;
+
+  text-align: center;
+
+  background: var(--blue-light);
 }
-td:first-child{
-  color:#64748b;
-  font-weight:800;
+
+.feature:first-child {
+  border-radius:
+    30px 0 0 30px;
 }
-input,textarea{
-  width:100%;
-  padding:14px;
-  margin:8px 0 18px;
-  border:1px solid #cbd5e1;
-  border-radius:10px;
-  font-size:16px;
+
+.feature:last-child {
+  border-radius:
+    0 30px 30px 0;
 }
-.modal{
-  display:none;
-  position:fixed;
-  inset:0;
-  background:rgba(0,0,0,.45);
-  z-index:9999;
-  align-items:center;
-  justify-content:center;
-  padding:20px;
+
+.feature span {
+  display: block;
+
+  margin-bottom: 18px;
+
+  font-size: 55px;
 }
-.modalBox{
-  background:white;
-  width:100%;
-  max-width:420px;
-  border-radius:22px;
-  padding:28px;
-  box-shadow:0 20px 50px rgba(0,0,0,.25);
+
+.feature h3 {
+  margin:
+    0 0 10px;
+
+  font-size: 24px;
 }
-.modalBox h2{
-  margin-top:0;
-  color:#075bbb;
+
+.feature p {
+  margin: 0;
+
+  font-weight: 700;
+
+  line-height: 1.7;
 }
-footer{
-  text-align:center;
-  color:#64748b;
-  padding:30px;
+
+footer {
+  padding: 30px;
+
+  color: var(--subtext);
+
+  text-align: center;
+
+  background: var(--background);
 }
-@media(max-width:800px){
-  header{padding:0 18px}
-  nav{display:none}
-  .hero{grid-template-columns:1fr;padding:36px 24px}
-  .hero h1{font-size:48px}
-  .phone{width:200px;height:300px}
-  .features{grid-template-columns:1fr;margin:20px}
-  .app{grid-template-columns:1fr;margin:20px}
-  .sidebar{display:flex;overflow-x:auto;gap:6px}
-  .sidebar h2{display:none}
-  .sidebtn{min-width:120px;text-align:center}
-  .cards,.test-grid{grid-template-columns:1fr}
-  .page{padding:22px}
+
+
+/* ========================================
+   初期設定・決済・Google画面
+======================================== */
+
+.flow-screen {
+  min-height: 100vh;
+
+  padding:
+    35px 20px 80px;
+
+  background:
+    radial-gradient(
+      circle at top,
+      #dcecff 0,
+      #f4f7fb 45%
+    );
+}
+
+.flow-container {
+  width:
+    min(680px, 100%);
+
+  margin: auto;
+}
+
+.back-button {
+  border: none;
+
+  padding: 12px 0;
+
+  color: var(--blue);
+  background: transparent;
+
+  font-weight: 800;
+}
+
+.back-button:hover {
+  color: var(--blue-dark);
+}
+
+.step-label {
+  margin-top: 30px;
+
+  color: var(--blue);
+
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.flow-container > h1 {
+  margin:
+    0 0 12px;
+
+  font-size:
+    clamp(34px, 6vw, 52px);
+}
+
+.description {
+  margin-bottom: 28px;
+
+  color: var(--subtext);
+
+  line-height: 1.8;
+}
+
+
+/* ========================================
+   共通カード
+======================================== */
+
+.plan-card,
+.price-card,
+.payment-card,
+.notice-box,
+.google-account-card,
+.google-card {
+  margin-bottom: 24px;
+
+  padding: 26px;
+
+  background: var(--white);
+
+  border:
+    1px solid var(--border);
+
+  border-radius: 24px;
+
+  box-shadow:
+    0 10px 35px
+    rgba(16, 24, 40, 0.07);
+}
+
+
+/* ========================================
+   プラン表示
+======================================== */
+
+.plan-header {
+  display: flex;
+
+  align-items: flex-start;
+
+  justify-content: space-between;
+
+  gap: 15px;
+}
+
+.plan-header h2 {
+  margin: 0;
+}
+
+.plan-header strong {
+  color: var(--blue);
+
+  font-size: 22px;
+}
+
+.small-label {
+  margin:
+    0 0 5px;
+
+  color: var(--subtext);
+
+  font-size: 13px;
+  font-weight: 800;
+}
+
+
+/* ========================================
+   キーワード入力
+======================================== */
+
+.keyword-section {
+  margin:
+    30px 0;
+}
+
+.section-title-row {
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+}
+
+.section-title-row h2 {
+  margin-top: 0;
+}
+
+.section-title-row span {
+  padding:
+    7px 13px;
+
+  color: var(--blue);
+
+  background: var(--blue-light);
+
+  border-radius: 999px;
+
+  font-weight: 800;
+}
+
+.keyword-input-row {
+  display: grid;
+
+  grid-template-columns:
+    46px 1fr 48px;
+
+  gap: 10px;
+
+  margin-bottom: 12px;
+}
+
+.keyword-number {
+  display: flex;
+
+  align-items: center;
+  justify-content: center;
+
+  color: var(--blue);
+
+  background: var(--blue-light);
+
+  border-radius: 14px;
+
+  font-weight: 900;
+}
+
+.keyword-input-row input,
+.contact-form input,
+.contact-form textarea,
+.google-card input {
+  width: 100%;
+
+  border:
+    2px solid var(--border);
+
+  border-radius: 14px;
+
+  padding: 15px;
+
+  color: var(--text);
+
+  background: var(--white);
+}
+
+.keyword-input-row input:focus,
+.contact-form input:focus,
+.contact-form textarea:focus,
+.google-card input:focus {
+  border-color: var(--blue);
+
+  outline: none;
+
+  box-shadow:
+    0 0 0 4px
+    rgba(8, 98, 199, 0.1);
+}
+
+.remove-keyword {
+  border: none;
+
+  border-radius: 14px;
+
+  color: var(--red);
+
+  background: #fff0f0;
+
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.remove-keyword:hover {
+  background: #ffe0e0;
+}
+
+.remove-keyword:disabled {
+  cursor: not-allowed;
+
+  opacity: 0.3;
+}
+
+
+/* ========================================
+   料金表示
+======================================== */
+
+.price-row,
+.payment-detail {
+  display: flex;
+
+  justify-content: space-between;
+
+  gap: 15px;
+
+  padding:
+    11px 0;
+}
+
+.price-card hr {
+  border: none;
+
+  border-top:
+    1px solid var(--border);
+}
+
+.total-row,
+.total-payment {
+  color: var(--blue);
+
+  font-size: 21px;
+}
+
+.monthly-price {
+  margin-bottom: 0;
+
+  color: var(--subtext);
+
+  text-align: right;
+}
+
+.error-message {
+  min-height: 24px;
+
+  color: var(--red);
+
+  font-weight: 800;
+}
+
+
+/* ========================================
+   決済確認
+======================================== */
+
+.payment-card h2 {
+  margin-top: 0;
+}
+
+.payment-keywords {
+  display: flex;
+
+  flex-wrap: wrap;
+
+  gap: 8px;
+
+  margin:
+    16px 0 24px;
+}
+
+.keyword-chip {
+  padding:
+    8px 13px;
+
+  color: var(--blue);
+
+  background: var(--blue-light);
+
+  border-radius: 999px;
+
+  font-weight: 800;
+}
+
+.notice-box {
+  color: #7a4a00;
+
+  background: #fff7e7;
+
+  border-color: #ffd68b;
+}
+
+.notice-box p {
+  margin-bottom: 0;
+
+  line-height: 1.7;
+}
+
+
+/* ========================================
+   Googleアカウント選択
+======================================== */
+
+.google-account-card {
+  display: grid;
+
+  grid-template-columns:
+    54px 1fr auto;
+
+  align-items: center;
+
+  gap: 15px;
+}
+
+.account-avatar {
+  display: flex;
+
+  width: 54px;
+  height: 54px;
+
+  align-items: center;
+  justify-content: center;
+
+  color: #4285f4;
+
+  background: var(--white);
+
+  border:
+    2px solid var(--border);
+
+  border-radius: 50%;
+
+  font-size: 27px;
+  font-weight: 900;
+}
+
+.account-details {
+  display: grid;
+
+  gap: 5px;
+}
+
+.account-details span {
+  color: var(--subtext);
+
+  word-break: break-all;
+}
+
+.account-select-button {
+  border: none;
+
+  border-radius: 12px;
+
+  padding:
+    11px 16px;
+
+  color: var(--white);
+
+  background: var(--blue);
+
+  font-weight: 800;
+}
+
+.account-select-button:hover {
+  background: var(--blue-dark);
+}
+
+.google-card {
+  display: grid;
+
+  grid-template-columns:
+    72px 1fr;
+
+  align-items: start;
+
+  gap: 22px;
+}
+
+.google-logo {
+  display: flex;
+
+  width: 72px;
+  height: 72px;
+
+  align-items: center;
+  justify-content: center;
+
+  color: #4285f4;
+
+  background: var(--white);
+
+  border:
+    2px solid var(--border);
+
+  border-radius: 50%;
+
+  font-size: 38px;
+  font-weight: 900;
+}
+
+.google-card-content h2 {
+  margin-top: 0;
+}
+
+.google-card-content p {
+  color: var(--subtext);
+
+  line-height: 1.7;
+}
+
+.google-card-content label {
+  display: block;
+
+  margin:
+    18px 0 8px;
+
+  font-weight: 800;
+}
+
+.google-button {
+  width: 100%;
+
+  border:
+    2px solid var(--border);
+
+  border-radius: 15px;
+
+  padding: 15px;
+
+  color: var(--text);
+
+  background: var(--white);
+
+  font-weight: 800;
+}
+
+.google-button:hover {
+  border-color: var(--blue);
+
+  background: var(--blue-light);
+}
+
+
+/* ========================================
+   管理画面
+======================================== */
+
+.app-screen {
+  min-height: 100vh;
+
+  background: var(--background);
+}
+
+.app-header {
+  position: sticky;
+
+  top: 0;
+  z-index: 20;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  padding:
+    calc(
+      15px +
+      env(safe-area-inset-top)
+    )
+    20px
+    15px;
+
+  color: var(--white);
+
+  background:
+    linear-gradient(
+      135deg,
+      var(--blue),
+      var(--blue-dark)
+    );
+}
+
+.app-logo {
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.app-actions {
+  display: flex;
+
+  align-items: center;
+
+  gap: 10px;
+}
+
+.logout-button {
+  border:
+    1px solid
+    rgba(255, 255, 255, 0.5);
+
+  border-radius: 999px;
+
+  padding:
+    8px 13px;
+
+  color: var(--white);
+
+  background:
+    rgba(255, 255, 255, 0.14);
+
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.logout-button:hover {
+  background:
+    rgba(255, 255, 255, 0.28);
+}
+
+.app-status {
+  padding:
+    8px 13px;
+
+  background:
+    rgba(255, 255, 255, 0.18);
+
+  border-radius: 999px;
+
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.app-status.expired {
+  background:
+    rgba(225, 61, 61, 0.95);
+}
+
+.app-main {
+  width:
+    min(900px, 100%);
+
+  margin: auto;
+
+  padding:
+    30px
+    20px
+    calc(
+      105px +
+      env(safe-area-inset-bottom)
+    );
+}
+
+.app-page {
+  display: none;
+}
+
+.app-page.active {
+  display: block;
+}
+
+.app-page > h1 {
+  margin:
+    10px 0 30px;
+
+  font-size:
+    clamp(36px, 7vw, 55px);
+}
+
+.dashboard-grid {
+  display: grid;
+
+  gap: 20px;
+}
+
+
+/* ========================================
+   管理画面カード
+======================================== */
+
+.card {
+  padding: 26px;
+
+  background: var(--white);
+
+  border:
+    1px solid var(--border);
+
+  border-radius: 24px;
+
+  box-shadow:
+    0 10px 30px
+    rgba(16, 24, 40, 0.06);
+}
+
+.card h2 {
+  margin-top: 0;
+}
+
+.status-display {
+  margin:
+    22px 0;
+
+  color: var(--green);
+
+  font-size:
+    clamp(35px, 8vw, 60px);
+
+  font-weight: 900;
+}
+
+.status-display.expired {
+  color: var(--red);
+}
+
+
+/* ========================================
+   通知テスト
+======================================== */
+
+.test-grid {
+  display: grid;
+
+  grid-template-columns:
+    repeat(2, 1fr);
+
+  gap: 18px;
+
+  margin:
+    25px 0;
+}
+
+.test-card {
+  padding: 24px;
+
+  background: var(--white);
+
+  border:
+    1px solid var(--border);
+
+  border-radius: 22px;
+
+  box-shadow:
+    0 8px 25px
+    rgba(16, 24, 40, 0.06);
+}
+
+.test-card h2 {
+  margin-top: 0;
+}
+
+.test-button {
+  width: 100%;
+
+  border: none;
+
+  border-radius: 14px;
+
+  padding: 14px;
+
+  color: var(--white);
+
+  background: var(--blue);
+
+  font-weight: 800;
+}
+
+.test-button:hover {
+  background: var(--blue-dark);
+}
+
+.test-button:disabled {
+  cursor: not-allowed;
+
+  background: #98a2b3;
+
+  opacity: 0.75;
+}
+
+.usage-number {
+  color: var(--blue);
+
+  font-size: 44px;
+  font-weight: 900;
+}
+
+.usage-number span {
+  color: var(--subtext);
+
+  font-size: 20px;
+}
+
+
+/* ========================================
+   契約情報
+======================================== */
+
+.contract-row {
+  display: flex;
+
+  justify-content: space-between;
+
+  gap: 15px;
+
+  padding:
+    16px 0;
+
+  border-bottom:
+    1px solid var(--border);
+}
+
+.contract-row:last-of-type {
+  border-bottom: none;
+}
+
+.contract-row span {
+  color: var(--subtext);
+}
+
+.contract-row strong {
+  text-align: right;
+}
+
+.renewal-button {
+  margin-top: 22px;
+}
+
+
+/* ========================================
+   保存キーワード
+======================================== */
+
+.saved-keyword {
+  display: flex;
+
+  align-items: center;
+
+  gap: 14px;
+
+  margin-bottom: 10px;
+
+  padding: 15px;
+
+  background: var(--blue-light);
+
+  border-radius: 14px;
+
+  font-weight: 800;
+}
+
+.saved-keyword-number {
+  display: flex;
+
+  width: 32px;
+  height: 32px;
+
+  flex-shrink: 0;
+
+  align-items: center;
+  justify-content: center;
+
+  color: var(--white);
+
+  background: var(--blue);
+
+  border-radius: 50%;
+}
+
+
+/* ========================================
+   お問い合わせ
+======================================== */
+
+.contact-form {
+  display: grid;
+
+  gap: 9px;
+}
+
+.contact-form label {
+  margin-top: 12px;
+
+  font-weight: 800;
+}
+
+.contact-form textarea {
+  resize: vertical;
+}
+
+
+/* ========================================
+   下部の5タブ
+======================================== */
+
+.bottom-tabs {
+  position: fixed;
+
+  right: 0;
+  bottom: 0;
+  left: 0;
+
+  z-index: 50;
+
+  display: grid;
+
+  grid-template-columns:
+    repeat(
+      5,
+      minmax(0, 1fr)
+    );
+
+  width: 100%;
+
+  padding:
+    8px
+    5px
+    calc(
+      8px +
+      env(safe-area-inset-bottom)
+    );
+
+  overflow: hidden;
+
+  background: var(--white);
+
+  border-top:
+    1px solid var(--border);
+
+  box-shadow:
+    0 -8px 25px
+    rgba(16, 24, 40, 0.09);
+}
+
+.tab-button {
+  min-width: 0;
+
+  border: none;
+
+  padding:
+    7px 2px;
+
+  color: var(--subtext);
+
+  background: transparent;
+
+  text-align: center;
+}
+
+.tab-button span {
+  display: block;
+
+  font-size: 22px;
+}
+
+.tab-button small {
+  display: block;
+
+  margin-top: 3px;
+
+  overflow: hidden;
+
+  font-size: 10px;
+  font-weight: 800;
+
+  text-overflow: ellipsis;
+
+  white-space: nowrap;
+}
+
+.tab-button.active {
+  color: var(--blue);
+
+  background: var(--blue-light);
+
+  border-radius: 13px;
+}
+
+
+/* ========================================
+   タブレット・スマホ対応
+======================================== */
+
+@media (max-width: 800px) {
+  .hero {
+    display: block;
+
+    min-height: auto;
+
+    padding:
+      65px 6%;
+  }
+
+  .hero-text h1 {
+    font-size: 72px;
+  }
+
+  .hero-text h2 {
+    margin-top: 45px;
+
+    font-size: 38px;
+  }
+
+  .hero-buttons {
+    display: grid;
+  }
+
+  .notification-card {
+    width: 82%;
+
+    min-height: 480px;
+
+    margin:
+      90px auto 40px;
+  }
+
+  .features {
+    display: block;
+
+    padding:
+      30px 5% 80px;
+  }
+
+  .feature {
+    border-bottom:
+      2px solid #d5e5fa;
+  }
+
+  .feature:first-child {
+    border-radius:
+      30px 30px 0 0;
+  }
+
+  .feature:last-child {
+    border-radius:
+      0 0 30px 30px;
+  }
+
+  .test-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .google-card {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* ========================================
+   小さいスマホ対応
+======================================== */
+
+@media (max-width: 520px) {
+  .plan-header {
+    display: grid;
+  }
+
+  .google-account-card {
+    grid-template-columns:
+      48px 1fr;
+  }
+
+  .account-select-button {
+    grid-column:
+      1 / -1;
+
+    width: 100%;
+  }
+
+  .contract-row {
+    align-items: flex-start;
+  }
+}
+
+
+@media (max-width: 390px) {
+  .landing-logo {
+    font-size: 23px;
+  }
+
+  .hero-text h1 {
+    font-size: 60px;
+  }
+
+  .hero-text h2 {
+    font-size: 32px;
+  }
+
+  .notification-card {
+    width: 90%;
+
+    min-height: 410px;
+  }
+
+  .notification-card h2 {
+    font-size: 42px;
+  }
+
+  .tab-button small {
+    font-size: 9px;
+  }
+
+  .tab-button span {
+    font-size: 20px;
+  }
+
+  .app-main {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .app-actions {
+    gap: 5px;
+  }
+
+  .logout-button,
+  .app-status {
+    padding:
+      7px 9px;
+
+    font-size: 11px;
+  }
+
+  .keyword-input-row {
+    grid-template-columns:
+      40px 1fr 43px;
+  }
 }
