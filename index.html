@@ -1019,7 +1019,11 @@
         </h1>
 
 
-        <article class="card contact-form">
+        <form
+          id="contactForm"
+          class="card contact-form"
+          onsubmit="sendContact(event)"
+        >
 
           <label for="contactName">
             お名前
@@ -1028,16 +1032,23 @@
           <input
             id="contactName"
             type="text"
+            name="name"
+            autocomplete="name"
+            maxlength="80"
+            required
           >
 
 
           <label for="contactCompany">
-            会社名・農場名
+            会社名・農場名（任意）
           </label>
 
           <input
             id="contactCompany"
             type="text"
+            name="company"
+            autocomplete="organization"
+            maxlength="120"
           >
 
 
@@ -1048,6 +1059,10 @@
           <input
             id="contactEmail"
             type="email"
+            name="email"
+            autocomplete="email"
+            maxlength="254"
+            required
           >
 
 
@@ -1057,19 +1072,45 @@
 
           <textarea
             id="contactMessage"
+            name="message"
             rows="6"
+            maxlength="5000"
+            required
           ></textarea>
 
+          <div
+            class="contact-honeypot"
+            aria-hidden="true"
+          >
+            <label for="contactWebsite">
+              ウェブサイト
+            </label>
+
+            <input
+              id="contactWebsite"
+              type="text"
+              name="website"
+              tabindex="-1"
+              autocomplete="off"
+            >
+          </div>
+
+          <p
+            id="contactStatus"
+            class="contact-status"
+            role="status"
+            aria-live="polite"
+          ></p>
 
           <button
-            type="button"
+            id="contactSubmitButton"
+            type="submit"
             class="btn primary full-width"
-            onclick="sendContact()"
           >
             お問い合わせを送信
           </button>
 
-        </article>
+        </form>
 
       </section>
 

@@ -1139,6 +1139,46 @@ footer {
   resize: vertical;
 }
 
+.contact-form .btn {
+  margin-top: 12px;
+}
+
+.contact-honeypot {
+  position: absolute;
+
+  width: 1px;
+  height: 1px;
+
+  overflow: hidden;
+
+  clip-path: inset(50%);
+
+  white-space: nowrap;
+}
+
+.contact-status {
+  min-height: 1.5em;
+  margin: 12px 0 0;
+
+  color: var(--subtext);
+
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.contact-status.success {
+  color: #15803d;
+}
+
+.contact-status.error {
+  color: #b91c1c;
+}
+
+.contact-status.sending {
+  color: var(--blue);
+}
+
 
 /* ========================================
    下部の5タブ
