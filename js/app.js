@@ -591,7 +591,8 @@ ${formatYen(totalPrice)}
 
   return;
 }
-
+  paymentMode = "signup";
+  openPayment();
 }
 
 /* ========================================
@@ -1328,12 +1329,11 @@ function renderTestKeywordCards() {
 
   updateContractStatusUI();
 }
-
 async function testNotification(keyword, button) {
-  const testButtons =
-    document.querySelectorAll(
-      'button[onclick*="testNotification"]'
-    );
+const testButtons =
+  document.querySelectorAll(
+    ".test-button"
+  );
 
   try {
     if (isContractExpired()) {
