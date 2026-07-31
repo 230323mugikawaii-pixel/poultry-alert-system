@@ -136,6 +136,7 @@ let paidAnnualPrice = BASE_PRICE;
 /*
   signup：初回契約
   upgrade：キーワード追加による料金アップ
+  renewal：契約期間の1年延長
 */
 let paymentMode = "signup";
 
@@ -222,6 +223,17 @@ function backToSetup() {
   window.scrollTo({
     top: 0
   });
+}
+
+
+function backFromPayment() {
+  if (paymentMode === "renewal") {
+    showOnlyScreen("appScreen");
+    showAppPage("contractPage");
+    return;
+  }
+
+  backToSetup();
 }
 
 
@@ -600,6 +612,30 @@ ${formatYen(totalPrice)}
 ======================================== */
 
 function openPayment() {
+  const renewalMode =
+    paymentMode === "renewal";
+
+  setText(
+    "paymentStepLabel",
+    renewalMode
+      ? "契約更新"
+      : "STEP 2 / 2"
+  );
+
+  setText(
+    "paymentTitle",
+    renewalMode
+      ? "契約更新の決済内容を確認"
+      : "決済内容を確認"
+  );
+
+  setText(
+    "paymentCompleteButton",
+    renewalMode
+      ? "決済を完了する"
+      : "決済を完了して次へ"
+  );
+
   setText(
     "paymentKeywordCount",
     paymentMode === "upgrade"
@@ -655,6 +691,35 @@ function openPayment() {
 }
 
 function completeDemoPayment() {
+  if (paymentMode === "renewal") {
+    extendContractByOneYear();
+
+    paidAnnualPrice =
+      totalPrice;
+
+    saveData();
+
+    setText(
+      "renewalCompleteEndDate",
+      formatDate(contractEndDate)
+    );
+
+    setText(
+      "renewalCompleteAmount",
+      formatYen(totalPrice)
+    );
+
+    showOnlyScreen(
+      "renewalCompleteScreen"
+    );
+
+    window.scrollTo({
+      top: 0
+    });
+
+    return;
+  }
+
   if (paymentMode === "upgrade") {
     const additionalPrice =
       totalPrice - paidAnnualPrice;
@@ -1032,18 +1097,14 @@ function updateContractStatusUI() {
 
 
 function renewContract() {
-  const confirmed =
-    window.confirm(
-      `契約を1年間更新しますか？
+  paymentMode =
+    "renewal";
 
-更新料金：${formatYen(totalPrice)}
+  openPayment();
+}
 
-現在は試作版のため、実際の決済は行われません。`
-    );
 
-  if (!confirmed) {
-    return;
-  }
+function extendContractByOneYear() {
 
   if (isContractExpired()) {
     createContractDates();
@@ -1056,17 +1117,20 @@ function renewContract() {
         1
     );
   }
+}
 
-  saveData();
 
+function returnToContractPage() {
   renderTestKeywordCards();
 
   renderContractInformation();
 
-  window.alert(
-    `契約を更新しました。
+  showOnlyScreen(
+    "appScreen"
+  );
 
-新しい契約終了日：${formatDate(contractEndDate)}`
+  showAppPage(
+    "contractPage"
   );
 }
 
@@ -1589,6 +1653,7 @@ function showOnlyScreen(screenId) {
     "landingScreen",
     "setupScreen",
     "paymentScreen",
+    "renewalCompleteScreen",
     "googleScreen",
     "appScreen"
   ];

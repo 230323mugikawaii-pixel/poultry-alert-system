@@ -383,18 +383,21 @@
       <button
         type="button"
         class="back-button"
-        onclick="backToSetup()"
+        onclick="backFromPayment()"
       >
         ← 戻る
       </button>
 
 
-      <p class="step-label">
+      <p
+        id="paymentStepLabel"
+        class="step-label"
+      >
         STEP 2 / 2
       </p>
 
 
-      <h1>
+      <h1 id="paymentTitle">
         決済内容を確認
       </h1>
 
@@ -468,11 +471,101 @@
 
 
       <button
+        id="paymentCompleteButton"
         type="button"
         class="btn primary full-width"
         onclick="completeDemoPayment()"
       >
         決済を完了して次へ
+      </button>
+
+    </div>
+
+  </section>
+
+
+
+  <!-- ========================================
+       契約更新完了画面
+  ========================================= -->
+
+  <section
+    id="renewalCompleteScreen"
+    class="flow-screen hidden"
+  >
+
+    <div class="flow-container">
+
+      <p class="step-label">
+        契約更新完了
+      </p>
+
+
+      <h1>
+        決済が完了しました
+      </h1>
+
+
+      <p class="description">
+        契約期間を1年間延長しました。
+      </p>
+
+
+      <div class="payment-card">
+
+        <h2>
+          スタンダードプラン
+        </h2>
+
+
+        <div class="payment-detail">
+
+          <span>
+            新しい契約終了日
+          </span>
+
+          <strong id="renewalCompleteEndDate">
+            ―
+          </strong>
+
+        </div>
+
+
+        <div class="payment-detail total-payment">
+
+          <span>
+            お支払い金額
+          </span>
+
+          <strong id="renewalCompleteAmount">
+            6,000円
+          </strong>
+
+        </div>
+
+      </div>
+
+
+      <div class="notice-box">
+
+        <strong>
+          更新が完了しました
+        </strong>
+
+        <p>
+          通知機能を引き続きご利用いただけます。
+          現在は試作版のため、実際の料金は発生しません。
+        </p>
+
+      </div>
+
+
+      <button
+        type="button"
+        class="btn primary full-width"
+        onclick="returnToContractPage()"
+      >
+        契約情報へ戻る
       </button>
 
     </div>
@@ -1061,4 +1154,4 @@
 </script>
 
 </body>
-</html> 
+</html>
