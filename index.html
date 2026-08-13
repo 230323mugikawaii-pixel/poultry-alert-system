@@ -253,7 +253,8 @@
 
         <p>
           3キーワードまで基本料金に含まれます。<br>
-          4個目以降は、1個につき年額1,000円追加されます。
+          4個目以降は、1個につき年額100円追加されます。<br>
+          利用人数は3人まで基本料金に含まれ、4人目以降は1人につき年額100円追加されます。
         </p>
 
       </div>
@@ -279,6 +280,11 @@
         <div id="keywordInputs"></div>
 
 
+        <p class="input-help">
+          1つの入力欄には「停電」のように1単語だけ入力してください。
+        </p>
+
+
         <button
           type="button"
           class="btn outline full-width"
@@ -286,6 +292,32 @@
         >
           ＋ キーワードを追加
         </button>
+
+      </div>
+
+
+      <!-- 利用人数 -->
+
+      <div class="user-count-section">
+
+        <label for="userCount">
+          Call Nowを利用する人数
+        </label>
+
+        <input
+          id="userCount"
+          type="number"
+          min="1"
+          max="100"
+          step="1"
+          value="1"
+          inputmode="numeric"
+          oninput="changeUserCount(this.value)"
+        >
+
+        <p class="input-help">
+          3人まで基本料金に含まれます。4人目以降は1人につき年額100円です。
+        </p>
 
       </div>
 
@@ -302,6 +334,19 @@
 
           <strong>
             6,000円
+          </strong>
+
+        </div>
+
+
+        <div class="price-row">
+
+          <span>
+            追加利用者
+          </span>
+
+          <strong id="extraUserPrice">
+            0円
           </strong>
 
         </div>
@@ -426,6 +471,19 @@
           id="paymentKeywords"
           class="payment-keywords"
         ></div>
+
+
+        <div class="payment-detail">
+
+          <span>
+            利用人数
+          </span>
+
+          <strong id="paymentUserCount">
+            1人
+          </strong>
+
+        </div>
 
 
         <div class="payment-detail">
@@ -600,12 +658,12 @@
 
 
       <h1>
-        Googleアカウントを選択
+        Googleでログイン
       </h1>
 
 
       <p class="description">
-        Gmailの通知を確認するGoogleアカウントを選択します。
+        Gmailの通知を確認するGoogleアカウントでログインします。
       </p>
 
 
@@ -637,7 +695,7 @@
           class="account-select-button"
           onclick="useSavedGoogleAccount()"
         >
-          選択
+          Googleで再認証
         </button>
 
       </div>
@@ -655,27 +713,14 @@
         <div class="google-card-content">
 
           <h2>
-            別のGoogleアカウントを使用
+            Googleアカウントを選択
           </h2>
 
 
           <p>
-            現在は試作版のため、本物のGoogle認証画面ではありません。
-            入力したメールアドレスを選択済みアカウントとして保存します。
+            Googleの認証画面でアカウントを選択し、Gmailの閲覧権限を許可してください。
+            Call NowがGoogleのパスワードを保存することはありません。
           </p>
-
-
-          <label for="googleEmail">
-            Googleメールアドレス
-          </label>
-
-
-          <input
-            id="googleEmail"
-            type="email"
-            placeholder="example@gmail.com"
-            autocomplete="email"
-          >
 
 
           <p
@@ -688,9 +733,9 @@
           <button
             type="button"
             class="google-button"
-            onclick="completeGoogleLogin()"
+            onclick="startGoogleLogin()"
           >
-            このGoogleアカウントで続行
+            Googleでログイン
           </button>
 
         </div>
@@ -886,6 +931,19 @@
 
             <strong id="contractStartDate">
               ―
+            </strong>
+
+          </div>
+
+
+          <div class="contract-row">
+
+            <span>
+              利用人数
+            </span>
+
+            <strong id="contractUserCount">
+              1人
             </strong>
 
           </div>
@@ -1166,7 +1224,12 @@
 
   <!-- 動作用JavaScript -->
 
-<script src="js/app.js?v=3"></script>
+<script
+  src="https://accounts.google.com/gsi/client"
+  async
+  defer
+></script>
+<script src="js/app.js?v=5"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";

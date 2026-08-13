@@ -449,6 +449,64 @@ footer {
     30px 0;
 }
 
+.user-count-section {
+  margin:
+    30px 0;
+
+  padding: 22px;
+
+  background: var(--white);
+
+  border:
+    1px solid var(--border);
+
+  border-radius: 20px;
+}
+
+.user-count-section label {
+  display: block;
+
+  margin-bottom: 10px;
+
+  font-weight: 800;
+}
+
+.user-count-section input {
+  width: 100%;
+
+  border:
+    2px solid var(--border);
+
+  border-radius: 14px;
+
+  padding: 15px;
+
+  color: var(--text);
+
+  background: var(--white);
+}
+
+.user-count-section input:focus {
+  border-color: var(--blue);
+
+  outline: none;
+
+  box-shadow:
+    0 0 0 4px
+    rgba(8, 98, 199, 0.1);
+}
+
+.input-help {
+  margin:
+    10px 0 0;
+
+  color: var(--subtext);
+
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
 .section-title-row {
   display: flex;
 

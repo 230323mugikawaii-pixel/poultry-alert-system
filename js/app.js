@@ -6,7 +6,9 @@
 function saveData() {
   const data = {
     keywords: keywords,
+    userCount: userCount,
     totalPrice: totalPrice,
+    paidAnnualPrice: paidAnnualPrice,
     googleEmail: googleEmail,
 
     contractStartDate:
@@ -65,6 +67,34 @@ function loadSavedData() {
     }
 
     if (
+      Number.isInteger(data.userCount) &&
+      data.userCount >= 1 &&
+      data.userCount <= MAX_USER_COUNT
+    ) {
+      userCount = data.userCount;
+    }
+
+    if (
+      typeof data.paidAnnualPrice ===
+        "number" &&
+      data.paidAnnualPrice >= BASE_PRICE
+    ) {
+      paidAnnualPrice =
+        data.paidAnnualPrice;
+    } else if (
+      data.contractStartDate &&
+      typeof data.totalPrice ===
+        "number"
+    ) {
+      /*
+        旧形式の保存データでは、現在の年額を
+        支払い済み年額として引き継ぐ。
+      */
+      paidAnnualPrice =
+        data.totalPrice;
+    }
+
+    if (
       typeof data.googleEmail ===
       "string"
     ) {
@@ -113,11 +143,18 @@ function loadSavedData() {
 }
 const BASE_PRICE = 6000;
 const INCLUDED_KEYWORD_LIMIT = 3;
-const EXTRA_KEYWORD_PRICE = 1000;
+const EXTRA_KEYWORD_PRICE = 100;
+const INCLUDED_USER_LIMIT = 3;
+const EXTRA_USER_PRICE = 100;
+const MAX_USER_COUNT = 100;
 const STORAGE_KEY = "callNowContract";
 const SESSION_KEY = "callNowSession";
 const CONTACT_INFO_STORAGE_KEY =
   "callNowContactInfo";
+const GOOGLE_CLIENT_ID =
+  "187445333976-dpqiiqq2a46ljquoqfiqsh5vnq109hqu.apps.googleusercontent.com";
+const GOOGLE_GMAIL_SCOPE =
+  "https://www.googleapis.com/auth/gmail.readonly";
 const TEST_API_URL =
   "https://script.google.com/macros/s/AKfycbw6hllq-Teht0GXydKn0V9GijokIhaCCUfBAeUKdTgIY2Vi7yqznDG55Xa1BTQtfitMgw/exec";
 
@@ -125,10 +162,13 @@ const TEST_API_TOKEN =
   "callnow-test-2026-Abc123456789";
 
 let keywords = ["停電", "通電", "警報"];
+let userCount = 1;
 let totalPrice = BASE_PRICE;
 let contractStartDate = null;
 let contractEndDate = null;
 let googleEmail = "";
+let googleTokenClient = null;
+let googleAccessToken = "";
 let setupMode = "signup";
 /*
   現在の契約期間で、すでに支払った年額
@@ -151,6 +191,7 @@ window.addEventListener("DOMContentLoaded", () => {
   loadSavedData();
   initializeContactInfoPersistence();
   normalizeKeywords();
+  syncUserCountInput();
   updatePrice();
   renderKeywordInputs();
 
@@ -195,6 +236,7 @@ function startSignup() {
 
   showOnlyScreen("setupScreen");
   renderKeywordInputs();
+  syncUserCountInput();
   updateSetupScreenText();
 
   window.scrollTo({
@@ -221,6 +263,7 @@ function handleSetupBack() {
 function backToSetup() {
   showOnlyScreen("setupScreen");
   renderKeywordInputs();
+  syncUserCountInput();
   updateSetupScreenText();
 
   window.scrollTo({
@@ -271,7 +314,7 @@ function renderKeywordInputs() {
         value="${escapeHtml(keyword)}"
         placeholder="例：停電"
         maxlength="30"
-        oninput="changeKeyword(${index}, this.value)"
+        oninput="changeKeyword(${index}, this.value, this)"
       >
 
       <button
@@ -331,10 +374,29 @@ function removeKeyword(index) {
 }
 
 
-function changeKeyword(index, value) {
+function changeKeyword(
+  index,
+  value,
+  inputElement = null
+) {
   keywords[index] = value;
 
-  showSetupError("");
+  const trimmedValue =
+    String(value).trim();
+
+  const errorMessage =
+    trimmedValue &&
+    !isSingleWordKeyword(trimmedValue)
+      ? "キーワードは1つの欄に1単語だけ入力してください。"
+      : "";
+
+  if (inputElement) {
+    inputElement.setCustomValidity(
+      errorMessage
+    );
+  }
+
+  showSetupError(errorMessage);
 
   updatePrice();
 }
@@ -374,6 +436,20 @@ function validateKeywords() {
     return false;
   }
 
+  const invalidKeyword =
+    validKeywords.find(
+      (keyword) =>
+        !isSingleWordKeyword(keyword)
+    );
+
+  if (invalidKeyword) {
+    showSetupError(
+      `「${invalidKeyword}」は複数の単語を含んでいます。1つの欄には1単語だけ入力してください。`
+    );
+
+    return false;
+  }
+
   const normalized =
     validKeywords.map((keyword) =>
       keyword.toLowerCase()
@@ -393,6 +469,104 @@ function validateKeywords() {
   showSetupError("");
 
   return true;
+}
+
+
+function isSingleWordKeyword(value) {
+  const keyword =
+    String(value).trim();
+
+  if (!keyword) {
+    return false;
+  }
+
+  if (
+    /[\s、。・,，/／]+/u.test(
+      keyword
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    typeof Intl.Segmenter ===
+      "function"
+  ) {
+    const segmenter =
+      new Intl.Segmenter(
+        "ja",
+        {
+          granularity: "word"
+        }
+      );
+
+    const wordSegments =
+      Array.from(
+        segmenter.segment(keyword)
+      ).filter(
+        (segment) =>
+          segment.isWordLike
+      );
+
+    return wordSegments.length === 1;
+  }
+
+  return true;
+}
+
+
+/* ========================================
+   利用人数
+======================================== */
+
+function changeUserCount(value) {
+  userCount = Number(value);
+
+  const errorMessage =
+    validateUserCount(false)
+      ? ""
+      : `利用人数は1人から${MAX_USER_COUNT}人までの整数で入力してください。`;
+
+  showSetupError(errorMessage);
+  updatePrice();
+}
+
+
+function validateUserCount(
+  showError = true
+) {
+  const valid =
+    Number.isInteger(userCount) &&
+    userCount >= 1 &&
+    userCount <= MAX_USER_COUNT;
+
+  if (!valid && showError) {
+    showSetupError(
+      `利用人数は1人から${MAX_USER_COUNT}人までの整数で入力してください。`
+    );
+  }
+
+  return valid;
+}
+
+
+function getPriceUserCount() {
+  return validateUserCount(false)
+    ? userCount
+    : 1;
+}
+
+
+function syncUserCountInput() {
+  const input =
+    document.getElementById(
+      "userCount"
+    );
+
+  if (input) {
+    input.value =
+      String(getPriceUserCount());
+  }
 }
 
 
@@ -423,9 +597,21 @@ function updatePrice() {
     extraKeywordCount *
     EXTRA_KEYWORD_PRICE;
 
+  const extraUserCount =
+    Math.max(
+      0,
+      getPriceUserCount() -
+        INCLUDED_USER_LIMIT
+    );
+
+  const extraUserPrice =
+    extraUserCount *
+    EXTRA_USER_PRICE;
+
   totalPrice =
     BASE_PRICE +
-    extraPrice;
+    extraPrice +
+    extraUserPrice;
 
   setText(
     "keywordCount",
@@ -435,6 +621,11 @@ function updatePrice() {
   setText(
     "extraPrice",
     formatYen(extraPrice)
+  );
+
+  setText(
+    "extraUserPrice",
+    formatYen(extraUserPrice)
   );
 
   setText(
@@ -541,6 +732,10 @@ function continueFromSetup() {
     return;
   }
 
+  if (!validateUserCount()) {
+    return;
+  }
+
   keywords =
     getValidKeywords();
 
@@ -644,6 +839,11 @@ function openPayment() {
     paymentMode === "upgrade"
       ? `${keywords.length}個（変更後）`
       : `${keywords.length}個`
+  );
+
+  setText(
+    "paymentUserCount",
+    `${userCount}人`
   );
 
   const paymentAmount =
@@ -822,7 +1022,7 @@ function useSavedGoogleAccount() {
     return;
   }
 
-  finishLogin();
+  startGoogleLogin();
 }
 
 
@@ -841,32 +1041,155 @@ function backFromGoogle() {
 }
 
 
-function completeGoogleLogin() {
-  const emailInput =
-    document.getElementById(
-      "googleEmail"
-    );
+function initializeGoogleTokenClient() {
+  const oauth2 =
+    window.google &&
+    window.google.accounts &&
+    window.google.accounts.oauth2;
 
-  const enteredEmail =
-    emailInput
-      ? emailInput.value.trim()
-      : "";
+  if (!oauth2) {
+    return false;
+  }
 
-  if (!isValidEmail(enteredEmail)) {
+  if (!googleTokenClient) {
+    googleTokenClient =
+      oauth2.initTokenClient({
+        client_id:
+          GOOGLE_CLIENT_ID,
+        scope:
+          GOOGLE_GMAIL_SCOPE,
+        callback:
+          handleGoogleTokenResponse,
+        error_callback:
+          handleGoogleLoginError
+      });
+  }
+
+  return true;
+}
+
+
+function startGoogleLogin() {
+  setText(
+    "googleError",
+    ""
+  );
+
+  if (!initializeGoogleTokenClient()) {
     setText(
       "googleError",
-      "正しいメールアドレスを入力してください。"
+      "Googleログインの準備中です。数秒待って、もう一度押してください。"
     );
 
     return;
   }
 
-  googleEmail =
-    enteredEmail;
+  googleTokenClient.requestAccessToken({
+    prompt: "select_account"
+  });
+}
 
-  saveData();
 
-  finishLogin();
+async function handleGoogleTokenResponse(
+  response
+) {
+  try {
+    if (
+      !response ||
+      response.error ||
+      !response.access_token
+    ) {
+      throw new Error(
+        response && response.error
+          ? response.error
+          : "access_token_missing"
+      );
+    }
+
+    const oauth2 =
+      window.google.accounts.oauth2;
+
+    if (
+      !oauth2.hasGrantedAllScopes(
+        response,
+        GOOGLE_GMAIL_SCOPE
+      )
+    ) {
+      setText(
+        "googleError",
+        "Gmailの閲覧権限が必要です。もう一度ログインして許可してください。"
+      );
+
+      return;
+    }
+
+    googleAccessToken =
+      response.access_token;
+
+    const profileResponse =
+      await fetch(
+        "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+        {
+          headers: {
+            Authorization:
+              `Bearer ${googleAccessToken}`
+          }
+        }
+      );
+
+    if (!profileResponse.ok) {
+      throw new Error(
+        `gmail_profile_${profileResponse.status}`
+      );
+    }
+
+    const profile =
+      await profileResponse.json();
+
+    const selectedEmail =
+      String(
+        profile.emailAddress || ""
+      ).trim();
+
+    if (!isValidEmail(selectedEmail)) {
+      throw new Error(
+        "gmail_email_missing"
+      );
+    }
+
+    googleEmail =
+      selectedEmail;
+
+    saveData();
+    finishLogin();
+  } catch (error) {
+    googleAccessToken = "";
+
+    console.error(
+      "Googleログインに失敗しました。",
+      error
+    );
+
+    setText(
+      "googleError",
+      "Googleログインを完了できませんでした。もう一度お試しください。"
+    );
+  }
+}
+
+
+function handleGoogleLoginError(error) {
+  googleAccessToken = "";
+
+  console.error(
+    "Googleログイン画面を開けませんでした。",
+    error
+  );
+
+  setText(
+    "googleError",
+    "Googleログイン画面を開けませんでした。もう一度お試しください。"
+  );
 }
 
 
@@ -955,6 +1278,11 @@ function renderContractInformation() {
   setText(
     "contractKeywordCount",
     `${keywords.length}個`
+  );
+
+  setText(
+    "contractUserCount",
+    `${userCount}人`
   );
 
   setText(
@@ -1273,6 +1601,9 @@ function logout() {
   sessionStorage.removeItem(
     SESSION_KEY
   );
+
+  googleAccessToken = "";
+  googleTokenClient = null;
 
   setupMode =
     "login";
