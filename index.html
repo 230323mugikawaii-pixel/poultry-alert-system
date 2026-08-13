@@ -254,7 +254,7 @@
         <p>
           3キーワードまで基本料金に含まれます。<br>
           4個目以降は、1個につき年額100円追加されます。<br>
-          利用人数は3人まで基本料金に含まれ、4人目以降は1人につき年額100円追加されます。
+          Googleアカウントは1件まで基本料金に含まれ、2件目以降は1件につき年額100円追加されます。
         </p>
 
       </div>
@@ -296,27 +296,28 @@
       </div>
 
 
-      <!-- 利用人数 -->
+      <!-- 連携Googleアカウント数 -->
 
-      <div class="user-count-section">
+      <div class="account-count-section">
 
-        <label for="userCount">
-          Call Nowを利用する人数
+        <label for="accountCount">
+          連携するGoogleアカウント数
         </label>
 
         <input
-          id="userCount"
+          id="accountCount"
           type="number"
           min="1"
           max="100"
           step="1"
           value="1"
           inputmode="numeric"
-          oninput="changeUserCount(this.value)"
+          oninput="changeAccountCount(this.value)"
         >
 
         <p class="input-help">
-          3人まで基本料金に含まれます。4人目以降は1人につき年額100円です。
+          1件まで基本料金に含まれます。2件目以降は1件につき年額100円です。
+          例：自分と家族のGmailを連携する場合は「2」と入力します。
         </p>
 
       </div>
@@ -342,10 +343,10 @@
         <div class="price-row">
 
           <span>
-            追加利用者
+            追加Googleアカウント
           </span>
 
-          <strong id="extraUserPrice">
+          <strong id="extraAccountPrice">
             0円
           </strong>
 
@@ -476,11 +477,11 @@
         <div class="payment-detail">
 
           <span>
-            利用人数
+            連携Googleアカウント数
           </span>
 
-          <strong id="paymentUserCount">
-            1人
+          <strong id="paymentAccountCount">
+            1件
           </strong>
 
         </div>
@@ -644,6 +645,7 @@
     <div class="flow-container">
 
       <button
+        id="googleBackButton"
         type="button"
         class="back-button"
         onclick="backFromGoogle()"
@@ -657,47 +659,35 @@
       </p>
 
 
-      <h1>
-        Googleでログイン
+      <h1 id="googleScreenTitle">
+        Googleアカウントを連携
       </h1>
 
 
-      <p class="description">
-        Gmailの通知を確認するGoogleアカウントでログインします。
+      <p
+        id="googleScreenDescription"
+        class="description"
+      >
+        通知を確認するGmailを、契約した件数分だけ1件ずつ連携します。
       </p>
 
 
-      <!-- 前回利用したGoogleアカウント -->
+      <div class="notice-box">
+        <strong>複数アカウント連携は試作中です</strong>
+        <p>
+          この画面では、複数のGoogleアカウントの認証と登録を確認できます。
+          複数Gmailの常時監視は、監視サーバー側の対応後に利用できるようになります。
+        </p>
+      </div>
 
-      <div
-        id="savedGoogleAccountCard"
-        class="google-account-card hidden"
-      >
 
-        <div class="account-avatar">
-          G
+      <div class="google-account-card linked-accounts-card">
+        <div class="linked-accounts-heading">
+          <strong>連携するアカウント</strong>
+          <span id="linkedGoogleAccountCount">0 / 1件を連携済み</span>
         </div>
 
-
-        <div class="account-details">
-
-          <strong>
-            前回使用したアカウント
-          </strong>
-
-          <span id="savedGoogleEmail"></span>
-
-        </div>
-
-
-        <button
-          type="button"
-          class="account-select-button"
-          onclick="useSavedGoogleAccount()"
-        >
-          Googleで再認証
-        </button>
-
+        <div id="linkedGoogleAccounts"></div>
       </div>
 
 
@@ -712,13 +702,13 @@
 
         <div class="google-card-content">
 
-          <h2>
-            Googleアカウントを選択
+          <h2 id="googleCardTitle">
+            Googleアカウントを追加
           </h2>
 
 
           <p>
-            Googleの認証画面でアカウントを選択し、Gmailの閲覧権限を許可してください。
+            Googleの認証画面で、まだ連携していないアカウントを選択し、Gmailの閲覧権限を許可してください。
             Call NowがGoogleのパスワードを保存することはありません。
           </p>
 
@@ -731,16 +721,27 @@
 
 
           <button
+            id="googleAuthButton"
             type="button"
             class="google-button"
             onclick="startGoogleLogin()"
           >
-            Googleでログイン
+            Googleアカウントを追加
           </button>
 
         </div>
 
       </div>
+
+      <button
+        id="finishGoogleLinkButton"
+        type="button"
+        class="btn primary full-width"
+        onclick="finishGoogleAccountLinking()"
+        disabled
+      >
+        連携を完了してホームへ
+      </button>
 
     </div>
 
@@ -827,9 +828,18 @@
             </h2>
 
 
-            <p id="connectedGoogleAccount">
+            <div id="connectedGoogleAccounts">
               未選択
-            </p>
+            </div>
+
+
+            <button
+              type="button"
+              class="btn outline full-width account-manage-button"
+              onclick="openGoogleAccountManager()"
+            >
+              Googleアカウントを管理
+            </button>
 
           </article>
 
@@ -939,11 +949,24 @@
           <div class="contract-row">
 
             <span>
-              利用人数
+              連携Googleアカウント数
             </span>
 
-            <strong id="contractUserCount">
-              1人
+            <strong id="contractAccountCount">
+              1件
+            </strong>
+
+          </div>
+
+
+          <div class="contract-row">
+
+            <span>
+              現在の連携済みアカウント
+            </span>
+
+            <strong id="contractLinkedAccountCount">
+              0件
             </strong>
 
           </div>
@@ -1229,13 +1252,14 @@
   async
   defer
 ></script>
-<script src="js/app.js?v=5"></script>
+<script src="js/app.js?v=6"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";
 
     showOnlyScreen("setupScreen");
     renderKeywordInputs();
+    syncAccountCountInput();
     updateSetupScreenText();
 
     window.scrollTo({

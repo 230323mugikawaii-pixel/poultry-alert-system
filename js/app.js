@@ -6,10 +6,17 @@
 function saveData() {
   const data = {
     keywords: keywords,
-    userCount: userCount,
+    accountCount: accountCount,
     totalPrice: totalPrice,
     paidAnnualPrice: paidAnnualPrice,
-    googleEmail: googleEmail,
+    googleAccounts: googleAccounts,
+
+    /*
+      旧版との互換性を保つため、先頭のアカウントも
+      従来の項目名で保存する。
+    */
+    googleEmail:
+      googleAccounts[0] || "",
 
     contractStartDate:
       contractStartDate
@@ -67,11 +74,11 @@ function loadSavedData() {
     }
 
     if (
-      Number.isInteger(data.userCount) &&
-      data.userCount >= 1 &&
-      data.userCount <= MAX_USER_COUNT
+      Number.isInteger(data.accountCount) &&
+      data.accountCount >= 1 &&
+      data.accountCount <= MAX_ACCOUNT_COUNT
     ) {
-      userCount = data.userCount;
+      accountCount = data.accountCount;
     }
 
     if (
@@ -94,13 +101,30 @@ function loadSavedData() {
         data.totalPrice;
     }
 
-    if (
+    if (Array.isArray(data.googleAccounts)) {
+      googleAccounts =
+        normalizeGoogleAccounts(
+          data.googleAccounts
+        );
+    } else if (
       typeof data.googleEmail ===
-      "string"
+        "string" &&
+      isValidEmail(data.googleEmail)
     ) {
-      googleEmail =
-        data.googleEmail;
+      /*
+        旧版の単一アカウントを、複数アカウント形式へ
+        自動的に引き継ぐ。
+      */
+      googleAccounts = [
+        data.googleEmail.trim()
+      ];
     }
+
+    accountCount = Math.max(
+      accountCount,
+      googleAccounts.length,
+      1
+    );
 
     if (data.contractStartDate) {
       const startDate =
@@ -144,9 +168,9 @@ function loadSavedData() {
 const BASE_PRICE = 6000;
 const INCLUDED_KEYWORD_LIMIT = 3;
 const EXTRA_KEYWORD_PRICE = 100;
-const INCLUDED_USER_LIMIT = 3;
-const EXTRA_USER_PRICE = 100;
-const MAX_USER_COUNT = 100;
+const INCLUDED_ACCOUNT_LIMIT = 1;
+const EXTRA_ACCOUNT_PRICE = 100;
+const MAX_ACCOUNT_COUNT = 100;
 const STORAGE_KEY = "callNowContract";
 const SESSION_KEY = "callNowSession";
 const CONTACT_INFO_STORAGE_KEY =
@@ -162,13 +186,16 @@ const TEST_API_TOKEN =
   "callnow-test-2026-Abc123456789";
 
 let keywords = ["停電", "通電", "警報"];
-let userCount = 1;
+let accountCount = 1;
 let totalPrice = BASE_PRICE;
 let contractStartDate = null;
 let contractEndDate = null;
-let googleEmail = "";
+let googleAccounts = [];
 let googleTokenClient = null;
-let googleAccessToken = "";
+let googleAccessTokens = {};
+let googleScreenMode = "link";
+let googleAuthMode = "add";
+let googleLoginVerified = false;
 let setupMode = "signup";
 /*
   現在の契約期間で、すでに支払った年額
@@ -191,7 +218,7 @@ window.addEventListener("DOMContentLoaded", () => {
   loadSavedData();
   initializeContactInfoPersistence();
   normalizeKeywords();
-  syncUserCountInput();
+  syncAccountCountInput();
   updatePrice();
   renderKeywordInputs();
 
@@ -201,8 +228,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const canOpenApp =
     sessionIsActive &&
     contractStartDate &&
-    contractEndDate &&
-    googleEmail;
+    contractEndDate;
 
   if (canOpenApp) {
     openApp();
@@ -236,7 +262,7 @@ function startSignup() {
 
   showOnlyScreen("setupScreen");
   renderKeywordInputs();
-  syncUserCountInput();
+  syncAccountCountInput();
   updateSetupScreenText();
 
   window.scrollTo({
@@ -263,7 +289,7 @@ function handleSetupBack() {
 function backToSetup() {
   showOnlyScreen("setupScreen");
   renderKeywordInputs();
-  syncUserCountInput();
+  syncAccountCountInput();
   updateSetupScreenText();
 
   window.scrollTo({
@@ -516,33 +542,40 @@ function isSingleWordKeyword(value) {
 
 
 /* ========================================
-   利用人数
+   連携Googleアカウント数
 ======================================== */
 
-function changeUserCount(value) {
-  userCount = Number(value);
+function changeAccountCount(value) {
+  accountCount = Number(value);
 
-  const errorMessage =
-    validateUserCount(false)
-      ? ""
-      : `利用人数は1人から${MAX_USER_COUNT}人までの整数で入力してください。`;
+  let errorMessage = "";
+
+  if (!validateAccountCount(false)) {
+    errorMessage =
+      accountCount < googleAccounts.length
+        ? `現在${googleAccounts.length}件のGoogleアカウントが連携されています。先に不要なアカウントを解除してください。`
+        : `連携するGoogleアカウント数は1件から${MAX_ACCOUNT_COUNT}件までの整数で入力してください。`;
+  }
 
   showSetupError(errorMessage);
   updatePrice();
 }
 
 
-function validateUserCount(
+function validateAccountCount(
   showError = true
 ) {
   const valid =
-    Number.isInteger(userCount) &&
-    userCount >= 1 &&
-    userCount <= MAX_USER_COUNT;
+    Number.isInteger(accountCount) &&
+    accountCount >= 1 &&
+    accountCount <= MAX_ACCOUNT_COUNT &&
+    accountCount >= googleAccounts.length;
 
   if (!valid && showError) {
     showSetupError(
-      `利用人数は1人から${MAX_USER_COUNT}人までの整数で入力してください。`
+      accountCount < googleAccounts.length
+        ? `現在${googleAccounts.length}件のGoogleアカウントが連携されています。先に不要なアカウントを解除してください。`
+        : `連携するGoogleアカウント数は1件から${MAX_ACCOUNT_COUNT}件までの整数で入力してください。`
     );
   }
 
@@ -550,22 +583,25 @@ function validateUserCount(
 }
 
 
-function getPriceUserCount() {
-  return validateUserCount(false)
-    ? userCount
-    : 1;
+function getPriceAccountCount() {
+  return validateAccountCount(false)
+    ? accountCount
+    : Math.max(
+        googleAccounts.length,
+        1
+      );
 }
 
 
-function syncUserCountInput() {
+function syncAccountCountInput() {
   const input =
     document.getElementById(
-      "userCount"
+      "accountCount"
     );
 
   if (input) {
     input.value =
-      String(getPriceUserCount());
+      String(getPriceAccountCount());
   }
 }
 
@@ -574,6 +610,45 @@ function showSetupError(message) {
   setText(
     "setupError",
     message
+  );
+}
+
+
+function normalizeGoogleAccounts(accounts) {
+  const uniqueAccounts = [];
+  const seenAccounts = new Set();
+
+  accounts.forEach((account) => {
+    const email =
+      String(account || "")
+        .trim();
+
+    const normalizedEmail =
+      email.toLowerCase();
+
+    if (
+      isValidEmail(email) &&
+      !seenAccounts.has(normalizedEmail)
+    ) {
+      seenAccounts.add(normalizedEmail);
+      uniqueAccounts.push(email);
+    }
+  });
+
+  return uniqueAccounts;
+}
+
+
+function findGoogleAccountIndex(email) {
+  const normalizedEmail =
+    String(email || "")
+      .trim()
+      .toLowerCase();
+
+  return googleAccounts.findIndex(
+    (account) =>
+      account.toLowerCase() ===
+        normalizedEmail
   );
 }
 
@@ -597,21 +672,21 @@ function updatePrice() {
     extraKeywordCount *
     EXTRA_KEYWORD_PRICE;
 
-  const extraUserCount =
+  const extraAccountCount =
     Math.max(
       0,
-      getPriceUserCount() -
-        INCLUDED_USER_LIMIT
+      getPriceAccountCount() -
+        INCLUDED_ACCOUNT_LIMIT
     );
 
-  const extraUserPrice =
-    extraUserCount *
-    EXTRA_USER_PRICE;
+  const extraAccountPrice =
+    extraAccountCount *
+    EXTRA_ACCOUNT_PRICE;
 
   totalPrice =
     BASE_PRICE +
     extraPrice +
-    extraUserPrice;
+    extraAccountPrice;
 
   setText(
     "keywordCount",
@@ -624,8 +699,8 @@ function updatePrice() {
   );
 
   setText(
-    "extraUserPrice",
-    formatYen(extraUserPrice)
+    "extraAccountPrice",
+    formatYen(extraAccountPrice)
   );
 
   setText(
@@ -693,12 +768,12 @@ function updateSetupScreenText() {
 
     setText(
       "setupTitle",
-      "通知キーワードを編集"
+      "通知・アカウント設定を編集"
     );
 
     setText(
       "setupDescription",
-      "登録キーワードを変更できます。変更内容を保存すると管理画面へ戻ります。"
+      "登録キーワードと、連携するGoogleアカウント数を変更できます。"
     );
 
     continueButton.textContent =
@@ -714,7 +789,7 @@ function updateSetupScreenText() {
 
   setText(
     "setupTitle",
-    "通知キーワードを設定"
+    "通知キーワードと連携数を設定"
   );
 
   setText(
@@ -732,7 +807,7 @@ function continueFromSetup() {
     return;
   }
 
-  if (!validateUserCount()) {
+  if (!validateAccountCount()) {
     return;
   }
 
@@ -756,7 +831,7 @@ function continueFromSetup() {
 
   // 料金が変わっていない場合
   saveData();
-  openGoogleScreen();
+  openGoogleScreen("login");
 
   return;
 }
@@ -781,6 +856,15 @@ if (setupMode === "edit") {
     同額・値下げの場合は追加決済なし
   */
   saveData();
+
+  if (
+    googleAccounts.length <
+      accountCount
+  ) {
+    openGoogleScreen("link");
+    return;
+  }
+
   openApp();
 
   if (totalPrice < paidAnnualPrice) {
@@ -842,8 +926,8 @@ function openPayment() {
   );
 
   setText(
-    "paymentUserCount",
-    `${userCount}人`
+    "paymentAccountCount",
+    `${accountCount}件`
   );
 
   const paymentAmount =
@@ -931,7 +1015,15 @@ function completeDemoPayment() {
       totalPrice;
 
     saveData();
-    openApp();
+
+    if (
+      googleAccounts.length <
+        accountCount
+    ) {
+      openGoogleScreen("link");
+    } else {
+      openApp();
+    }
 
     window.alert(
       `契約内容を変更しました。
@@ -960,7 +1052,7 @@ ${formatYen(totalPrice)}
     totalPrice;
 
   saveData();
-  openGoogleScreen();
+  openGoogleScreen("link");
 }
 
 
@@ -968,7 +1060,59 @@ ${formatYen(totalPrice)}
    Googleアカウント選択
 ======================================== */
 
-function openGoogleScreen() {
+function openGoogleScreen(
+  mode = "link"
+) {
+  googleScreenMode = mode;
+
+  if (mode === "login") {
+    googleLoginVerified = false;
+  }
+
+  setText(
+    "googleBackButton",
+    mode === "manage"
+      ? "← ホームへ戻る"
+      : "← キーワード設定へ戻る"
+  );
+
+  setText(
+    "googleScreenTitle",
+    mode === "login"
+      ? "Googleでログイン"
+      : "Googleアカウントを連携"
+  );
+
+  setText(
+    "googleScreenDescription",
+    mode === "login"
+      ? "連携済みのGoogleアカウントを選んで、本人確認をします。"
+      : "通知を確認するGmailを、契約した件数分だけ1件ずつ連携します。"
+  );
+
+  setText(
+    "googleAuthButton",
+    mode === "login"
+      ? "Googleでログイン"
+      : "Googleアカウントを追加"
+  );
+
+  setText(
+    "googleCardTitle",
+    mode === "login"
+      ? "連携済みアカウントで本人確認"
+      : "Googleアカウントを追加"
+  );
+
+  setText(
+    "finishGoogleLinkButton",
+    mode === "manage"
+      ? "管理を完了してホームへ"
+      : mode === "login"
+        ? "ログインしてホームへ"
+        : "連携を完了してホームへ"
+  );
+
   showOnlyScreen(
     "googleScreen"
   );
@@ -980,15 +1124,6 @@ function openGoogleScreen() {
     ""
   );
 
-  const emailInput =
-    document.getElementById(
-      "googleEmail"
-    );
-
-  if (emailInput) {
-    emailInput.value = "";
-  }
-
   window.scrollTo({
     top: 0
   });
@@ -996,37 +1131,148 @@ function openGoogleScreen() {
 
 
 function renderGoogleAccountOptions() {
-  const savedAccountCard =
+  const accountList =
     document.getElementById(
-      "savedGoogleAccountCard"
+      "linkedGoogleAccounts"
     );
 
-  if (!savedAccountCard) {
+  if (!accountList) {
     return;
   }
 
-  savedAccountCard.classList.toggle(
-    "hidden",
-    googleEmail.length === 0
-  );
+  accountList.innerHTML = "";
+
+  if (googleAccounts.length === 0) {
+    const emptyMessage =
+      document.createElement("p");
+
+    emptyMessage.className =
+      "google-account-empty";
+
+    emptyMessage.textContent =
+      "連携済みのGoogleアカウントはありません。";
+
+    accountList.appendChild(
+      emptyMessage
+    );
+  } else {
+    googleAccounts.forEach(
+      (email, index) => {
+        const accountItem =
+          document.createElement("div");
+
+        accountItem.className =
+          "linked-google-account";
+
+        accountItem.innerHTML = `
+          <span class="account-avatar small-avatar">G</span>
+          <span class="linked-google-email">${escapeHtml(email)}</span>
+          <button
+            type="button"
+            class="account-remove-button"
+            onclick="removeGoogleAccount(${index})"
+          >
+            解除
+          </button>
+        `;
+
+        accountList.appendChild(
+          accountItem
+        );
+      }
+    );
+  }
 
   setText(
-    "savedGoogleEmail",
-    googleEmail
+    "linkedGoogleAccountCount",
+    `${googleAccounts.length} / ${accountCount}件を連携済み`
   );
+
+  const finishButton =
+    document.getElementById(
+      "finishGoogleLinkButton"
+    );
+
+  if (finishButton) {
+    finishButton.disabled =
+      googleAccounts.length !==
+        accountCount ||
+      (
+        googleScreenMode === "login" &&
+        !googleLoginVerified
+      );
+  }
 }
 
 
-function useSavedGoogleAccount() {
-  if (!googleEmail) {
+function removeGoogleAccount(index) {
+  if (
+    !Number.isInteger(index) ||
+    index < 0 ||
+    index >= googleAccounts.length
+  ) {
     return;
   }
 
-  startGoogleLogin();
+  const email =
+    googleAccounts[index];
+
+  const confirmed =
+    window.confirm(
+      `${email} の連携を解除しますか？`
+    );
+
+  if (!confirmed) {
+    return;
+  }
+
+  delete googleAccessTokens[
+    email.toLowerCase()
+  ];
+
+  googleAccounts.splice(index, 1);
+
+  saveData();
+  renderGoogleAccountOptions();
+  renderConnectedGoogleAccounts();
+}
+
+
+function finishGoogleAccountLinking() {
+  if (
+    googleAccounts.length !==
+      accountCount
+  ) {
+    setText(
+      "googleError",
+      `あと${accountCount - googleAccounts.length}件のGoogleアカウントを連携してください。`
+    );
+
+    return;
+  }
+
+  if (
+    googleScreenMode === "login" &&
+    !googleLoginVerified
+  ) {
+    setText(
+      "googleError",
+      "連携済みのGoogleアカウントでログインしてください。"
+    );
+
+    return;
+  }
+
+  finishLogin();
 }
 
 
 function backFromGoogle() {
+  if (googleScreenMode === "manage") {
+    openApp();
+    return;
+  }
+
   showOnlyScreen(
     "setupScreen"
   );
@@ -1069,7 +1315,17 @@ function initializeGoogleTokenClient() {
 }
 
 
-function startGoogleLogin() {
+function startGoogleLogin(
+  mode = null
+) {
+  googleAuthMode =
+    mode ||
+    (
+      googleScreenMode === "login"
+        ? "login"
+        : "add"
+    );
+
   setText(
     "googleError",
     ""
@@ -1123,7 +1379,7 @@ async function handleGoogleTokenResponse(
       return;
     }
 
-    googleAccessToken =
+    const accessToken =
       response.access_token;
 
     const profileResponse =
@@ -1132,7 +1388,7 @@ async function handleGoogleTokenResponse(
         {
           headers: {
             Authorization:
-              `Bearer ${googleAccessToken}`
+              `Bearer ${accessToken}`
           }
         }
       );
@@ -1157,14 +1413,85 @@ async function handleGoogleTokenResponse(
       );
     }
 
-    googleEmail =
-      selectedEmail;
+    const normalizedEmail =
+      selectedEmail.toLowerCase();
+
+    const existingIndex =
+      findGoogleAccountIndex(
+        selectedEmail
+      );
+
+    if (
+      googleAuthMode === "login" &&
+      existingIndex === -1
+    ) {
+      setText(
+        "googleError",
+        `${selectedEmail} はCall Nowに連携されていません。連携済みのGoogleアカウントを選択してください。`
+      );
+
+      return;
+    }
+
+    if (
+      existingIndex !== -1 &&
+      googleAuthMode === "add"
+    ) {
+      googleAccessTokens[
+        normalizedEmail
+      ] = accessToken;
+
+      setText(
+        "googleError",
+        `${selectedEmail} はすでに連携されています。別のGoogleアカウントを選択してください。`
+      );
+
+      return;
+    }
+
+    if (
+      existingIndex === -1 &&
+      googleAccounts.length >=
+        accountCount
+    ) {
+      setText(
+        "googleError",
+        `契約上限は${accountCount}件です。追加する場合は、先に連携アカウント数を変更してください。`
+      );
+
+      return;
+    }
+
+    if (existingIndex === -1) {
+      googleAccounts.push(
+        selectedEmail
+      );
+    }
+
+    googleAccessTokens[
+      normalizedEmail
+    ] = accessToken;
+
+    googleLoginVerified = true;
 
     saveData();
-    finishLogin();
-  } catch (error) {
-    googleAccessToken = "";
+    renderGoogleAccountOptions();
 
+    if (googleAuthMode === "login") {
+      setText(
+        "googleError",
+        `${selectedEmail} で本人確認が完了しました。`
+      );
+    } else if (
+      googleAccounts.length ===
+        accountCount
+    ) {
+      setText(
+        "googleError",
+        "必要なGoogleアカウントの連携が完了しました。"
+      );
+    }
+  } catch (error) {
     console.error(
       "Googleログインに失敗しました。",
       error
@@ -1179,8 +1506,6 @@ async function handleGoogleTokenResponse(
 
 
 function handleGoogleLoginError(error) {
-  googleAccessToken = "";
-
   console.error(
     "Googleログイン画面を開けませんでした。",
     error
@@ -1281,8 +1606,13 @@ function renderContractInformation() {
   );
 
   setText(
-    "contractUserCount",
-    `${userCount}人`
+    "contractAccountCount",
+    `${accountCount}件`
+  );
+
+  setText(
+    "contractLinkedAccountCount",
+    `${googleAccounts.length}件`
   );
 
   setText(
@@ -1495,10 +1825,7 @@ function openApp() {
 
   renderContractInformation();
 
-  setText(
-    "connectedGoogleAccount",
-    googleEmail || "未選択"
-  );
+  renderConnectedGoogleAccounts();
 
   showAppPage(
     "homePage"
@@ -1507,6 +1834,61 @@ function openApp() {
   window.scrollTo({
     top: 0
   });
+}
+
+
+function renderConnectedGoogleAccounts() {
+  const container =
+    document.getElementById(
+      "connectedGoogleAccounts"
+    );
+
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML = "";
+
+  if (googleAccounts.length === 0) {
+    container.innerHTML = `
+      <p class="connected-account-summary">
+        0 / ${accountCount}件を連携済み
+      </p>
+      <p>未選択</p>
+    `;
+    return;
+  }
+
+  const summary =
+    document.createElement("p");
+
+  summary.className =
+    "connected-account-summary";
+
+  summary.textContent =
+    `${googleAccounts.length} / ${accountCount}件を連携済み`;
+
+  const list =
+    document.createElement("ul");
+
+  list.className =
+    "connected-account-list";
+
+  googleAccounts.forEach((email) => {
+    const item =
+      document.createElement("li");
+
+    item.textContent = email;
+    list.appendChild(item);
+  });
+
+  container.appendChild(summary);
+  container.appendChild(list);
+}
+
+
+function openGoogleAccountManager() {
+  openGoogleScreen("manage");
 }
 
 
@@ -1602,7 +1984,7 @@ function logout() {
     SESSION_KEY
   );
 
-  googleAccessToken = "";
+  googleAccessTokens = {};
   googleTokenClient = null;
 
   setupMode =
