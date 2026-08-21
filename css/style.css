@@ -930,6 +930,10 @@ footer {
   line-height: 1.7;
 }
 
+.google-card-content #googleError {
+  color: var(--red);
+}
+
 .google-card-content label {
   display: block;
 
