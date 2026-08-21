@@ -13,7 +13,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-  <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=8">
 </head>
 
 <body>
@@ -412,6 +412,46 @@
     </div>
 
   </section>
+
+  <div
+    id="alarmModal"
+    class="alarm-modal hidden"
+    role="alertdialog"
+    aria-modal="true"
+    aria-labelledby="alarmTitle"
+    aria-describedby="alarmMessage"
+  >
+    <div class="alarm-modal-card">
+      <div class="alarm-modal-icon" aria-hidden="true">🔔</div>
+      <p class="alarm-modal-eyebrow">メールを検知しました</p>
+      <h2 id="alarmTitle">
+        <span id="alarmKeyword"></span>の通知
+      </h2>
+      <p id="alarmMessage">
+        登録キーワードを含むメールを検知しました。
+      </p>
+      <p id="alarmDetectedAt" class="alarm-detected-at"></p>
+      <p
+        id="alarmSoundStatus"
+        class="alarm-sound-status"
+        aria-live="polite"
+      ></p>
+      <button
+        id="restartAlarmButton"
+        type="button"
+        class="btn outline alarm-restart-button hidden"
+      >
+        通知音を鳴らす
+      </button>
+      <button
+        id="stopAlarmButton"
+        type="button"
+        class="btn alarm-stop-button"
+      >
+        通知音を停止
+      </button>
+    </div>
+  </div>
 
 
 
@@ -900,7 +940,7 @@
 
     <p>
       テストを実行してから、登録している端末へメールが届くまで、
-      最大で1分かかります。
+      最大で3分かかります。
     </p>
 
     <p>
@@ -1252,7 +1292,7 @@
   async
   defer
 ></script>
-<script src="js/app.js?v=6"></script>
+    <script src="js/app.js?v=8"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";
