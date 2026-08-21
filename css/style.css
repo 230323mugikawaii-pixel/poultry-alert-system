@@ -1439,6 +1439,117 @@ footer {
 
 
 /* ========================================
+   警報画面
+======================================== */
+
+.alarm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 24px;
+
+  background: rgba(8, 19, 38, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.alarm-modal-card {
+  width: min(100%, 520px);
+  padding: 36px;
+
+  text-align: center;
+
+  background: var(--white);
+  border: 3px solid var(--red);
+  border-radius: 28px;
+  box-shadow: 0 28px 80px rgba(8, 19, 38, 0.35);
+}
+
+.alarm-modal-icon {
+  display: inline-grid;
+  place-items: center;
+
+  width: 82px;
+  height: 82px;
+  margin-bottom: 12px;
+
+  font-size: 48px;
+
+  background: #fff2f0;
+  border-radius: 50%;
+
+  animation: alarm-ring 0.75s ease-in-out infinite;
+}
+
+.alarm-modal-eyebrow {
+  margin: 0 0 8px;
+
+  color: var(--red);
+  font-weight: 900;
+}
+
+.alarm-modal-card h2 {
+  margin: 0;
+
+  font-size: 34px;
+  line-height: 1.35;
+}
+
+.alarm-modal-card > p:not(.alarm-modal-eyebrow) {
+  margin: 16px 0 0;
+}
+
+.alarm-detected-at {
+  color: var(--subtext);
+  font-weight: 800;
+}
+
+.alarm-sound-status {
+  min-height: 24px;
+
+  color: var(--red);
+  font-weight: 900;
+}
+
+.alarm-restart-button,
+.alarm-stop-button {
+  width: 100%;
+  margin-top: 18px;
+}
+
+.alarm-stop-button {
+  background: var(--red);
+  border-color: var(--red);
+}
+
+.alarm-stop-button:hover {
+  background: #b9271f;
+  border-color: #b9271f;
+}
+
+@keyframes alarm-ring {
+  0%,
+  100% {
+    transform: rotate(-12deg) scale(1);
+  }
+
+  50% {
+    transform: rotate(12deg) scale(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .alarm-modal-icon {
+    animation: none;
+  }
+}
+
+
+/* ========================================
    タブレット・スマホ対応
 ======================================== */
 

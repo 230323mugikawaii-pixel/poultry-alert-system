@@ -184,6 +184,17 @@ const TEST_API_URL =
 
 const TEST_API_TOKEN =
   "callnow-test-2026-Abc123456789";
+const TEST_DETECTION_TIMEOUT_MS =
+  3 * 60 * 1000;
+
+const APP_BUILD_VERSION =
+  "2026-08-21.1";
+
+let alarmAudioContext = null;
+let alarmRepeatTimer = null;
+let alarmActiveNodes = [];
+let alarmIsActive = false;
+let alarmFocusBeforeOpen = null;
 
 let keywords = ["停電", "通電", "警報"];
 let accountCount = 1;
@@ -215,8 +226,13 @@ let paymentMode = "signup";
 let priceBeforeEditing = BASE_PRICE;
 
 window.addEventListener("DOMContentLoaded", () => {
+  console.info(
+    `Call Now ${APP_BUILD_VERSION}`
+  );
+
   loadSavedData();
   initializeContactInfoPersistence();
+  initializeAlarmNotification();
   normalizeKeywords();
   syncAccountCountInput();
   updatePrice();
@@ -1980,6 +1996,8 @@ function logout() {
     return;
   }
 
+  closeAlarmNotification();
+
   sessionStorage.removeItem(
     SESSION_KEY
   );
@@ -2046,6 +2064,491 @@ function renderSavedKeywordList() {
 
 
 /* ========================================
+   警報音・停止画面
+======================================== */
+
+function initializeAlarmNotification() {
+  const stopButton =
+    document.getElementById(
+      "stopAlarmButton"
+    );
+
+  const restartButton =
+    document.getElementById(
+      "restartAlarmButton"
+    );
+
+  if (stopButton) {
+    stopButton.addEventListener(
+      "click",
+      closeAlarmNotification
+    );
+  }
+
+  if (restartButton) {
+    restartButton.addEventListener(
+      "click",
+      () => {
+        void startAlarmSound();
+      }
+    );
+  }
+}
+
+
+function getAlarmAudioContext() {
+  const AudioContextClass =
+    window.AudioContext ||
+    window.webkitAudioContext;
+
+  if (!AudioContextClass) {
+    return null;
+  }
+
+  if (!alarmAudioContext) {
+    alarmAudioContext =
+      new AudioContextClass();
+  }
+
+  return alarmAudioContext;
+}
+
+
+async function unlockAlarmAudio() {
+  const context =
+    getAlarmAudioContext();
+
+  if (!context) {
+    return false;
+  }
+
+  try {
+    if (
+      context.state ===
+      "suspended"
+    ) {
+      await context.resume();
+    }
+
+    /*
+      Safariで、テストボタンを押した操作を
+      通知音の再生許可として記憶させる。
+    */
+    const oscillator =
+      context.createOscillator();
+
+    const gain =
+      context.createGain();
+
+    gain.gain.setValueAtTime(
+      0.0001,
+      context.currentTime
+    );
+
+    oscillator.connect(gain);
+    gain.connect(
+      context.destination
+    );
+
+    oscillator.start();
+    oscillator.stop(
+      context.currentTime + 0.01
+    );
+
+    return (
+      context.state === "running"
+    );
+  } catch (error) {
+    console.warn(
+      "通知音の再生準備に失敗しました。",
+      error
+    );
+
+    return false;
+  }
+}
+
+
+function scheduleAlarmTone(
+  context,
+  startTime,
+  frequency,
+  duration
+) {
+  const oscillator =
+    context.createOscillator();
+
+  const gain =
+    context.createGain();
+
+  oscillator.type = "square";
+
+  oscillator.frequency
+    .setValueAtTime(
+      frequency,
+      startTime
+    );
+
+  gain.gain.setValueAtTime(
+    0.0001,
+    startTime
+  );
+
+  gain.gain
+    .exponentialRampToValueAtTime(
+      0.28,
+      startTime + 0.02
+    );
+
+  gain.gain.setValueAtTime(
+    0.28,
+    startTime + duration - 0.04
+  );
+
+  gain.gain
+    .exponentialRampToValueAtTime(
+      0.0001,
+      startTime + duration
+    );
+
+  oscillator.connect(gain);
+  gain.connect(
+    context.destination
+  );
+
+  alarmActiveNodes.push(
+    oscillator
+  );
+
+  oscillator.addEventListener(
+    "ended",
+    () => {
+      alarmActiveNodes =
+        alarmActiveNodes.filter(
+          node =>
+            node !== oscillator
+        );
+
+      oscillator.disconnect();
+      gain.disconnect();
+    },
+    {
+      once: true
+    }
+  );
+
+  oscillator.start(startTime);
+
+  oscillator.stop(
+    startTime + duration
+  );
+}
+
+
+function playAlarmPattern() {
+  if (!alarmIsActive) {
+    return;
+  }
+
+  if (alarmRepeatTimer) {
+    window.clearTimeout(
+      alarmRepeatTimer
+    );
+  }
+
+  const context =
+    getAlarmAudioContext();
+
+  if (
+    !context ||
+    context.state !== "running"
+  ) {
+    showAlarmAudioFallback();
+    return;
+  }
+
+  const status =
+    document.getElementById(
+      "alarmSoundStatus"
+    );
+
+  const restartButton =
+    document.getElementById(
+      "restartAlarmButton"
+    );
+
+  if (status) {
+    status.textContent =
+      "通知音が鳴っています。「通知音を停止」を押すまで繰り返します。";
+  }
+
+  if (restartButton) {
+    restartButton.classList.add(
+      "hidden"
+    );
+  }
+
+  const startTime =
+    context.currentTime + 0.03;
+
+  scheduleAlarmTone(
+    context,
+    startTime,
+    880,
+    0.22
+  );
+
+  scheduleAlarmTone(
+    context,
+    startTime + 0.32,
+    1175,
+    0.22
+  );
+
+  scheduleAlarmTone(
+    context,
+    startTime + 0.64,
+    880,
+    0.22
+  );
+
+  alarmRepeatTimer =
+    window.setTimeout(
+      playAlarmPattern,
+      1300
+    );
+}
+
+
+async function startAlarmSound() {
+  stopAlarmSound();
+  alarmIsActive = true;
+
+  const isReady =
+    await unlockAlarmAudio();
+
+  if (!alarmIsActive) {
+    return;
+  }
+
+  if (!isReady) {
+    showAlarmAudioFallback();
+    return;
+  }
+
+  playAlarmPattern();
+}
+
+
+function showAlarmAudioFallback() {
+  const status =
+    document.getElementById(
+      "alarmSoundStatus"
+    );
+
+  const restartButton =
+    document.getElementById(
+      "restartAlarmButton"
+    );
+
+  if (status) {
+    status.textContent =
+      "Safariが通知音をブロックしました。「通知音を鳴らす」を押してください。";
+  }
+
+  if (restartButton) {
+    restartButton.classList.remove(
+      "hidden"
+    );
+  }
+}
+
+
+function stopAlarmSound() {
+  alarmIsActive = false;
+
+  if (alarmRepeatTimer) {
+    window.clearTimeout(
+      alarmRepeatTimer
+    );
+
+    alarmRepeatTimer = null;
+  }
+
+  alarmActiveNodes.forEach(
+    oscillator => {
+      try {
+        oscillator.stop();
+      } catch (error) {
+        /* すでに停止済みの場合は何もしない。 */
+      }
+
+      try {
+        oscillator.disconnect();
+      } catch (error) {
+        /* すでに切断済みの場合は何もしない。 */
+      }
+    }
+  );
+
+  alarmActiveNodes = [];
+}
+
+
+function showAlarmNotification(
+  keyword,
+  detectedAt
+) {
+  const modal =
+    document.getElementById(
+      "alarmModal"
+    );
+
+  if (!modal) {
+    return;
+  }
+
+  const keywordElement =
+    document.getElementById(
+      "alarmKeyword"
+    );
+
+  const detectedAtElement =
+    document.getElementById(
+      "alarmDetectedAt"
+    );
+
+  const status =
+    document.getElementById(
+      "alarmSoundStatus"
+    );
+
+  const restartButton =
+    document.getElementById(
+      "restartAlarmButton"
+    );
+
+  const stopButton =
+    document.getElementById(
+      "stopAlarmButton"
+    );
+
+  alarmFocusBeforeOpen =
+    document.activeElement;
+
+  if (keywordElement) {
+    keywordElement.textContent =
+      `「${keyword}」`;
+  }
+
+  if (detectedAtElement) {
+    const formatted =
+      formatAlarmDetectedAt(
+        detectedAt
+      );
+
+    detectedAtElement.textContent =
+      formatted
+        ? `検知時刻：${formatted}`
+        : "";
+  }
+
+  if (status) {
+    status.textContent =
+      "通知音を準備しています。";
+  }
+
+  if (restartButton) {
+    restartButton.classList.add(
+      "hidden"
+    );
+  }
+
+  modal.classList.remove(
+    "hidden"
+  );
+
+  if (stopButton) {
+    stopButton.focus();
+  }
+
+  void startAlarmSound();
+}
+
+
+function closeAlarmNotification() {
+  stopAlarmSound();
+
+  const modal =
+    document.getElementById(
+      "alarmModal"
+    );
+
+  const status =
+    document.getElementById(
+      "alarmSoundStatus"
+    );
+
+  const restartButton =
+    document.getElementById(
+      "restartAlarmButton"
+    );
+
+  if (modal) {
+    modal.classList.add(
+      "hidden"
+    );
+  }
+
+  if (restartButton) {
+    restartButton.classList.add(
+      "hidden"
+    );
+  }
+
+  if (status) {
+    status.textContent = "";
+  }
+
+  if (
+    alarmFocusBeforeOpen &&
+    typeof alarmFocusBeforeOpen.focus ===
+      "function"
+  ) {
+    alarmFocusBeforeOpen.focus();
+  }
+
+  alarmFocusBeforeOpen = null;
+}
+
+
+function formatAlarmDetectedAt(value) {
+  if (!value) {
+    return "";
+  }
+
+  const date =
+    new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat(
+    "ja-JP",
+    {
+      dateStyle: "medium",
+      timeStyle: "medium"
+    }
+  ).format(date);
+}
+
+
+/* ========================================
    通知テスト
 ======================================== */
 
@@ -2094,14 +2597,16 @@ function renderTestKeywordCards() {
       );
 
     if (button) {
-   button.addEventListener(
-  "click",
-  () =>
-    testNotification(
-      keyword,
-      button
-    )
-);
+      button.addEventListener(
+        "click",
+        async () => {
+          await unlockAlarmAudio();
+          await testNotification(
+            keyword,
+            button
+          );
+        }
+      );
     }
 
     container.appendChild(card);
@@ -2193,26 +2698,18 @@ const testButtons =
     const detectedStatus =
       await waitForTestDetection(
         requestId,
-        60000
+        TEST_DETECTION_TIMEOUT_MS
       );
 
     if (detectedStatus) {
-      window.alert(
-        `テスト成功！
-
-「${keyword}」のメールをGmailへ送信し、
-システムがメールを検知しました。
-
-検知時刻：
-${
-  detectedStatus.detectedAt ||
-  "確認済み"
-}`
+      showAlarmNotification(
+        keyword,
+        detectedStatus.detectedAt || ""
       );
     } else {
       window.alert(
         `Gmailへの送信処理は行いましたが、
-1分以内に検知結果を確認できませんでした。
+3分以内に検知結果を確認できませんでした。
 
 Gmailにテストメールが届いているか、
 「CallNow-Test-Detected」ラベルが付いているか確認してください。`
@@ -2263,6 +2760,137 @@ function createTestRequestId() {
    Gmailで検知されるまで確認する
 ======================================== */
 
+function parseJsonSafely(value) {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return null;
+  }
+}
+
+
+function extractTestDetectionStatus(result) {
+  const parsedResult =
+    parseJsonSafely(result);
+
+  if (
+    !parsedResult ||
+    typeof parsedResult !== "object"
+  ) {
+    return null;
+  }
+
+  const candidates = [
+    parsedResult.status,
+    parsedResult.state
+      ? parsedResult
+      : null,
+    parsedResult.data &&
+      parsedResult.data.status,
+    parsedResult.data
+  ];
+
+  for (const candidate of candidates) {
+    const parsedCandidate =
+      parseJsonSafely(candidate);
+
+    if (
+      parsedCandidate &&
+      typeof parsedCandidate === "object" &&
+      typeof parsedCandidate.state === "string"
+    ) {
+      return parsedCandidate;
+    }
+  }
+
+  return null;
+}
+
+
+async function findTestMailInConnectedGmail(
+  requestId
+) {
+  const accessTokens =
+    Array.from(
+      new Set(
+        Object.values(
+          googleAccessTokens
+        ).filter(
+          (value) =>
+            typeof value === "string" &&
+            value
+        )
+      )
+    );
+
+  for (const accessToken of accessTokens) {
+    try {
+      const searchUrl =
+        new URL(
+          "https://gmail.googleapis.com/gmail/v1/users/me/messages"
+        );
+
+      searchUrl.searchParams.set(
+        "q",
+        `in:inbox newer_than:1d label:CallNow-Test-Detected "${requestId}"`
+      );
+
+      searchUrl.searchParams.set(
+        "maxResults",
+        "1"
+      );
+
+      const response =
+        await fetch(
+          searchUrl.toString(),
+          {
+            method: "GET",
+            headers: {
+              Authorization:
+                `Bearer ${accessToken}`
+            },
+            cache: "no-store"
+          }
+        );
+
+      if (!response.ok) {
+        console.warn(
+          "Gmailでのテストメール確認に失敗しました。",
+          response.status
+        );
+        continue;
+      }
+
+      const result =
+        await response.json();
+
+      if (
+        Array.isArray(result.messages) &&
+        result.messages.length > 0
+      ) {
+        return {
+          state: "detected",
+          detectedAt:
+            new Date().toISOString(),
+          source: "gmail-api"
+        };
+      }
+    } catch (error) {
+      console.warn(
+        "Gmailでのテストメール確認に失敗しました。",
+        error
+      );
+    }
+  }
+
+  return null;
+}
+
+
 async function waitForTestDetection(
   requestId,
   timeoutMilliseconds
@@ -2270,6 +2898,8 @@ async function waitForTestDetection(
   const endTime =
     Date.now() +
     timeoutMilliseconds;
+
+  let attemptCount = 0;
 
   while (
     Date.now() <
@@ -2279,6 +2909,7 @@ async function waitForTestDetection(
       3秒ごとに検知状況を確認する。
     */
     await sleep(3000);
+    attemptCount += 1;
 
     try {
       const statusUrl =
@@ -2320,16 +2951,31 @@ async function waitForTestDetection(
           }
         );
 
+      if (!response.ok) {
+        throw new Error(
+          `status_http_${response.status}`
+        );
+      }
+
+      const responseText =
+        await response.text();
+
       const result =
-        await response.json();
+        parseJsonSafely(
+          responseText
+        );
+
+      const status =
+        extractTestDetectionStatus(
+          result
+        );
 
       if (
-        result.ok &&
-        result.status &&
-        result.status.state ===
+        status &&
+        status.state ===
           "detected"
       ) {
-        return result.status;
+        return status;
       }
 
     } catch (error) {
@@ -2337,6 +2983,24 @@ async function waitForTestDetection(
         "検知状況の確認に失敗しました。",
         error
       );
+    }
+
+    /*
+      Apps Scriptの状態取得が遅れた場合も、
+      Gmailに検知済みラベルが付いていれば
+      テスト成功として確認する。
+    */
+    if (
+      attemptCount % 2 === 0
+    ) {
+      const gmailStatus =
+        await findTestMailInConnectedGmail(
+          requestId
+        );
+
+      if (gmailStatus) {
+        return gmailStatus;
+      }
     }
   }
 
