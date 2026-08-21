@@ -1156,6 +1156,8 @@ function renderGoogleAccountOptions() {
     return;
   }
 
+  updateGoogleAuthActionText();
+
   accountList.innerHTML = "";
 
   if (googleAccounts.length === 0) {
@@ -1210,14 +1212,71 @@ function renderGoogleAccountOptions() {
     );
 
   if (finishButton) {
-    finishButton.disabled =
-      googleAccounts.length !==
-        accountCount ||
-      (
-        googleScreenMode === "login" &&
-        !googleLoginVerified
-      );
+    finishButton.disabled = false;
   }
+}
+
+
+function updateGoogleAuthActionText() {
+  const needsAccountLink =
+    googleAccounts.length <
+      accountCount;
+
+  if (
+    googleScreenMode === "login" &&
+    needsAccountLink
+  ) {
+    setText(
+      "googleCardTitle",
+      "Googleアカウントを連携"
+    );
+
+    setText(
+      "googleAuthDescription",
+      "Googleの認証画面で、通知を確認するアカウントを選択し、Gmailの閲覧権限を許可してください。連携後、そのまま本人確認が完了します。Call NowがGoogleのパスワードを保存することはありません。"
+    );
+
+    setText(
+      "googleAuthButton",
+      "Googleアカウントを連携"
+    );
+
+    return;
+  }
+
+  if (googleScreenMode === "login") {
+    setText(
+      "googleCardTitle",
+      "連携済みアカウントで本人確認"
+    );
+
+    setText(
+      "googleAuthDescription",
+      "Googleの認証画面で、連携済みのアカウントを選択してください。Call NowがGoogleのパスワードを保存することはありません。"
+    );
+
+    setText(
+      "googleAuthButton",
+      "Googleでログイン"
+    );
+
+    return;
+  }
+
+  setText(
+    "googleCardTitle",
+    "Googleアカウントを追加"
+  );
+
+  setText(
+    "googleAuthDescription",
+    "Googleの認証画面で、まだ連携していないアカウントを選択し、Gmailの閲覧権限を許可してください。Call NowがGoogleのパスワードを保存することはありません。"
+  );
+
+  setText(
+    "googleAuthButton",
+    "Googleアカウントを追加"
+  );
 }
 
 
@@ -1256,6 +1315,22 @@ function removeGoogleAccount(index) {
 
 function finishGoogleAccountLinking() {
   if (
+    googleScreenMode === "login" &&
+    (
+      googleAccounts.length !==
+        accountCount ||
+      !googleLoginVerified
+    )
+  ) {
+    setText(
+      "googleError",
+      "アカウントの連携を済ませてください"
+    );
+
+    return;
+  }
+
+  if (
     googleAccounts.length !==
       accountCount
   ) {
@@ -1266,19 +1341,6 @@ function finishGoogleAccountLinking() {
 
     return;
   }
-
-  if (
-    googleScreenMode === "login" &&
-    !googleLoginVerified
-  ) {
-    setText(
-      "googleError",
-      "連携済みのGoogleアカウントでログインしてください。"
-    );
-
-    return;
-  }
-
   finishLogin();
 }
 
@@ -1334,10 +1396,15 @@ function initializeGoogleTokenClient() {
 function startGoogleLogin(
   mode = null
 ) {
+  const needsAccountLink =
+    googleAccounts.length <
+      accountCount;
+
   googleAuthMode =
     mode ||
     (
-      googleScreenMode === "login"
+      googleScreenMode === "login" &&
+      !needsAccountLink
         ? "login"
         : "add"
     );

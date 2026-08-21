@@ -747,7 +747,7 @@
           </h2>
 
 
-          <p>
+          <p id="googleAuthDescription">
             Googleの認証画面で、まだ連携していないアカウントを選択し、Gmailの閲覧権限を許可してください。
             Call NowがGoogleのパスワードを保存することはありません。
           </p>
@@ -778,7 +778,6 @@
         type="button"
         class="btn primary full-width"
         onclick="finishGoogleAccountLinking()"
-        disabled
       >
         連携を完了してホームへ
       </button>
@@ -1292,7 +1291,7 @@
   async
   defer
 ></script>
-    <script src="js/app.js?v=8"></script>
+    <script src="js/app.js?v=9"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";
