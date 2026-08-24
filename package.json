@@ -1,0 +1,15 @@
+{
+  "name": "call-now",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "build": "pnpm --filter @call-now/api build",
+    "dev:api": "pnpm --filter @call-now/api dev",
+    "format:check": "pnpm --filter @call-now/api format:check",
+    "lint": "pnpm --filter @call-now/api lint",
+    "test": "pnpm --filter @call-now/api test",
+    "test:coverage": "pnpm --filter @call-now/api test:coverage",
+    "typecheck": "pnpm --filter @call-now/api typecheck",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  }
+}
