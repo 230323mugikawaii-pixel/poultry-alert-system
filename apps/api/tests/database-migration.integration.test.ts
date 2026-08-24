@@ -2,13 +2,21 @@ import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { afterEach, describe, expect, it } from "vitest";
 
-const migration = readFileSync(
-  new URL(
-    "../prisma/migrations/20260824000100_phase1_foundation/migration.sql",
-    import.meta.url
-  ),
-  "utf8"
-);
+const migration =
+  readFileSync(
+    new URL(
+      "../prisma/migrations/20260824000100_phase1_foundation/migration.sql",
+      import.meta.url
+    ),
+    "utf8"
+  ) +
+  readFileSync(
+    new URL(
+      "../prisma/migrations/20260824000200_security_throttles/migration.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
 
 const databases: PGlite[] = [];
 

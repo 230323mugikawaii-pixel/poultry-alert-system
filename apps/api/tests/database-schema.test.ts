@@ -24,7 +24,8 @@ describe("database foundation", () => {
       "Subscription",
       "Invitation",
       "InvitationRedemption",
-      "AuditEvent"
+      "AuditEvent",
+      "SecurityThrottle"
     ]) {
       expect(schema).toContain(`model ${model} {`);
     }

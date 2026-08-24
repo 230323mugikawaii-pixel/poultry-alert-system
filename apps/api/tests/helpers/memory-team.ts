@@ -162,7 +162,7 @@ export class MemoryTeamRepository implements TeamRepository {
     return change;
   }
 
-  public addMember(userId = randomUUID()): void {
+  public addMember(userId: string = randomUUID()): void {
     if (!this.context) {
       throw new Error("Create a team first");
     }

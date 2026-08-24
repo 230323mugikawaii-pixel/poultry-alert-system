@@ -28,6 +28,7 @@
     "@prisma/adapter-pg": "7.2.0",
     "@prisma/client": "7.2.0",
     "@sinclair/typebox": "latest",
+    "argon2": "0.45.1",
     "dotenv": "latest",
     "fastify": "latest",
     "nodemailer": "9.0.5",

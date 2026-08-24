@@ -8,6 +8,8 @@ import type { AppEnvironment } from "./config/env.js";
 import { AppError } from "./lib/app-error.js";
 import type { AuthService } from "./modules/auth/auth-service.js";
 import { createAuthRoutes } from "./modules/auth/auth-routes.js";
+import type { InvitationService } from "./modules/invitations/invitation-service.js";
+import { createInvitationRoutes } from "./modules/invitations/invitation-routes.js";
 import type { TeamService } from "./modules/teams/team-service.js";
 import { createTeamRoutes } from "./modules/teams/team-routes.js";
 import { systemRoutes } from "./routes/system.js";
@@ -17,6 +19,7 @@ export interface BuildAppOptions {
   readonly logger?: boolean;
   readonly authService?: AuthService;
   readonly teamService?: TeamService;
+  readonly invitationService?: InvitationService;
 }
 
 export async function buildApp(
@@ -35,7 +38,9 @@ export async function buildApp(
                 "res.headers.set-cookie",
                 "body.token",
                 "body.password",
-                "body.magicLink"
+                "body.magicLink",
+                "body.joinToken",
+                "body.invitationPassword"
               ],
               censor: "[REDACTED]"
             }
@@ -112,6 +117,17 @@ export async function buildApp(
       createTeamRoutes(
         options.authService,
         options.teamService,
+        options.environment,
+        options.invitationService
+      )
+    );
+  }
+
+  if (options.authService && options.invitationService) {
+    await app.register(
+      createInvitationRoutes(
+        options.authService,
+        options.invitationService,
         options.environment
       )
     );

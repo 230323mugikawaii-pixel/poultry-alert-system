@@ -3,6 +3,7 @@ import { Type } from "@sinclair/typebox";
 import type { AppEnvironment } from "../../config/env.js";
 import { AppError } from "../../lib/app-error.js";
 import type { AuthService } from "../auth/auth-service.js";
+import type { InvitationService } from "../invitations/invitation-service.js";
 import type { TeamContextRecord } from "./team-repository.js";
 import type { TeamService } from "./team-service.js";
 
@@ -29,10 +30,19 @@ const TeamResponse = Type.Object({
   })
 });
 
+const IssuedInvitationResponse = Type.Object({
+  id: Type.String({ format: "uuid" }),
+  maxUses: Type.Integer({ minimum: 1 }),
+  usedCount: Type.Integer({ minimum: 0 }),
+  expiresAt: Type.String(),
+  password: Type.String()
+});
+
 export function createTeamRoutes(
   authService: AuthService,
   teamService: TeamService,
-  environment: AppEnvironment
+  environment: AppEnvironment,
+  invitationService?: InvitationService
 ): FastifyPluginAsyncTypebox {
   return async (app) => {
     const authenticateUserId = async (request: {
@@ -70,7 +80,12 @@ export function createTeamRoutes(
               })
             )
           }),
-          response: { 201: Type.Object({ team: TeamResponse }) }
+          response: {
+            201: Type.Object({
+              team: TeamResponse,
+              invitation: Type.Union([IssuedInvitationResponse, Type.Null()])
+            })
+          }
         }
       },
       async (request, reply) => {
@@ -82,7 +97,22 @@ export function createTeamRoutes(
           seatLimit: request.body.seatLimit,
           ...(request.body.keywords ? { keywords: request.body.keywords } : {})
         });
-        await reply.status(201).send({ team: serializeTeam(team) });
+        const invitation =
+          invitationService && team.seatSummary.availableSeats > 0
+            ? await invitationService.issueForTeam(team.teamId, userId)
+            : null;
+        await reply.status(201).send({
+          team: serializeTeam(team),
+          invitation: invitation
+            ? {
+                id: invitation.invitation.id,
+                maxUses: invitation.invitation.maxUses,
+                usedCount: invitation.invitation.usedCount,
+                expiresAt: invitation.invitation.expiresAt.toISOString(),
+                password: invitation.password
+              }
+            : null
+        });
       }
     );
 
@@ -161,7 +191,8 @@ export function createTeamRoutes(
               previousSeatLimit: Type.Integer({ minimum: 0 }),
               requestedSeatLimit: Type.Integer({ minimum: 0 }),
               activeMemberCount: Type.Integer({ minimum: 0 }),
-              availableSeats: Type.Integer({ minimum: 0 })
+              availableSeats: Type.Integer({ minimum: 0 }),
+              invitation: Type.Union([IssuedInvitationResponse, Type.Null()])
             })
           }
         }
@@ -173,7 +204,27 @@ export function createTeamRoutes(
           userId,
           request.body.seatLimit
         );
-        await reply.status(202).send(result);
+        const invitation =
+          invitationService &&
+          result.status === "APPLIED" &&
+          result.availableSeats > 0
+            ? await invitationService.issueForTeam(
+                (await teamService.requireOwner(userId)).teamId,
+                userId
+              )
+            : null;
+        await reply.status(202).send({
+          ...result,
+          invitation: invitation
+            ? {
+                id: invitation.invitation.id,
+                maxUses: invitation.invitation.maxUses,
+                usedCount: invitation.invitation.usedCount,
+                expiresAt: invitation.invitation.expiresAt.toISOString(),
+                password: invitation.password
+              }
+            : null
+        });
       }
     );
   };

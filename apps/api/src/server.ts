@@ -4,6 +4,8 @@ import { createDatabaseClient } from "./db/client.js";
 import { AuthService } from "./modules/auth/auth-service.js";
 import { SmtpMagicLinkEmailSender } from "./modules/auth/email-sender.js";
 import { PrismaAuthRepository } from "./modules/auth/prisma-auth-repository.js";
+import { InvitationService } from "./modules/invitations/invitation-service.js";
+import { PrismaInvitationRepository } from "./modules/invitations/prisma-invitation-repository.js";
 import { PrismaTeamRepository } from "./modules/teams/prisma-team-repository.js";
 import { TeamService } from "./modules/teams/team-service.js";
 
@@ -30,7 +32,21 @@ const authService = new AuthService({
 const teamService = new TeamService({
   repository: new PrismaTeamRepository(database)
 });
-const app = await buildApp({ environment, authService, teamService });
+const invitationService = new InvitationService({
+  repository: new PrismaInvitationRepository(database),
+  teamService,
+  publicOrigin: environment.PUBLIC_ORIGIN,
+  tokenPepper: environment.AUTH_TOKEN_PEPPER,
+  invitationTtlDays: environment.INVITATION_TTL_DAYS,
+  joinGrantTtlMinutes: environment.JOIN_GRANT_TTL_MINUTES,
+  lineLinkTtlHours: environment.LINE_LINK_TTL_HOURS
+});
+const app = await buildApp({
+  environment,
+  authService,
+  teamService,
+  invitationService
+});
 app.addHook("onClose", async () => database.$disconnect());
 
 const shutdown = async (signal: string): Promise<void> => {

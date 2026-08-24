@@ -421,3 +421,14 @@ model AuditEvent {
   @@map("audit_events")
 }
 
+model SecurityThrottle {
+  keyHash         String    @id @db.Char(64)
+  scope           String    @db.VarChar(50)
+  failureCount    Int       @default(0)
+  windowStartedAt DateTime  @db.Timestamptz(3)
+  lockedUntil     DateTime? @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(3)
+
+  @@index([scope, lockedUntil])
+  @@map("security_throttles")
+}
