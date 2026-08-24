@@ -8,12 +8,15 @@ import type { AppEnvironment } from "./config/env.js";
 import { AppError } from "./lib/app-error.js";
 import type { AuthService } from "./modules/auth/auth-service.js";
 import { createAuthRoutes } from "./modules/auth/auth-routes.js";
+import type { TeamService } from "./modules/teams/team-service.js";
+import { createTeamRoutes } from "./modules/teams/team-routes.js";
 import { systemRoutes } from "./routes/system.js";
 
 export interface BuildAppOptions {
   readonly environment: AppEnvironment;
   readonly logger?: boolean;
   readonly authService?: AuthService;
+  readonly teamService?: TeamService;
 }
 
 export async function buildApp(
@@ -101,6 +104,16 @@ export async function buildApp(
   if (options.authService) {
     await app.register(
       createAuthRoutes(options.authService, options.environment)
+    );
+  }
+
+  if (options.authService && options.teamService) {
+    await app.register(
+      createTeamRoutes(
+        options.authService,
+        options.teamService,
+        options.environment
+      )
     );
   }
 

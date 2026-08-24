@@ -1,0 +1,141 @@
+import { randomInt } from "node:crypto";
+import { AppError } from "../../lib/app-error.js";
+import type {
+  SeatLimitChangeResult,
+  TeamContextRecord,
+  TeamMemberRecord,
+  TeamRepository
+} from "./team-repository.js";
+import {
+  calculateAnnualPriceYen,
+  calculateSeatSummary
+} from "./seat-policy.js";
+
+export interface TeamServiceOptions {
+  readonly repository: TeamRepository;
+  readonly now?: () => Date;
+  readonly teamCodeGenerator?: () => string;
+}
+
+export class TeamService {
+  private readonly now: () => Date;
+  private readonly teamCodeGenerator: () => string;
+
+  public constructor(private readonly options: TeamServiceOptions) {
+    this.now = options.now ?? (() => new Date());
+    this.teamCodeGenerator = options.teamCodeGenerator ?? generateTeamCode;
+  }
+
+  public async createTeam(input: {
+    readonly ownerUserId: string;
+    readonly name?: string;
+    readonly seatLimit: number;
+    readonly keywords?: readonly string[];
+  }): Promise<TeamContextRecord> {
+    calculateSeatSummary(input.seatLimit, 0);
+    const keywords = normalizeKeywords(input.keywords ?? []);
+    const now = this.now();
+    const termEnd = new Date(now);
+    termEnd.setUTCFullYear(termEnd.getUTCFullYear() + 1);
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        return await this.options.repository.createTeam({
+          ownerUserId: input.ownerUserId,
+          publicCode: this.teamCodeGenerator(),
+          name: input.name?.trim().slice(0, 120) || null,
+          seatLimit: input.seatLimit,
+          keywords,
+          currentTermStartedAt: now,
+          currentTermEndsAt: termEnd,
+          currentTermAmountYen: calculateAnnualPriceYen(
+            input.seatLimit,
+            keywords.length
+          )
+        });
+      } catch (error) {
+        if (!isTeamCodeConflict(error)) {
+          throw error;
+        }
+      }
+    }
+
+    throw new AppError(
+      "TEAM_CODE_GENERATION_FAILED",
+      "チームIDを発行できませんでした。もう一度お試しください。",
+      503
+    );
+  }
+
+  public async getCurrentTeam(userId: string): Promise<TeamContextRecord> {
+    const context = await this.options.repository.findCurrentTeam(userId);
+    if (!context) {
+      throw new AppError("TEAM_NOT_FOUND", "所属チームが見つかりません。", 404);
+    }
+    return context;
+  }
+
+  public async listMembers(
+    userId: string
+  ): Promise<readonly TeamMemberRecord[]> {
+    const context = await this.getCurrentTeam(userId);
+    return this.options.repository.listActiveMembers(context.teamId);
+  }
+
+  public async requestSeatLimitChange(
+    userId: string,
+    requestedSeatLimit: number
+  ): Promise<SeatLimitChangeResult> {
+    calculateSeatSummary(requestedSeatLimit, 0);
+    const context = await this.requireOwner(userId);
+    return this.options.repository.requestSeatLimitChange({
+      teamId: context.teamId,
+      requestedByUserId: userId,
+      requestedSeatLimit,
+      now: this.now()
+    });
+  }
+
+  public async applyPaidSeatIncrease(
+    changeId: string
+  ): Promise<SeatLimitChangeResult> {
+    return this.options.repository.applyPaidSeatIncrease({
+      changeId,
+      now: this.now()
+    });
+  }
+
+  public async requireOwner(userId: string): Promise<TeamContextRecord> {
+    const context = await this.getCurrentTeam(userId);
+    if (context.role !== "OWNER") {
+      throw new AppError(
+        "OWNER_REQUIRED",
+        "この操作はチームの代表者だけが実行できます。",
+        403
+      );
+    }
+    return context;
+  }
+}
+
+export function generateTeamCode(): string {
+  return randomInt(0, 1_000_000).toString().padStart(6, "0");
+}
+
+function normalizeKeywords(values: readonly string[]): string[] {
+  const keywords: string[] = [];
+  const normalizedValues = new Set<string>();
+  for (const value of values) {
+    const keyword = value.trim().slice(0, 100);
+    const normalized = keyword.normalize("NFKC").toLowerCase();
+    if (keyword && !normalizedValues.has(normalized)) {
+      normalizedValues.add(normalized);
+      keywords.push(keyword);
+    }
+  }
+  return keywords;
+}
+
+function isTeamCodeConflict(error: unknown): boolean {
+  return error instanceof AppError && error.code === "TEAM_CODE_CONFLICT";
+}

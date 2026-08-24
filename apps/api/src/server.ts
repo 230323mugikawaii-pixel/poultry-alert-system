@@ -4,6 +4,8 @@ import { createDatabaseClient } from "./db/client.js";
 import { AuthService } from "./modules/auth/auth-service.js";
 import { SmtpMagicLinkEmailSender } from "./modules/auth/email-sender.js";
 import { PrismaAuthRepository } from "./modules/auth/prisma-auth-repository.js";
+import { PrismaTeamRepository } from "./modules/teams/prisma-team-repository.js";
+import { TeamService } from "./modules/teams/team-service.js";
 
 const environment = loadEnvironment();
 const database = createDatabaseClient(environment.DATABASE_URL);
@@ -25,7 +27,10 @@ const authService = new AuthService({
   sessionAbsoluteDays: environment.SESSION_ABSOLUTE_DAYS,
   maxActiveSessions: environment.MAX_ACTIVE_SESSIONS
 });
-const app = await buildApp({ environment, authService });
+const teamService = new TeamService({
+  repository: new PrismaTeamRepository(database)
+});
+const app = await buildApp({ environment, authService, teamService });
 app.addHook("onClose", async () => database.$disconnect());
 
 const shutdown = async (signal: string): Promise<void> => {
