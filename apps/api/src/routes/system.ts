@@ -6,24 +6,45 @@ const StatusResponse = Type.Object({
   service: Type.Literal("call-now-api")
 });
 
-export const systemRoutes: FastifyPluginAsyncTypebox = async (app) => {
-  app.get(
-    "/healthz",
-    {
-      schema: {
-        response: { 200: StatusResponse }
-      }
-    },
-    async () => ({ ok: true as const, service: "call-now-api" as const })
-  );
+const UnavailableResponse = Type.Object({
+  ok: Type.Literal(false),
+  service: Type.Literal("call-now-api"),
+  reason: Type.Literal("dependency_unavailable")
+});
 
-  app.get(
-    "/readyz",
-    {
-      schema: {
-        response: { 200: StatusResponse }
+export function createSystemRoutes(
+  readinessCheck: () => Promise<void> = async () => undefined
+): FastifyPluginAsyncTypebox {
+  return async (app) => {
+    app.get(
+      "/healthz",
+      {
+        schema: {
+          response: { 200: StatusResponse }
+        }
+      },
+      async () => ({ ok: true as const, service: "call-now-api" as const })
+    );
+
+    app.get(
+      "/readyz",
+      {
+        schema: {
+          response: { 200: StatusResponse, 503: UnavailableResponse }
+        }
+      },
+      async (_request, reply) => {
+        try {
+          await readinessCheck();
+          return { ok: true as const, service: "call-now-api" as const };
+        } catch {
+          await reply.status(503).send({
+            ok: false,
+            service: "call-now-api",
+            reason: "dependency_unavailable"
+          });
+        }
       }
-    },
-    async () => ({ ok: true as const, service: "call-now-api" as const })
-  );
-};
+    );
+  };
+}

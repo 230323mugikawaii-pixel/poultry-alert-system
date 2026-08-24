@@ -60,4 +60,26 @@ describe("system routes", () => {
       }
     });
   });
+
+  it("reports a dependency outage through readiness without failing liveness", async () => {
+    const app = await buildApp({
+      environment,
+      logger: false,
+      readinessCheck: async () => {
+        throw new Error("database unavailable");
+      }
+    });
+    apps.push(app);
+
+    const ready = await app.inject({ method: "GET", url: "/readyz" });
+    const alive = await app.inject({ method: "GET", url: "/healthz" });
+
+    expect(ready.statusCode).toBe(503);
+    expect(ready.json()).toEqual({
+      ok: false,
+      service: "call-now-api",
+      reason: "dependency_unavailable"
+    });
+    expect(alive.statusCode).toBe(200);
+  });
 });

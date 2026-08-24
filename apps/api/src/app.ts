@@ -12,7 +12,7 @@ import type { InvitationService } from "./modules/invitations/invitation-service
 import { createInvitationRoutes } from "./modules/invitations/invitation-routes.js";
 import type { TeamService } from "./modules/teams/team-service.js";
 import { createTeamRoutes } from "./modules/teams/team-routes.js";
-import { systemRoutes } from "./routes/system.js";
+import { createSystemRoutes } from "./routes/system.js";
 
 export interface BuildAppOptions {
   readonly environment: AppEnvironment;
@@ -20,6 +20,7 @@ export interface BuildAppOptions {
   readonly authService?: AuthService;
   readonly teamService?: TeamService;
   readonly invitationService?: InvitationService;
+  readonly readinessCheck?: () => Promise<void>;
 }
 
 export async function buildApp(
@@ -104,7 +105,7 @@ export async function buildApp(
     });
   });
 
-  await app.register(systemRoutes);
+  await app.register(createSystemRoutes(options.readinessCheck));
 
   if (options.authService) {
     await app.register(

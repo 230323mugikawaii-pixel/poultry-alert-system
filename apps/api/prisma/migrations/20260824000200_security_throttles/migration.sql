@@ -13,4 +13,3 @@ CREATE TABLE "security_throttles" (
 
 CREATE INDEX "security_throttles_scope_lockedUntil_idx"
   ON "security_throttles"("scope", "lockedUntil");
-

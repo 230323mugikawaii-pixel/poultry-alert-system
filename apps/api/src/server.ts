@@ -45,7 +45,10 @@ const app = await buildApp({
   environment,
   authService,
   teamService,
-  invitationService
+  invitationService,
+  readinessCheck: async () => {
+    await database.$queryRaw`SELECT 1`;
+  }
 });
 app.addHook("onClose", async () => database.$disconnect());
 

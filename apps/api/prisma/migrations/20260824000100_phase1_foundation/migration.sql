@@ -540,4 +540,3 @@ CREATE UNIQUE INDEX "invitations_one_active_password_per_team"
 CREATE UNIQUE INDEX "owner_transfers_one_pending_per_team"
   ON "owner_transfers" ("teamId")
   WHERE status = 'PENDING';
-
