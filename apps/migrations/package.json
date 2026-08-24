@@ -1,0 +1,18 @@
+{
+  "name": "@call-now/migrations",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "db:generate": "prisma generate --config prisma.config.ts",
+    "db:migrate:deploy": "prisma migrate deploy --config prisma.config.ts",
+    "db:validate": "prisma validate --config prisma.config.ts"
+  },
+  "dependencies": {
+    "dotenv": "17.4.2",
+    "prisma": "7.9.1"
+  }
+}

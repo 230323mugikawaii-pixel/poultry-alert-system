@@ -21,7 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql://callnow:callnow@127.0.0.1:5432/callnow_test
-      IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REPOSITORY }}/call-now-api:${{ github.sha }}
+      API_IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REPOSITORY }}/call-now-api:${{ github.sha }}
+      MIGRATION_IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REPOSITORY }}/call-now-db-migrate:${{ github.sha }}
     services:
       postgres:
         image: postgres:17-alpine
@@ -47,8 +48,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @call-now/api db:generate
-      - run: pnpm --filter @call-now/api db:migrate:deploy
+      - run: pnpm db:generate
+      - run: pnpm db:migrate:deploy
       - run: pnpm test:postgres
       - run: pnpm verify
 
@@ -59,19 +60,19 @@ jobs:
           service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@v3
       - run: gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
-      - run: docker build --file apps/api/Dockerfile --tag "$IMAGE" .
-      - run: docker push "$IMAGE"
+      - run: docker build --file apps/api/Dockerfile --target runtime --tag "$API_IMAGE" .
+      - run: docker build --file apps/api/Dockerfile --target migration --tag "$MIGRATION_IMAGE" .
+      - run: docker push "$API_IMAGE"
+      - run: docker push "$MIGRATION_IMAGE"
 
       - name: Deploy migration job
         run: >-
           gcloud run jobs deploy call-now-db-migrate
           --project "${{ vars.GCP_PROJECT_ID }}"
           --region "${{ vars.GCP_REGION }}"
-          --image "$IMAGE"
+          --image "$MIGRATION_IMAGE"
           --set-cloudsql-instances "${{ vars.CLOUD_SQL_CONNECTION_NAME }}"
           --set-secrets "DATABASE_URL=call-now-database-url:${{ vars.DATABASE_URL_SECRET_VERSION }}"
-          --command pnpm
-          --args "--filter,@call-now/api,db:migrate:deploy"
           --service-account "${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}"
           --quiet
       - name: Apply database migrations
@@ -87,7 +88,7 @@ jobs:
           gcloud run deploy call-now-api
           --project "${{ vars.GCP_PROJECT_ID }}"
           --region "${{ vars.GCP_REGION }}"
-          --image "$IMAGE"
+          --image "$API_IMAGE"
           --allow-unauthenticated
           --service-account "${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}"
           --set-cloudsql-instances "${{ vars.CLOUD_SQL_CONNECTION_NAME }}"

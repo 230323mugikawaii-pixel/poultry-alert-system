@@ -18,6 +18,10 @@ secrets.
 Production Cloud SQL must enable automated backups and point-in-time recovery.
 High availability should be enabled before accepting production contracts.
 
+The Dockerfile has separate `runtime` and `migration` targets. The runtime target
+runs as the unprivileged `node` user with production dependencies only. The migration
+target contains Prisma CLI and is deployed only to the Cloud Run migration job.
+
 ## Secret Manager entries
 
 - `call-now-database-url`

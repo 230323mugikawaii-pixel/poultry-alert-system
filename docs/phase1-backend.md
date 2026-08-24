@@ -20,6 +20,8 @@ Implemented areas:
 - Server-side OWNER authorization and audit events
 - Local, CI, staging, and production configuration boundaries
 - Secret Manager and Workload Identity Federation deployment path
+- Separate non-root runtime and migration container targets; the API runtime contains
+  production dependencies only and does not include the Prisma CLI toolchain
 
 Deferred until later phases:
 
@@ -36,8 +38,8 @@ Deferred until later phases:
 1. Copy `.env.example` to an ignored `.env` file and replace local values as needed.
 2. Start PostgreSQL and Mailpit with `docker compose up -d`.
 3. Install dependencies with `pnpm install`.
-4. Generate the client with `pnpm --filter @call-now/api db:generate`.
-5. Apply migrations with `pnpm --filter @call-now/api db:migrate:deploy`.
+4. Generate the client with `pnpm db:generate`.
+5. Apply migrations with `pnpm db:migrate:deploy`.
 6. Start the API with `pnpm dev:api`.
 
 Run `pnpm test:postgres` only against a dedicated database whose name contains

@@ -39,8 +39,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @call-now/api db:validate
-      - run: pnpm --filter @call-now/api db:generate
-      - run: pnpm --filter @call-now/api db:migrate:deploy
+      - run: pnpm db:validate
+      - run: pnpm db:generate
+      - run: pnpm db:migrate:deploy
       - run: pnpm test:postgres
       - run: pnpm verify

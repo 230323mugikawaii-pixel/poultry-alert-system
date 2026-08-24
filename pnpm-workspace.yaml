@@ -2,6 +2,12 @@ packages:
   - "apps/*"
   - "packages/*"
 
+autoInstallPeers: false
+
+overrides:
+  deepmerge-ts: 8.0.0
+  lodash: 4.18.1
+
 onlyBuiltDependencies:
   - esbuild
 allowBuilds:
