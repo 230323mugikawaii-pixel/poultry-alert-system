@@ -1061,9 +1061,6 @@ footer {
 .dashboard-grid {
   display: grid;
 
-  grid-template-columns:
-    repeat(2, minmax(0, 1fr));
-
   gap: 20px;
 }
 
@@ -1124,6 +1121,17 @@ footer {
   flex: 0 0 auto;
 
   font-size: 18px;
+}
+
+.announcement-empty {
+  padding: 16px 2px;
+
+  color: var(--subtext);
+
+  border-top:
+    1px solid var(--border);
+  border-bottom:
+    1px solid var(--border);
 }
 
 
@@ -1859,10 +1867,6 @@ body.app-dialog-open {
   }
 
   .test-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .dashboard-grid {
     grid-template-columns: 1fr;
   }
 

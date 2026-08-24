@@ -13,7 +13,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=13">
+    <link rel="stylesheet" href="css/style.css?v=14">
 </head>
 
 <body>
@@ -733,7 +733,10 @@
       </p>
 
 
-      <div class="google-account-card linked-accounts-card">
+      <div
+        id="linkedGoogleAccountCard"
+        class="google-account-card linked-accounts-card"
+      >
         <div class="linked-accounts-heading">
           <strong>現在設定されている監視用Googleアカウント</strong>
         </div>
@@ -1317,7 +1320,7 @@
   async
   defer
 ></script>
-    <script src="js/app.js?v=13"></script>
+    <script src="js/app.js?v=14"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";

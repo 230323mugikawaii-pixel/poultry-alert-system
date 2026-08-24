@@ -168,27 +168,13 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-25.1";
+  "2026-08-25.2";
 
 /*
   正式なURLが決まった場合だけ設定する公開リンク。
   お知らせは将来APIから同じtitle/url形式で取得できる。
 */
-const announcements = Object.freeze([
-  {
-    title:
-      "システムメンテナンスのお知らせ",
-    url: ""
-  },
-  {
-    title: "新機能追加のお知らせ",
-    url: ""
-  },
-  {
-    title: "契約更新について",
-    url: ""
-  }
-]);
+const announcements = Object.freeze([]);
 const supportUrl = "";
 const appStoreUrl = "";
 const googlePlayUrl = "";
@@ -1087,6 +1073,9 @@ function openGoogleScreen(
   mode = "link"
 ) {
   googleScreenMode = mode;
+  const isLoginMode =
+    mode === "login" &&
+    Boolean(googleEmail);
 
   if (mode === "login") {
     googleLoginVerified = false;
@@ -1101,16 +1090,16 @@ function openGoogleScreen(
 
   setText(
     "googleScreenTitle",
-    mode === "login"
+    isLoginMode
       ? "Googleでログイン"
       : mode === "manage"
         ? "Googleアカウント設定"
-        : "Googleアカウントを設定"
+        : "監視用Googleアカウントを設定"
   );
 
   setText(
     "googleScreenDescription",
-    mode === "login"
+    isLoginMode
       ? "監視用Googleアカウントで本人確認します。"
       : mode === "manage"
         ? "監視用Googleアカウントの変更や連携解除ができます。"
@@ -1119,15 +1108,15 @@ function openGoogleScreen(
 
   setText(
     "googleAuthButton",
-    mode === "login"
+    isLoginMode
       ? "Googleでログイン"
       : "Googleアカウントを設定"
   );
 
   setText(
     "googleCardTitle",
-    mode === "login"
-      ? "監視用Googleアカウントで本人確認"
+    isLoginMode
+      ? "Googleでログイン"
       : "Googleアカウントを設定"
   );
 
@@ -1135,7 +1124,7 @@ function openGoogleScreen(
     "finishGoogleLinkButton",
     mode === "manage"
       ? "設定を完了してホームへ"
-      : mode === "login"
+      : isLoginMode
         ? "ログインしてホームへ"
         : "設定を完了してホームへ"
   );
@@ -1167,11 +1156,28 @@ function renderGoogleAccountOptions() {
     return;
   }
 
+  const accountCard =
+    document.getElementById(
+      "linkedGoogleAccountCard"
+    );
+  const showAccountManagement =
+    googleScreenMode === "manage";
+
+  if (accountCard) {
+    accountCard.classList.toggle(
+      "hidden",
+      !showAccountManagement
+    );
+  }
+
   updateGoogleAuthActionText();
 
   accountList.innerHTML = "";
 
-  if (!googleEmail) {
+  if (
+    showAccountManagement &&
+    !googleEmail
+  ) {
     const emptyMessage =
       document.createElement("p");
 
@@ -1184,7 +1190,9 @@ function renderGoogleAccountOptions() {
     accountList.appendChild(
       emptyMessage
     );
-  } else {
+  } else if (
+    showAccountManagement
+  ) {
     const accountItem =
       document.createElement("div");
 
@@ -1273,12 +1281,12 @@ function updateGoogleAuthActionText() {
   if (googleScreenMode === "login") {
     setText(
       "googleCardTitle",
-      "監視用Googleアカウントで本人確認"
+      "Googleでログイン"
     );
 
     setText(
       "googleAuthDescription",
-      "Googleの認証画面で、連携済みのアカウントを選択してください。Call NowがGoogleのパスワードを保存することはありません。"
+      "設定済みの監視用Googleアカウントで本人確認してください。Call NowがGoogleのパスワードを保存することはありません。"
     );
 
     setText(
@@ -1546,7 +1554,7 @@ async function handleGoogleTokenResponse(
     ) {
       setText(
         "googleError",
-        `${selectedEmail} は設定されている監視用Googleアカウントと一致しません。登録済みのアカウントを選択してください。`
+        "選択したアカウントは、設定済みの監視用Googleアカウントと一致しません。登録済みのアカウントを選択してください。"
       );
 
       return;
@@ -1582,7 +1590,7 @@ async function handleGoogleTokenResponse(
     if (googleAuthMode === "login") {
       setText(
         "googleError",
-        `${selectedEmail} で本人確認が完了しました。`
+        "監視用Googleアカウントで本人確認が完了しました。"
       );
     } else if (
       googleAuthMode === "replace" &&
@@ -1995,6 +2003,7 @@ function renderAnnouncements() {
   }
 
   list.replaceChildren();
+  let renderedAnnouncementCount = 0;
 
   announcements.forEach(
     (announcement) => {
@@ -2050,8 +2059,21 @@ function renderAnnouncements() {
       }
 
       list.appendChild(item);
+      renderedAnnouncementCount += 1;
     }
   );
+
+  if (renderedAnnouncementCount === 0) {
+    const emptyMessage =
+      document.createElement("li");
+
+    emptyMessage.className =
+      "announcement-empty";
+    emptyMessage.textContent =
+      "お知らせは準備中です";
+
+    list.appendChild(emptyMessage);
+  }
 }
 
 
