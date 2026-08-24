@@ -168,7 +168,30 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-24.2";
+  "2026-08-25.1";
+
+/*
+  正式なURLが決まった場合だけ設定する公開リンク。
+  お知らせは将来APIから同じtitle/url形式で取得できる。
+*/
+const announcements = Object.freeze([
+  {
+    title:
+      "システムメンテナンスのお知らせ",
+    url: ""
+  },
+  {
+    title: "新機能追加のお知らせ",
+    url: ""
+  },
+  {
+    title: "契約更新について",
+    url: ""
+  }
+]);
+const supportUrl = "";
+const appStoreUrl = "";
+const googlePlayUrl = "";
 
 let alarmAudioContext = null;
 let alarmRepeatTimer = null;
@@ -223,6 +246,8 @@ window.addEventListener("DOMContentLoaded", () => {
   initializeAlarmNotification();
   normalizeKeywords();
   updatePrice();
+  renderAnnouncements();
+  renderHelpExternalLinks();
 
   if (contractStorageMigrationPending) {
     saveData();
@@ -1079,40 +1104,40 @@ function openGoogleScreen(
     mode === "login"
       ? "Googleでログイン"
       : mode === "manage"
-        ? "Googleアカウントを管理"
-        : "Googleアカウントを連携"
+        ? "Googleアカウント設定"
+        : "Googleアカウントを設定"
   );
 
   setText(
     "googleScreenDescription",
     mode === "login"
-      ? "連携済みのGoogleアカウントを選んで、本人確認をします。"
+      ? "監視用Googleアカウントで本人確認します。"
       : mode === "manage"
         ? "監視用Googleアカウントの変更や連携解除ができます。"
-        : "通知を確認するGmailを1件連携します。"
+        : "通知の確認と本人確認に使うGoogleアカウントを設定します。"
   );
 
   setText(
     "googleAuthButton",
     mode === "login"
       ? "Googleでログイン"
-      : "Googleアカウントを連携"
+      : "Googleアカウントを設定"
   );
 
   setText(
     "googleCardTitle",
     mode === "login"
-      ? "連携済みアカウントで本人確認"
-      : "Googleアカウントを連携"
+      ? "監視用Googleアカウントで本人確認"
+      : "Googleアカウントを設定"
   );
 
   setText(
     "finishGoogleLinkButton",
     mode === "manage"
-      ? "管理を完了してホームへ"
+      ? "設定を完了してホームへ"
       : mode === "login"
         ? "ログインしてホームへ"
-        : "連携を完了してホームへ"
+        : "設定を完了してホームへ"
   );
 
   showOnlyScreen(
@@ -1154,7 +1179,7 @@ function renderGoogleAccountOptions() {
       "google-account-empty";
 
     emptyMessage.textContent =
-      "連携済みのGoogleアカウントはありません。";
+      "監視用Googleアカウントは未設定です。";
 
     accountList.appendChild(
       emptyMessage
@@ -1191,13 +1216,6 @@ function renderGoogleAccountOptions() {
       accountItem
     );
   }
-
-  setText(
-    "linkedGoogleAccountCount",
-    googleEmail
-      ? "1件連携中"
-      : "未連携"
-  );
 
   const finishButton =
     document.getElementById(
@@ -1236,7 +1254,7 @@ function updateGoogleAuthActionText() {
   ) {
     setText(
       "googleCardTitle",
-      "Googleアカウントを連携"
+      "Googleアカウントを設定"
     );
 
     setText(
@@ -1246,7 +1264,7 @@ function updateGoogleAuthActionText() {
 
     setText(
       "googleAuthButton",
-      "Googleアカウントを連携"
+      "Googleアカウントを設定"
     );
 
     return;
@@ -1255,7 +1273,7 @@ function updateGoogleAuthActionText() {
   if (googleScreenMode === "login") {
     setText(
       "googleCardTitle",
-      "連携済みアカウントで本人確認"
+      "監視用Googleアカウントで本人確認"
     );
 
     setText(
@@ -1273,7 +1291,7 @@ function updateGoogleAuthActionText() {
 
   setText(
     "googleCardTitle",
-    "Googleアカウントを連携"
+    "Googleアカウントを設定"
   );
 
   setText(
@@ -1283,7 +1301,7 @@ function updateGoogleAuthActionText() {
 
   setText(
     "googleAuthButton",
-    "Googleアカウントを連携"
+    "Googleアカウントを設定"
   );
 }
 
@@ -1364,7 +1382,7 @@ function finishGoogleAccountLinking() {
   ) {
     setText(
       "googleError",
-      "監視用Googleアカウントを1件連携してください。"
+      "監視用Googleアカウントを設定してください。"
     );
 
     return;
@@ -1528,7 +1546,7 @@ async function handleGoogleTokenResponse(
     ) {
       setText(
         "googleError",
-        `${selectedEmail} はCall Nowに連携されていません。連携済みのGoogleアカウントを選択してください。`
+        `${selectedEmail} は設定されている監視用Googleアカウントと一致しません。登録済みのアカウントを選択してください。`
       );
 
       return;
@@ -1701,18 +1719,6 @@ function renderContractInformation() {
   setText(
     "contractKeywordCount",
     `${keywords.length}個`
-  );
-
-  setText(
-    "contractGoogleAccountLimit",
-    "1件（固定）"
-  );
-
-  setText(
-    "contractGoogleAccountStatus",
-    googleEmail
-      ? "連携済み"
-      : "未連携"
   );
 
   setText(
@@ -1911,6 +1917,193 @@ function formatDate(dateValue) {
 
 
 /* ========================================
+   お知らせ・外部リンク
+======================================== */
+
+function getSafeHttpsUrl(rawUrl) {
+  if (
+    typeof rawUrl !== "string" ||
+    !rawUrl.trim()
+  ) {
+    return "";
+  }
+
+  try {
+    const parsedUrl =
+      new URL(rawUrl);
+
+    return parsedUrl.protocol ===
+        "https:" &&
+      !parsedUrl.username &&
+      !parsedUrl.password
+      ? parsedUrl.href
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+
+function configureExternalLink(
+  elementId,
+  rawUrl
+) {
+  const link =
+    document.getElementById(
+      elementId
+    );
+
+  if (!link) {
+    return false;
+  }
+
+  const safeUrl =
+    getSafeHttpsUrl(rawUrl);
+
+  link.classList.toggle(
+    "hidden",
+    !safeUrl
+  );
+
+  if (!safeUrl) {
+    link.removeAttribute("href");
+    return false;
+  }
+
+  link.setAttribute("href", safeUrl);
+  link.setAttribute(
+    "target",
+    "_blank"
+  );
+  link.setAttribute(
+    "rel",
+    "noopener noreferrer"
+  );
+
+  return true;
+}
+
+
+function renderAnnouncements() {
+  const list =
+    document.getElementById(
+      "announcementList"
+    );
+
+  if (!list) {
+    return;
+  }
+
+  list.replaceChildren();
+
+  announcements.forEach(
+    (announcement) => {
+      const item =
+        document.createElement("li");
+      const safeUrl =
+        getSafeHttpsUrl(
+          announcement.url
+        );
+      const title = String(
+        announcement.title || ""
+      ).trim();
+
+      if (!title) {
+        return;
+      }
+
+      item.className =
+        "announcement-item";
+
+      if (!safeUrl) {
+        const text =
+          document.createElement(
+            "span"
+          );
+
+        text.textContent = title;
+        item.appendChild(text);
+      } else {
+        const link =
+          document.createElement("a");
+        const indicator =
+          document.createElement(
+            "span"
+          );
+
+        link.href = safeUrl;
+        link.target = "_blank";
+        link.rel =
+          "noopener noreferrer";
+        link.textContent = title;
+
+        indicator.className =
+          "announcement-link-indicator";
+        indicator.textContent = "↗";
+        indicator.setAttribute(
+          "aria-hidden",
+          "true"
+        );
+
+        link.appendChild(indicator);
+        item.appendChild(link);
+      }
+
+      list.appendChild(item);
+    }
+  );
+}
+
+
+function renderHelpExternalLinks() {
+  const hasSupportLink =
+    configureExternalLink(
+      "supportLink",
+      supportUrl
+    );
+
+  setText(
+    "supportStatus",
+    hasSupportLink
+      ? "個別サポート窓口をご利用いただけます。"
+      : "個別サポート窓口は準備中です。"
+  );
+
+  const hasAppStoreLink =
+    configureExternalLink(
+      "appStoreReviewLink",
+      appStoreUrl
+    );
+  const hasGooglePlayLink =
+    configureExternalLink(
+      "googlePlayReviewLink",
+      googlePlayUrl
+    );
+  const storeLinks =
+    document.getElementById(
+      "storeReviewLinks"
+    );
+  const hasStoreLink =
+    hasAppStoreLink ||
+    hasGooglePlayLink;
+
+  if (storeLinks) {
+    storeLinks.classList.toggle(
+      "hidden",
+      !hasStoreLink
+    );
+  }
+
+  setText(
+    "storeReviewStatus",
+    hasStoreLink
+      ? "正式ストアページから、ご意見・評価をお寄せいただけます。"
+      : "正式公開後は、App StoreまたはGoogle Playのレビューで受け付ける予定です。現在はストアページ未公開のため、レビューリンクは掲載していません。"
+  );
+}
+
+
+/* ========================================
    管理画面
 ======================================== */
 
@@ -1925,8 +2118,6 @@ function openApp() {
 
   renderContractInformation();
 
-  renderConnectedGoogleAccounts();
-
   showAppPage(
     "homePage"
   );
@@ -1934,50 +2125,6 @@ function openApp() {
   window.scrollTo({
     top: 0
   });
-}
-
-
-function renderConnectedGoogleAccounts() {
-  const container =
-    document.getElementById(
-      "connectedGoogleAccounts"
-    );
-
-  if (!container) {
-    return;
-  }
-
-  container.innerHTML = "";
-
-  if (!googleEmail) {
-    container.innerHTML = `
-      <p class="connected-account-summary">
-        未連携
-      </p>
-      <p>監視用Googleアカウントを連携してください。</p>
-    `;
-    return;
-  }
-
-  const summary =
-    document.createElement("p");
-
-  summary.className =
-    "connected-account-summary";
-
-  summary.textContent =
-    "1件連携中";
-
-  const email =
-    document.createElement("p");
-
-  email.className =
-    "connected-account-email";
-
-  email.textContent = googleEmail;
-
-  container.appendChild(summary);
-  container.appendChild(email);
 }
 
 
