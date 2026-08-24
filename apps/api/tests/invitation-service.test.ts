@@ -9,10 +9,11 @@ const ownerUserId = "00000000-0000-0000-0000-000000000001";
 const now = new Date("2026-08-24T00:00:00.000Z");
 
 async function createFixture(seatLimit = 5) {
+  let currentTime = now;
   const teamRepository = new MemoryTeamRepository();
   const teamService = new TeamService({
     repository: teamRepository,
-    now: () => now,
+    now: () => currentTime,
     teamCodeGenerator: () => "482731"
   });
   const team = await teamService.createTeam({ ownerUserId, seatLimit });
@@ -25,14 +26,17 @@ async function createFixture(seatLimit = 5) {
     invitationTtlDays: 30,
     joinGrantTtlMinutes: 15,
     lineLinkTtlHours: 24,
-    now: () => now
+    now: () => currentTime
   });
   return {
     team,
     teamRepository,
     teamService,
     invitationRepository,
-    invitationService
+    invitationService,
+    setNow: (value: Date) => {
+      currentTime = value;
+    }
   };
 }
 
@@ -159,6 +163,39 @@ describe("InvitationService", () => {
       usedCount: 1,
       maxUses: 1
     });
+  });
+
+  it("persists expired invitation and link states when they are observed", async () => {
+    const fixture = await createFixture(2);
+    const issued =
+      await fixture.invitationService.reissuePasswordInvitation(ownerUserId);
+    const line = await fixture.invitationService.createLineInvitationLink(
+      ownerUserId,
+      issued.invitation.id
+    );
+    const lineToken = new URL(line.invitationLink).searchParams.get("token");
+
+    fixture.setNow(new Date("2026-08-25T00:00:01.000Z"));
+    await expect(
+      fixture.invitationService.verifyLineInvitation(lineToken ?? "")
+    ).rejects.toMatchObject({ code: "INVITATION_INVALID_OR_EXPIRED" });
+    expect(fixture.invitationRepository.links[0]?.status).toBe("EXPIRED");
+    expect(fixture.invitationRepository.invitations[0]?.status).toBe("ACTIVE");
+
+    fixture.setNow(new Date("2026-09-24T00:00:01.000Z"));
+    await expect(
+      fixture.invitationService.verifyPasswordInvitation({
+        teamCode: "482731",
+        password: issued.password,
+        attemptKey: "192.0.2.80"
+      })
+    ).rejects.toMatchObject({ code: "INVITATION_INVALID_OR_EXPIRED" });
+    expect(fixture.invitationRepository.invitations[0]?.status).toBe("EXPIRED");
+    await expect(
+      fixture.invitationService.listInvitations(ownerUserId)
+    ).resolves.toEqual([
+      expect.objectContaining({ id: issued.invitation.id, status: "EXPIRED" })
+    ]);
   });
 
   it("locks repeated password failures for the team and source", async () => {

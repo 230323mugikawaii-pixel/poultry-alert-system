@@ -71,6 +71,7 @@ export class MemoryInvitationRepository implements InvitationRepository {
     return this.withLock(async () => {
       const context = this.requireTeam(input.teamId);
       this.requireOwner(input.actorUserId);
+      this.expireStale(input.now);
       if (context.pendingSeatLimit !== null) {
         throw new AppError("INVITATIONS_SUSPENDED", "pending", 409);
       }
@@ -100,8 +101,10 @@ export class MemoryInvitationRepository implements InvitationRepository {
   }
 
   public async findPasswordInvitation(
-    teamCode: string
+    teamCode: string,
+    now: Date
   ): Promise<InvitationRecord | null> {
+    this.expireStale(now);
     const invitation = [...this.invitations]
       .reverse()
       .find((candidate) => candidate.teamCode === teamCode);
@@ -116,6 +119,7 @@ export class MemoryInvitationRepository implements InvitationRepository {
     readonly now: Date;
   }): Promise<InvitationLinkRecord> {
     this.requireOwner(input.actorUserId);
+    this.expireStale(input.now);
     const invitation = this.invitations.find(
       ({ id }) => id === input.invitationId
     );
@@ -136,8 +140,10 @@ export class MemoryInvitationRepository implements InvitationRepository {
   }
 
   public async findInvitationLink(
-    tokenHash: string
+    tokenHash: string,
+    now: Date
   ): Promise<InvitationLinkRecord | null> {
+    this.expireStale(now);
     const link = this.links.find(
       (candidate) => candidate.tokenHash === tokenHash
     );
@@ -163,6 +169,7 @@ export class MemoryInvitationRepository implements InvitationRepository {
     readonly now: Date;
   }): Promise<JoinResult> {
     return this.withLock(async () => {
+      this.expireStale(input.now);
       const previous = this.redemptions.get(input.idempotencyKey);
       if (previous) {
         if (previous.userId !== input.userId) {
@@ -255,7 +262,11 @@ export class MemoryInvitationRepository implements InvitationRepository {
     });
   }
 
-  public async listInvitations(): Promise<readonly PublicInvitationRecord[]> {
+  public async listInvitations(
+    _teamId: string,
+    now: Date
+  ): Promise<readonly PublicInvitationRecord[]> {
+    this.expireStale(now);
     return [...this.invitations].reverse().map(toPublicInvitation);
   }
 
@@ -503,6 +514,24 @@ export class MemoryInvitationRepository implements InvitationRepository {
       }
     }
     void now;
+  }
+
+  private expireStale(now: Date): void {
+    const expiredInvitationIds = new Set<string>();
+    for (const invitation of this.invitations) {
+      if (invitation.status === "ACTIVE" && invitation.expiresAt <= now) {
+        invitation.status = "EXPIRED";
+        expiredInvitationIds.add(invitation.id);
+      }
+    }
+    for (const link of this.links) {
+      if (
+        link.status === "ACTIVE" &&
+        (link.expiresAt <= now || expiredInvitationIds.has(link.invitationId))
+      ) {
+        link.status = "EXPIRED";
+      }
+    }
   }
 
   private async withLock<T>(operation: () => Promise<T>): Promise<T> {

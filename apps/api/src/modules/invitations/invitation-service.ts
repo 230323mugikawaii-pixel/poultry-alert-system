@@ -90,8 +90,10 @@ export class InvitationService {
       );
     }
 
-    const invitation =
-      await this.options.repository.findPasswordInvitation(teamCode);
+    const invitation = await this.options.repository.findPasswordInvitation(
+      teamCode,
+      now
+    );
     const passwordHash =
       invitation?.passwordHash ?? (await this.dummyPasswordHash);
     const verified = await argon2
@@ -124,7 +126,8 @@ export class InvitationService {
   }> {
     const context = await this.options.teamService.requireOwner(userId);
     const invitations = await this.options.repository.listInvitations(
-      context.teamId
+      context.teamId,
+      this.now()
     );
     let current = invitations.find((invitation) =>
       invitationId
@@ -172,7 +175,8 @@ export class InvitationService {
     }
     const now = this.now();
     const link = await this.options.repository.findInvitationLink(
-      this.hashSecret(token)
+      this.hashSecret(token),
+      now
     );
     if (!link) {
       throw invalidInvitationError();
@@ -211,7 +215,7 @@ export class InvitationService {
     userId: string
   ): Promise<readonly PublicInvitationRecord[]> {
     const context = await this.options.teamService.requireOwner(userId);
-    return this.options.repository.listInvitations(context.teamId);
+    return this.options.repository.listInvitations(context.teamId, this.now());
   }
 
   public async revokeInvitation(

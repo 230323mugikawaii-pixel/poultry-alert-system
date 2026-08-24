@@ -47,6 +47,7 @@ export class PrismaInvitationRepository implements InvitationRepository {
           throw invitationExhaustedError();
         }
 
+        await expireStaleInvitations(transaction, input.teamId, input.now);
         await replaceActiveInvitations(transaction, input.teamId, input.now);
         const invitation = await transaction.invitation.create({
           data: {
@@ -83,8 +84,18 @@ export class PrismaInvitationRepository implements InvitationRepository {
   }
 
   public async findPasswordInvitation(
-    teamCode: string
+    teamCode: string,
+    now: Date
   ): Promise<InvitationRecord | null> {
+    const teamIdentity = await this.database.team.findUnique({
+      where: { publicCode: teamCode },
+      select: { id: true, status: true }
+    });
+    if (!teamIdentity || teamIdentity.status !== "ACTIVE") {
+      return null;
+    }
+    await expireStaleInvitations(this.database, teamIdentity.id, now);
+
     const team = await this.database.team.findUnique({
       where: { publicCode: teamCode },
       include: {
@@ -120,18 +131,31 @@ export class PrismaInvitationRepository implements InvitationRepository {
   }): Promise<InvitationLinkRecord> {
     return this.database.$transaction(
       async (transaction) => {
-        const invitation = await transaction.invitation.findUnique({
+        const invitationIdentity = await transaction.invitation.findUnique({
           where: { id: input.invitationId },
           include: { team: { include: { subscription: true } } }
         });
-        if (!invitation?.team.subscription) {
+        if (!invitationIdentity?.team.subscription) {
           throw new AppError(
             "INVITATION_NOT_FOUND",
             "招待が見つかりません。",
             404
           );
         }
-        await requireOwner(transaction, invitation.teamId, input.actorUserId);
+        await requireOwner(
+          transaction,
+          invitationIdentity.teamId,
+          input.actorUserId
+        );
+        await expireStaleInvitations(
+          transaction,
+          invitationIdentity.teamId,
+          input.now
+        );
+        const invitation = await transaction.invitation.findUniqueOrThrow({
+          where: { id: input.invitationId },
+          include: { team: { include: { subscription: true } } }
+        });
         const subscription = await lockSubscription(
           transaction,
           invitation.teamId
@@ -191,8 +215,22 @@ export class PrismaInvitationRepository implements InvitationRepository {
   }
 
   public async findInvitationLink(
-    tokenHash: string
+    tokenHash: string,
+    now: Date
   ): Promise<InvitationLinkRecord | null> {
+    const linkIdentity = await this.database.invitationLink.findUnique({
+      where: { tokenHash },
+      select: { invitation: { select: { teamId: true } } }
+    });
+    if (!linkIdentity) {
+      return null;
+    }
+    await expireStaleInvitations(
+      this.database,
+      linkIdentity.invitation.teamId,
+      now
+    );
+
     const link = await this.database.invitationLink.findUnique({
       where: { tokenHash },
       include: {
@@ -252,6 +290,7 @@ export class PrismaInvitationRepository implements InvitationRepository {
     readonly idempotencyKey: string;
     readonly now: Date;
   }): Promise<JoinResult> {
+    await expireJoinGrantInvitation(this.database, input.secretHash, input.now);
     return retrySerializableTransaction(
       () =>
         this.database.$transaction(
@@ -466,8 +505,10 @@ export class PrismaInvitationRepository implements InvitationRepository {
   }
 
   public async listInvitations(
-    teamId: string
+    teamId: string,
+    now: Date
   ): Promise<readonly PublicInvitationRecord[]> {
+    await expireStaleInvitations(this.database, teamId, now);
     const invitations = await this.database.invitation.findMany({
       where: { teamId },
       orderBy: { createdAt: "desc" },
@@ -848,6 +889,67 @@ async function countActiveMembers(
 ): Promise<number> {
   return transaction.teamMembership.count({
     where: { teamId, role: "MEMBER", status: "ACTIVE" }
+  });
+}
+
+async function expireJoinGrantInvitation(
+  database: DatabaseClient,
+  secretHash: string,
+  now: Date
+): Promise<void> {
+  const challenge = await database.authChallenge.findUnique({
+    where: { secretHash },
+    select: { kind: true, payload: true }
+  });
+  const payload = parseJoinGrantPayload(challenge?.payload);
+  if (challenge?.kind !== "JOIN_GRANT" || !payload) {
+    return;
+  }
+  const invitation = await database.invitation.findUnique({
+    where: { id: payload.invitationId },
+    select: { teamId: true }
+  });
+  if (invitation) {
+    await expireStaleInvitations(database, invitation.teamId, now);
+  }
+}
+
+async function expireStaleInvitations(
+  database: Pick<DatabaseClient, "invitation" | "invitationLink">,
+  teamId: string,
+  now: Date
+): Promise<void> {
+  const expiredInvitations = await database.invitation.findMany({
+    where: { teamId, status: "ACTIVE", expiresAt: { lte: now } },
+    select: { id: true }
+  });
+  const expiredInvitationIds = expiredInvitations.map(({ id }) => id);
+
+  if (expiredInvitationIds.length > 0) {
+    await database.invitationLink.updateMany({
+      where: {
+        invitationId: { in: expiredInvitationIds },
+        status: "ACTIVE"
+      },
+      data: { status: "EXPIRED", invalidatedAt: now }
+    });
+    await database.invitation.updateMany({
+      where: { id: { in: expiredInvitationIds }, status: "ACTIVE" },
+      data: {
+        status: "EXPIRED",
+        invalidatedAt: now,
+        invalidationNote: "TTL_EXPIRED"
+      }
+    });
+  }
+
+  await database.invitationLink.updateMany({
+    where: {
+      status: "ACTIVE",
+      expiresAt: { lte: now },
+      invitation: { teamId }
+    },
+    data: { status: "EXPIRED", invalidatedAt: now }
   });
 }
 

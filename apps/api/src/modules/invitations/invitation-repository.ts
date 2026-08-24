@@ -76,7 +76,10 @@ export interface InvitationRepository {
     readonly expiresAt: Date;
     readonly now: Date;
   }): Promise<InvitationRecord>;
-  findPasswordInvitation(teamCode: string): Promise<InvitationRecord | null>;
+  findPasswordInvitation(
+    teamCode: string,
+    now: Date
+  ): Promise<InvitationRecord | null>;
   createInvitationLink(input: {
     readonly invitationId: string;
     readonly actorUserId: string;
@@ -84,7 +87,10 @@ export interface InvitationRepository {
     readonly expiresAt: Date;
     readonly now: Date;
   }): Promise<InvitationLinkRecord>;
-  findInvitationLink(tokenHash: string): Promise<InvitationLinkRecord | null>;
+  findInvitationLink(
+    tokenHash: string,
+    now: Date
+  ): Promise<InvitationLinkRecord | null>;
   createJoinGrant(input: {
     readonly secretHash: string;
     readonly invitationId: string;
@@ -97,7 +103,10 @@ export interface InvitationRepository {
     readonly idempotencyKey: string;
     readonly now: Date;
   }): Promise<JoinResult>;
-  listInvitations(teamId: string): Promise<readonly PublicInvitationRecord[]>;
+  listInvitations(
+    teamId: string,
+    now: Date
+  ): Promise<readonly PublicInvitationRecord[]>;
   revokeInvitation(input: {
     readonly teamId: string;
     readonly invitationId: string;
