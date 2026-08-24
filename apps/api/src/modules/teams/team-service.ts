@@ -78,7 +78,7 @@ export class TeamService {
   public async listMembers(
     userId: string
   ): Promise<readonly TeamMemberRecord[]> {
-    const context = await this.getCurrentTeam(userId);
+    const context = await this.requireOwner(userId);
     return this.options.repository.listActiveMembers(context.teamId);
   }
 
