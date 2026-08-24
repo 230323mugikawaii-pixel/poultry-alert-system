@@ -14,22 +14,33 @@
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:generate": "prisma generate",
+    "db:validate": "prisma validate",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy"
   },
   "dependencies": {
     "@fastify/cookie": "latest",
     "@fastify/helmet": "latest",
     "@fastify/rate-limit": "latest",
     "@fastify/type-provider-typebox": "latest",
+    "@prisma/adapter-pg": "7.2.0",
+    "@prisma/client": "7.2.0",
     "@sinclair/typebox": "latest",
-    "fastify": "latest"
+    "dotenv": "latest",
+    "fastify": "latest",
+    "pg": "8.16.3"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.6",
     "@eslint/js": "latest",
     "@types/node": "latest",
+    "@types/pg": "8.15.6",
     "@vitest/coverage-v8": "latest",
     "eslint": "latest",
     "prettier": "latest",
+    "prisma": "7.2.0",
     "tsx": "latest",
     "typescript": "6.0.2",
     "typescript-eslint": "latest",

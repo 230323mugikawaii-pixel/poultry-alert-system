@@ -8,7 +8,8 @@ const environment: AppEnvironment = {
   PORT: 8080,
   LOG_LEVEL: "silent",
   PUBLIC_ORIGIN: "https://test.call-now.example",
-  COOKIE_NAME: "callnow_test_session"
+  COOKIE_NAME: "callnow_test_session",
+  DATABASE_URL: "postgresql://test:test@127.0.0.1:5432/test"
 };
 
 const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
@@ -43,4 +44,3 @@ describe("system routes", () => {
     });
   });
 });
-

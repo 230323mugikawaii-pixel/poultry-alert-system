@@ -1,0 +1,423 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserStatus {
+  ACTIVE
+  LOCKED
+  DELETED
+}
+
+enum CredentialType {
+  PASSKEY
+  PASSWORD
+}
+
+enum ChallengeKind {
+  MAGIC_LINK
+  PASSKEY_REGISTRATION
+  PASSKEY_AUTHENTICATION
+  JOIN_GRANT
+  OWNER_TRANSFER
+}
+
+enum TeamStatus {
+  ACTIVE
+  SUSPENDED
+  CANCELED
+}
+
+enum MembershipRole {
+  OWNER
+  MEMBER
+}
+
+enum MembershipStatus {
+  ACTIVE
+  LEFT
+  REMOVED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+enum SubscriptionChangeStatus {
+  AWAITING_PAYMENT
+  PENDING_CAPACITY
+  APPLIED
+  CANCELED
+  FAILED
+}
+
+enum InvitationKind {
+  PASSWORD_CAPACITY
+}
+
+enum InvitationStatus {
+  ACTIVE
+  EXHAUSTED
+  EXPIRED
+  REVOKED
+  REPLACED
+}
+
+enum RedemptionStatus {
+  STARTED
+  COMPLETED
+  REJECTED
+}
+
+enum NotificationChannel {
+  WEB_PUSH
+  EMAIL
+}
+
+enum NotificationTargetStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum GmailConnectionStatus {
+  ACTIVE
+  REVOKED
+  ERROR
+}
+
+enum OwnerTransferStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  CANCELED
+}
+
+model User {
+  id                        String               @id @default(uuid()) @db.Uuid
+  email                     String               @unique @db.VarChar(320)
+  displayName               String?              @db.VarChar(120)
+  status                    UserStatus           @default(ACTIVE)
+  emailVerifiedAt           DateTime?            @db.Timestamptz(3)
+  lockedUntil               DateTime?            @db.Timestamptz(3)
+  createdAt                 DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt                 DateTime             @updatedAt @db.Timestamptz(3)
+  deletedAt                 DateTime?            @db.Timestamptz(3)
+  credentials               AuthCredential[]
+  challenges                AuthChallenge[]
+  sessions                  Session[]
+  devices                   Device[]
+  memberships               TeamMembership[]
+  removedMemberships        TeamMembership[]     @relation("MembershipRemover")
+  requestedChanges          SubscriptionChange[]
+  createdInvitations        Invitation[]
+  redemptions               InvitationRedemption[]
+  initiatedOwnerTransfers   OwnerTransfer[]
+  auditEvents               AuditEvent[]
+
+  @@map("users")
+}
+
+model AuthCredential {
+  id                 String         @id @default(uuid()) @db.Uuid
+  userId             String         @db.Uuid
+  type               CredentialType
+  credentialId       String?        @unique @db.VarChar(1024)
+  publicKey           Bytes?
+  signCount           BigInt?        @default(0)
+  transports          String[]       @default([])
+  passwordHash        String?        @db.VarChar(255)
+  label               String?        @db.VarChar(100)
+  backupEligible      Boolean?       @default(false)
+  backupState         Boolean?       @default(false)
+  createdAt           DateTime       @default(now()) @db.Timestamptz(3)
+  lastUsedAt          DateTime?      @db.Timestamptz(3)
+  revokedAt           DateTime?      @db.Timestamptz(3)
+  user                User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@map("auth_credentials")
+}
+
+model AuthChallenge {
+  id                 String        @id @default(uuid()) @db.Uuid
+  userId             String?       @db.Uuid
+  kind               ChallengeKind
+  email              String?       @db.VarChar(320)
+  secretHash         String        @unique @db.Char(64)
+  payload            Json?
+  attemptCount       Int           @default(0)
+  maxAttempts        Int           @default(5)
+  expiresAt          DateTime      @db.Timestamptz(3)
+  consumedAt         DateTime?     @db.Timestamptz(3)
+  createdAt          DateTime      @default(now()) @db.Timestamptz(3)
+  user               User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email, kind, createdAt])
+  @@index([expiresAt])
+  @@map("auth_challenges")
+}
+
+model Device {
+  id                  String               @id @default(uuid()) @db.Uuid
+  userId              String               @db.Uuid
+  name                String?              @db.VarChar(120)
+  userAgentHash       String?              @db.Char(64)
+  createdAt           DateTime             @default(now()) @db.Timestamptz(3)
+  lastSeenAt          DateTime?            @db.Timestamptz(3)
+  revokedAt           DateTime?            @db.Timestamptz(3)
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions            Session[]
+  notificationTargets NotificationTarget[]
+
+  @@index([userId, revokedAt])
+  @@map("devices")
+}
+
+model Session {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @db.Uuid
+  deviceId      String?   @db.Uuid
+  tokenHash     String    @unique @db.Char(64)
+  ipHash        String?   @db.Char(64)
+  userAgentHash String?   @db.Char(64)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+  lastSeenAt    DateTime  @default(now()) @db.Timestamptz(3)
+  idleExpiresAt DateTime  @db.Timestamptz(3)
+  expiresAt     DateTime  @db.Timestamptz(3)
+  revokedAt     DateTime? @db.Timestamptz(3)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device        Device?   @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model Team {
+  id              String             @id @default(uuid()) @db.Uuid
+  publicCode      String             @unique @db.Char(6)
+  name            String?            @db.VarChar(120)
+  status          TeamStatus         @default(ACTIVE)
+  createdAt       DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime           @updatedAt @db.Timestamptz(3)
+  memberships     TeamMembership[]
+  subscription    Subscription?
+  keywords        TeamKeyword[]
+  invitations     Invitation[]
+  gmailConnection GmailConnection?
+  ownerTransfers  OwnerTransfer[]
+  auditEvents     AuditEvent[]
+
+  @@map("teams")
+}
+
+model TeamMembership {
+  id                  String                 @id @default(uuid()) @db.Uuid
+  teamId              String                 @db.Uuid
+  userId              String                 @db.Uuid
+  role                MembershipRole
+  status              MembershipStatus       @default(ACTIVE)
+  joinedAt            DateTime               @default(now()) @db.Timestamptz(3)
+  leftAt              DateTime?              @db.Timestamptz(3)
+  removedAt           DateTime?              @db.Timestamptz(3)
+  removedByUserId     String?                @db.Uuid
+  team                Team                   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user                User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  removedByUser       User?                  @relation("MembershipRemover", fields: [removedByUserId], references: [id], onDelete: SetNull)
+  redemptions         InvitationRedemption[]
+  notificationTargets NotificationTarget[]
+  ownerTransferTarget OwnerTransfer[]
+
+  @@unique([teamId, userId])
+  @@index([teamId, role, status])
+  @@map("team_memberships")
+}
+
+model Subscription {
+  id                    String               @id @default(uuid()) @db.Uuid
+  teamId                String               @unique @db.Uuid
+  status                SubscriptionStatus   @default(ACTIVE)
+  seatLimit             Int                  @default(0)
+  pendingSeatLimit      Int?
+  currentTermAmountYen  Int                  @default(6000)
+  currentTermStartedAt  DateTime             @db.Timestamptz(3)
+  currentTermEndsAt     DateTime             @db.Timestamptz(3)
+  pricingVersion        String               @default("2026-08") @db.VarChar(32)
+  createdAt             DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime             @updatedAt @db.Timestamptz(3)
+  team                  Team                 @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  changes               SubscriptionChange[]
+
+  @@map("subscriptions")
+}
+
+model SubscriptionChange {
+  id                    String                   @id @default(uuid()) @db.Uuid
+  subscriptionId        String                   @db.Uuid
+  requestedByUserId     String                   @db.Uuid
+  previousSeatLimit     Int
+  requestedSeatLimit    Int
+  status                SubscriptionChangeStatus
+  createdAt             DateTime                 @default(now()) @db.Timestamptz(3)
+  appliedAt             DateTime?                @db.Timestamptz(3)
+  canceledAt            DateTime?                @db.Timestamptz(3)
+  subscription          Subscription             @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  requestedByUser       User                     @relation(fields: [requestedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([subscriptionId, status])
+  @@map("subscription_changes")
+}
+
+model TeamKeyword {
+  id         String   @id @default(uuid()) @db.Uuid
+  teamId     String   @db.Uuid
+  keyword    String   @db.VarChar(100)
+  normalized String   @db.VarChar(100)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  team       Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, normalized])
+  @@map("team_keywords")
+}
+
+model Invitation {
+  id               String                 @id @default(uuid()) @db.Uuid
+  teamId           String                 @db.Uuid
+  kind             InvitationKind         @default(PASSWORD_CAPACITY)
+  status           InvitationStatus       @default(ACTIVE)
+  passwordHash     String                 @db.VarChar(255)
+  maxUses          Int
+  usedCount        Int                    @default(0)
+  expiresAt        DateTime               @db.Timestamptz(3)
+  createdByUserId  String                 @db.Uuid
+  replacedById     String?                @unique @db.Uuid
+  invalidatedAt    DateTime?              @db.Timestamptz(3)
+  invalidationNote String?                @db.VarChar(120)
+  createdAt        DateTime               @default(now()) @db.Timestamptz(3)
+  team             Team                   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdByUser    User                   @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  replacedBy       Invitation?            @relation("InvitationReplacement", fields: [replacedById], references: [id], onDelete: SetNull)
+  replaces         Invitation?            @relation("InvitationReplacement")
+  links            InvitationLink[]
+  redemptions      InvitationRedemption[]
+
+  @@index([teamId, status])
+  @@index([expiresAt])
+  @@map("invitations")
+}
+
+model InvitationLink {
+  id            String                 @id @default(uuid()) @db.Uuid
+  invitationId  String                 @db.Uuid
+  tokenHash     String                 @unique @db.Char(64)
+  status        InvitationStatus       @default(ACTIVE)
+  maxUses       Int                    @default(1)
+  usedCount     Int                    @default(0)
+  expiresAt     DateTime               @db.Timestamptz(3)
+  invalidatedAt DateTime?              @db.Timestamptz(3)
+  createdAt     DateTime               @default(now()) @db.Timestamptz(3)
+  invitation    Invitation             @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  redemptions   InvitationRedemption[]
+
+  @@index([invitationId, status])
+  @@index([expiresAt])
+  @@map("invitation_links")
+}
+
+model InvitationRedemption {
+  id             String            @id @default(uuid()) @db.Uuid
+  invitationId   String            @db.Uuid
+  linkId         String?           @db.Uuid
+  userId         String            @db.Uuid
+  membershipId   String?           @db.Uuid
+  status         RedemptionStatus  @default(STARTED)
+  idempotencyKey String            @unique @db.VarChar(100)
+  createdAt      DateTime          @default(now()) @db.Timestamptz(3)
+  completedAt    DateTime?         @db.Timestamptz(3)
+  invitation     Invitation        @relation(fields: [invitationId], references: [id], onDelete: Restrict)
+  link           InvitationLink?   @relation(fields: [linkId], references: [id], onDelete: Restrict)
+  user           User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  membership     TeamMembership?   @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+
+  @@index([invitationId, status])
+  @@map("invitation_redemptions")
+}
+
+model NotificationTarget {
+  id                 String                   @id @default(uuid()) @db.Uuid
+  membershipId       String                   @db.Uuid
+  deviceId           String?                  @db.Uuid
+  channel            NotificationChannel
+  status             NotificationTargetStatus @default(ACTIVE)
+  endpointCiphertext String                   @db.Text
+  endpointHash       String                   @db.Char(64)
+  createdAt          DateTime                 @default(now()) @db.Timestamptz(3)
+  verifiedAt         DateTime?                @db.Timestamptz(3)
+  disabledAt         DateTime?                @db.Timestamptz(3)
+  membership         TeamMembership           @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  device             Device?                  @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@unique([membershipId, channel, endpointHash])
+  @@index([membershipId, status])
+  @@map("notification_targets")
+}
+
+model GmailConnection {
+  id                    String                @id @default(uuid()) @db.Uuid
+  teamId                String                @unique @db.Uuid
+  googleSubject         String                @db.VarChar(255)
+  email                 String                @db.VarChar(320)
+  encryptedRefreshToken String                @db.Text
+  scopes                String[]              @default([])
+  status                GmailConnectionStatus @default(ACTIVE)
+  createdAt             DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime              @updatedAt @db.Timestamptz(3)
+  revokedAt             DateTime?             @db.Timestamptz(3)
+  team                  Team                  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@map("gmail_connections")
+}
+
+model OwnerTransfer {
+  id                   String              @id @default(uuid()) @db.Uuid
+  teamId               String              @db.Uuid
+  targetMembershipId   String              @db.Uuid
+  initiatedByUserId    String              @db.Uuid
+  status               OwnerTransferStatus @default(PENDING)
+  acceptanceTokenHash  String              @unique @db.Char(64)
+  expiresAt            DateTime            @db.Timestamptz(3)
+  createdAt            DateTime            @default(now()) @db.Timestamptz(3)
+  acceptedAt           DateTime?           @db.Timestamptz(3)
+  canceledAt           DateTime?           @db.Timestamptz(3)
+  team                 Team                @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  targetMembership     TeamMembership      @relation(fields: [targetMembershipId], references: [id], onDelete: Restrict)
+  initiatedByUser      User                @relation(fields: [initiatedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([teamId, status])
+  @@map("owner_transfers")
+}
+
+model AuditEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  teamId      String?  @db.Uuid
+  actorUserId String?  @db.Uuid
+  action      String   @db.VarChar(100)
+  targetType  String?  @db.VarChar(80)
+  targetId    String?  @db.VarChar(100)
+  requestId   String?  @db.VarChar(100)
+  metadata    Json?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  team        Team?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  actorUser   User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([teamId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@map("audit_events")
+}
+

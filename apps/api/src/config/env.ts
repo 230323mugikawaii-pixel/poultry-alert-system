@@ -26,7 +26,8 @@ const EnvironmentSchema = Type.Object({
     { default: "info" }
   ),
   PUBLIC_ORIGIN: Type.String({ minLength: 1 }),
-  COOKIE_NAME: Type.String({ minLength: 1, default: "callnow_session" })
+  COOKIE_NAME: Type.String({ minLength: 1, default: "callnow_session" }),
+  DATABASE_URL: Type.String({ minLength: 1 })
 });
 
 export type AppEnvironment = Static<typeof EnvironmentSchema>;
@@ -40,7 +41,10 @@ export function loadEnvironment(
     PORT: Number(source.PORT ?? "8080"),
     LOG_LEVEL: source.LOG_LEVEL ?? "info",
     PUBLIC_ORIGIN: source.PUBLIC_ORIGIN ?? "http://127.0.0.1:8080",
-    COOKIE_NAME: source.COOKIE_NAME ?? "callnow_session"
+    COOKIE_NAME: source.COOKIE_NAME ?? "callnow_session",
+    DATABASE_URL:
+      source.DATABASE_URL ??
+      "postgresql://callnow:callnow@127.0.0.1:5432/callnow"
   };
 
   if (!Value.Check(EnvironmentSchema, candidate)) {
