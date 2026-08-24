@@ -20,20 +20,6 @@ export class PrismaTeamRepository implements TeamRepository {
     try {
       return await this.database.$transaction(
         async (transaction) => {
-          const existingMembership = await transaction.teamMembership.findFirst(
-            {
-              where: { userId: input.ownerUserId, status: "ACTIVE" },
-              select: { id: true }
-            }
-          );
-          if (existingMembership) {
-            throw new AppError(
-              "ALREADY_TEAM_MEMBER",
-              "すでにチームへ所属しています。",
-              409
-            );
-          }
-
           const team = await transaction.team.create({
             data: {
               publicCode: input.publicCode,
@@ -458,8 +444,20 @@ async function replaceActiveInvitations(
   teamId: string,
   now: Date
 ): Promise<void> {
-  await transaction.invitation.updateMany({
+  const invitations = await transaction.invitation.findMany({
     where: { teamId, status: "ACTIVE" },
+    select: { id: true }
+  });
+  const invitationIds = invitations.map(({ id }) => id);
+  if (invitationIds.length === 0) {
+    return;
+  }
+  await transaction.invitationLink.updateMany({
+    where: { invitationId: { in: invitationIds }, status: "ACTIVE" },
+    data: { status: "REPLACED", invalidatedAt: now }
+  });
+  await transaction.invitation.updateMany({
+    where: { id: { in: invitationIds }, status: "ACTIVE" },
     data: {
       status: "REPLACED",
       invalidatedAt: now,
@@ -474,8 +472,20 @@ async function revokeActiveInvitations(
   now: Date,
   note: string
 ): Promise<void> {
-  await transaction.invitation.updateMany({
+  const invitations = await transaction.invitation.findMany({
     where: { teamId, status: "ACTIVE" },
+    select: { id: true }
+  });
+  const invitationIds = invitations.map(({ id }) => id);
+  if (invitationIds.length === 0) {
+    return;
+  }
+  await transaction.invitationLink.updateMany({
+    where: { invitationId: { in: invitationIds }, status: "ACTIVE" },
+    data: { status: "REVOKED", invalidatedAt: now }
+  });
+  await transaction.invitation.updateMany({
+    where: { id: { in: invitationIds }, status: "ACTIVE" },
     data: {
       status: "REVOKED",
       invalidatedAt: now,

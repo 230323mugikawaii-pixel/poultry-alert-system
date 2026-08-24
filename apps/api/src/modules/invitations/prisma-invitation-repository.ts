@@ -93,7 +93,9 @@ export class PrismaInvitationRepository implements InvitationRepository {
     if (!teamIdentity || teamIdentity.status !== "ACTIVE") {
       return null;
     }
-    await expireStaleInvitations(this.database, teamIdentity.id, now);
+    await this.database.$transaction((transaction) =>
+      expireStaleInvitations(transaction, teamIdentity.id, now)
+    );
 
     const team = await this.database.team.findUnique({
       where: { publicCode: teamCode },
@@ -224,10 +226,8 @@ export class PrismaInvitationRepository implements InvitationRepository {
     if (!linkIdentity) {
       return null;
     }
-    await expireStaleInvitations(
-      this.database,
-      linkIdentity.invitation.teamId,
-      now
+    await this.database.$transaction((transaction) =>
+      expireStaleInvitations(transaction, linkIdentity.invitation.teamId, now)
     );
 
     const link = await this.database.invitationLink.findUnique({
@@ -385,13 +385,19 @@ export class PrismaInvitationRepository implements InvitationRepository {
               throw invalidInvitationError();
             }
 
-            const otherMembership = await transaction.teamMembership.findFirst({
-              where: { userId: input.userId, status: "ACTIVE" }
-            });
-            if (otherMembership) {
+            const existingMembership =
+              await transaction.teamMembership.findUnique({
+                where: {
+                  teamId_userId: {
+                    teamId: invitation.teamId,
+                    userId: input.userId
+                  }
+                }
+              });
+            if (existingMembership?.status === "ACTIVE") {
               throw new AppError(
                 "ALREADY_TEAM_MEMBER",
-                "すでにチームへ参加しています。",
+                "すでにこのチームへ参加しています。",
                 409
               );
             }
@@ -448,7 +454,7 @@ export class PrismaInvitationRepository implements InvitationRepository {
                 }
               });
             }
-            if (nextActiveMemberCount >= subscription.seatLimit) {
+            if (invitationExhausted) {
               await transaction.invitationLink.updateMany({
                 where: { invitationId: invitation.id, status: "ACTIVE" },
                 data: { status: "EXHAUSTED", invalidatedAt: input.now }
@@ -507,7 +513,9 @@ export class PrismaInvitationRepository implements InvitationRepository {
     teamId: string,
     now: Date
   ): Promise<readonly PublicInvitationRecord[]> {
-    await expireStaleInvitations(this.database, teamId, now);
+    await this.database.$transaction((transaction) =>
+      expireStaleInvitations(transaction, teamId, now)
+    );
     const invitations = await this.database.invitation.findMany({
       where: { teamId },
       orderBy: { createdAt: "desc" },
@@ -848,12 +856,14 @@ async function expireJoinGrantInvitation(
     select: { teamId: true }
   });
   if (invitation) {
-    await expireStaleInvitations(database, invitation.teamId, now);
+    await database.$transaction((transaction) =>
+      expireStaleInvitations(transaction, invitation.teamId, now)
+    );
   }
 }
 
 async function expireStaleInvitations(
-  database: Pick<DatabaseClient, "invitation" | "invitationLink">,
+  database: Prisma.TransactionClient,
   teamId: string,
   now: Date
 ): Promise<void> {

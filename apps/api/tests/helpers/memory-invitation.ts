@@ -283,6 +283,11 @@ export class MemoryInvitationRepository implements InvitationRepository {
     );
     if (!invitation) return false;
     invitation.status = "REVOKED";
+    for (const link of this.links) {
+      if (link.invitationId === invitation.id && link.status === "ACTIVE") {
+        link.status = "REVOKED";
+      }
+    }
     return true;
   }
 

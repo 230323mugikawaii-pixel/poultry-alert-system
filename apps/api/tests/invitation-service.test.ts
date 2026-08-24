@@ -172,6 +172,28 @@ describe("InvitationService", () => {
     });
   });
 
+  it("invalidates active LINE links when the parent invitation is revoked", async () => {
+    const fixture = await createFixture(2);
+    const issued =
+      await fixture.invitationService.reissuePasswordInvitation(ownerUserId);
+    const line = await fixture.invitationService.createLineInvitationLink(
+      ownerUserId,
+      issued.invitation.id
+    );
+    const token = new URL(line.invitationLink).searchParams.get("token");
+
+    await fixture.invitationService.revokeInvitation(
+      ownerUserId,
+      issued.invitation.id
+    );
+
+    expect(fixture.invitationRepository.invitations[0]?.status).toBe("REVOKED");
+    expect(fixture.invitationRepository.links[0]?.status).toBe("REVOKED");
+    await expect(
+      fixture.invitationService.verifyLineInvitation(token ?? "")
+    ).rejects.toMatchObject({ code: "INVITATION_INVALID_OR_EXPIRED" });
+  });
+
   it("persists expired invitation and link states when they are observed", async () => {
     const fixture = await createFixture(2);
     const issued =
