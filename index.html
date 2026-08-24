@@ -13,7 +13,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=11">
+    <link rel="stylesheet" href="css/style.css?v=12">
 </head>
 
 <body>
@@ -254,7 +254,7 @@
         <p>
           3キーワードまで基本料金に含まれます。<br>
           4個目以降は、1個につき年額100円追加されます。<br>
-          Googleアカウントは1件まで基本料金に含まれ、2件目以降は1件につき年額100円追加されます。
+          監視用Googleアカウント1件が基本料金に含まれます。
         </p>
 
       </div>
@@ -296,28 +296,16 @@
       </div>
 
 
-      <!-- 連携Googleアカウント数 -->
+      <!-- 監視用Googleアカウント -->
 
-      <div class="account-count-section">
+      <div class="single-google-account-section">
 
-        <label for="accountCount">
-          連携するGoogleアカウント数
-        </label>
-
-        <input
-          id="accountCount"
-          type="number"
-          min="1"
-          max="100"
-          step="1"
-          value="1"
-          inputmode="numeric"
-          oninput="changeAccountCount(this.value)"
-        >
+        <strong>
+          監視用Googleアカウント
+        </strong>
 
         <p class="input-help">
-          1件まで基本料金に含まれます。2件目以降は1件につき年額100円です。
-          例：自分と家族のGmailを連携する場合は「2」と入力します。
+          Googleアカウントを1件連携します。追加料金はありません。
         </p>
 
       </div>
@@ -335,19 +323,6 @@
 
           <strong>
             6,000円
-          </strong>
-
-        </div>
-
-
-        <div class="price-row">
-
-          <span>
-            追加Googleアカウント
-          </span>
-
-          <strong id="extraAccountPrice">
-            0円
           </strong>
 
         </div>
@@ -563,11 +538,11 @@
         <div class="payment-detail">
 
           <span>
-            連携Googleアカウント数
+            監視用Googleアカウント
           </span>
 
-          <strong id="paymentAccountCount">
-            1件
+          <strong>
+            1件（基本料金に含む）
           </strong>
 
         </div>
@@ -754,32 +729,32 @@
         id="googleScreenDescription"
         class="description"
       >
-        通知を確認するGmailを、契約した件数分だけ1件ずつ連携します。
+        通知を確認するGmailを1件連携します。
       </p>
 
 
       <div class="notice-box">
-        <strong>複数アカウント連携は試作中です</strong>
+        <strong>監視用アカウントは1件です</strong>
         <p>
-          この画面では、複数のGoogleアカウントの認証と登録を確認できます。
-          複数Gmailの常時監視は、監視サーバー側の対応後に利用できるようになります。
+          1利用者につき、通知を確認するGoogleアカウントを1件だけ連携できます。
+          別のアカウントを使う場合は、連携後に「アカウントを変更」を選択してください。
         </p>
       </div>
 
 
       <div class="google-account-card linked-accounts-card">
         <div class="linked-accounts-heading">
-          <strong>連携するアカウント</strong>
-          <span id="linkedGoogleAccountCount">0 / 1件を連携済み</span>
+          <strong>監視用Googleアカウント</strong>
+          <span id="linkedGoogleAccountCount">未連携</span>
         </div>
 
         <div id="linkedGoogleAccounts"></div>
       </div>
 
 
-      <!-- 別アカウント -->
+      <!-- Google認証 -->
 
-      <div class="google-card">
+      <div id="googleAuthCard" class="google-card">
 
         <div class="google-logo">
           G
@@ -789,12 +764,12 @@
         <div class="google-card-content">
 
           <h2 id="googleCardTitle">
-            Googleアカウントを追加
+            Googleアカウントを連携
           </h2>
 
 
           <p id="googleAuthDescription">
-            Googleの認証画面で、まだ連携していないアカウントを選択し、Gmailの閲覧権限を許可してください。
+            Googleの認証画面で、通知を確認するアカウントを選択し、Gmailの閲覧権限を許可してください。
             Call NowがGoogleのパスワードを保存することはありません。
           </p>
 
@@ -812,7 +787,7 @@
             class="google-button"
             onclick="startGoogleLogin()"
           >
-            Googleアカウントを追加
+            Googleアカウントを連携
           </button>
 
         </div>
@@ -1034,11 +1009,11 @@
           <div class="contract-row">
 
             <span>
-              連携Googleアカウント数
+              監視用Googleアカウント
             </span>
 
-            <strong id="contractAccountCount">
-              1件
+            <strong id="contractGoogleAccountLimit">
+              1件（固定）
             </strong>
 
           </div>
@@ -1047,11 +1022,11 @@
           <div class="contract-row">
 
             <span>
-              現在の連携済みアカウント
+              現在の連携状態
             </span>
 
-            <strong id="contractLinkedAccountCount">
-              0件
+            <strong id="contractGoogleAccountStatus">
+              未連携
             </strong>
 
           </div>
@@ -1380,14 +1355,13 @@
   async
   defer
 ></script>
-    <script src="js/app.js?v=11"></script>
+    <script src="js/app.js?v=12"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";
 
     showOnlyScreen("setupScreen");
     renderKeywordInputs();
-    syncAccountCountInput();
     updateSetupScreenText();
 
     window.scrollTo({
