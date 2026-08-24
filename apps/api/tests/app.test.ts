@@ -1,0 +1,86 @@
+import { afterEach, describe, expect, it } from "vitest";
+import { buildApp } from "../src/app.js";
+import type { AppEnvironment } from "../src/config/env.js";
+
+const environment: AppEnvironment = {
+  APP_ENV: "test",
+  HOST: "127.0.0.1",
+  PORT: 8080,
+  TRUST_PROXY_HOPS: 0,
+  LOG_LEVEL: "silent",
+  PUBLIC_ORIGIN: "https://test.call-now.example",
+  COOKIE_NAME: "callnow_test_session",
+  DATABASE_URL: "postgresql://test:test@127.0.0.1:5432/test",
+  AUTH_TOKEN_PEPPER: "test-token-pepper-at-least-thirty-two-characters",
+  MAGIC_LINK_TTL_MINUTES: 15,
+  SESSION_IDLE_DAYS: 30,
+  SESSION_ABSOLUTE_DAYS: 90,
+  MAX_ACTIVE_SESSIONS: 5,
+  INVITATION_TTL_DAYS: 30,
+  JOIN_GRANT_TTL_MINUTES: 15,
+  LINE_LINK_TTL_HOURS: 24,
+  SMTP_HOST: "127.0.0.1",
+  SMTP_PORT: 1025,
+  SMTP_SECURE: false,
+  SMTP_USER: "",
+  SMTP_PASSWORD: "",
+  EMAIL_FROM: "Call Now <test@example.com>"
+};
+
+const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
+
+afterEach(async () => {
+  await Promise.all(apps.splice(0).map(async (app) => app.close()));
+});
+
+describe("system routes", () => {
+  it.each(["/healthz", "/readyz"])(
+    "returns healthy status for %s",
+    async (url) => {
+      const app = await buildApp({ environment, logger: false });
+      apps.push(app);
+
+      const response = await app.inject({ method: "GET", url });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ ok: true, service: "call-now-api" });
+    }
+  );
+
+  it("returns a stable error envelope for unknown routes", async () => {
+    const app = await buildApp({ environment, logger: false });
+    apps.push(app);
+
+    const response = await app.inject({ method: "GET", url: "/missing" });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({
+      error: {
+        code: "NOT_FOUND",
+        message: "The requested resource was not found."
+      }
+    });
+  });
+
+  it("reports a dependency outage through readiness without failing liveness", async () => {
+    const app = await buildApp({
+      environment,
+      logger: false,
+      readinessCheck: async () => {
+        throw new Error("database unavailable");
+      }
+    });
+    apps.push(app);
+
+    const ready = await app.inject({ method: "GET", url: "/readyz" });
+    const alive = await app.inject({ method: "GET", url: "/healthz" });
+
+    expect(ready.statusCode).toBe(503);
+    expect(ready.json()).toEqual({
+      ok: false,
+      service: "call-now-api",
+      reason: "dependency_unavailable"
+    });
+    expect(alive.statusCode).toBe(200);
+  });
+});

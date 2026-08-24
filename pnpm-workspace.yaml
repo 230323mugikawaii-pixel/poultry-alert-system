@@ -1,0 +1,24 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+autoInstallPeers: false
+
+overrides:
+  deepmerge-ts: 8.0.0
+  lodash: 4.18.1
+
+peerDependencyRules:
+  # Prisma Studio is not shipped or invoked by the migration image. Its UI-only
+  # peers must not pull React into the API or migration production packages.
+  ignoreMissing:
+    - react
+    - react-dom
+
+onlyBuiltDependencies:
+  - esbuild
+allowBuilds:
+  '@prisma/engines': true
+  argon2: true
+  esbuild: true
+  prisma: true

@@ -1,0 +1,100 @@
+name: Deploy API
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify-and-deploy:
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://callnow:callnow@127.0.0.1:5432/callnow_test
+      API_IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REPOSITORY }}/call-now-api:${{ github.sha }}
+      MIGRATION_IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REPOSITORY }}/call-now-db-migrate:${{ github.sha }}
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: callnow_test
+          POSTGRES_USER: callnow
+          POSTGRES_PASSWORD: callnow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U callnow -d callnow_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm db:migrate:deploy
+      - run: pnpm test:postgres
+      - run: pnpm verify
+
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - run: gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+      - run: docker build --file apps/api/Dockerfile --target runtime --tag "$API_IMAGE" .
+      - run: docker build --file apps/api/Dockerfile --target migration --tag "$MIGRATION_IMAGE" .
+      - run: docker push "$API_IMAGE"
+      - run: docker push "$MIGRATION_IMAGE"
+
+      - name: Deploy migration job
+        run: >-
+          gcloud run jobs deploy call-now-db-migrate
+          --project "${{ vars.GCP_PROJECT_ID }}"
+          --region "${{ vars.GCP_REGION }}"
+          --image "$MIGRATION_IMAGE"
+          --set-cloudsql-instances "${{ vars.CLOUD_SQL_CONNECTION_NAME }}"
+          --set-secrets "DATABASE_URL=call-now-database-url:${{ vars.DATABASE_URL_SECRET_VERSION }}"
+          --service-account "${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}"
+          --quiet
+      - name: Apply database migrations
+        run: >-
+          gcloud run jobs execute call-now-db-migrate
+          --project "${{ vars.GCP_PROJECT_ID }}"
+          --region "${{ vars.GCP_REGION }}"
+          --wait
+          --quiet
+
+      - name: Deploy HTTPS API
+        run: >-
+          gcloud run deploy call-now-api
+          --project "${{ vars.GCP_PROJECT_ID }}"
+          --region "${{ vars.GCP_REGION }}"
+          --image "$API_IMAGE"
+          --allow-unauthenticated
+          --service-account "${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}"
+          --set-cloudsql-instances "${{ vars.CLOUD_SQL_CONNECTION_NAME }}"
+          --set-env-vars "APP_ENV=${{ inputs.environment }},TRUST_PROXY_HOPS=1,PUBLIC_ORIGIN=${{ vars.PUBLIC_ORIGIN }},COOKIE_NAME=${{ vars.COOKIE_NAME }},SMTP_HOST=${{ vars.SMTP_HOST }},SMTP_PORT=${{ vars.SMTP_PORT }},SMTP_SECURE=${{ vars.SMTP_SECURE }},EMAIL_FROM=${{ vars.EMAIL_FROM }}"
+          --set-secrets "DATABASE_URL=call-now-database-url:${{ vars.DATABASE_URL_SECRET_VERSION }},AUTH_TOKEN_PEPPER=call-now-auth-token-pepper:${{ vars.AUTH_PEPPER_SECRET_VERSION }},SMTP_USER=call-now-smtp-user:${{ vars.SMTP_USER_SECRET_VERSION }},SMTP_PASSWORD=call-now-smtp-password:${{ vars.SMTP_PASSWORD_SECRET_VERSION }}"
+          --min 0
+          --max 10
+          --port 8080
+          --quiet
