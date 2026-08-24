@@ -168,7 +168,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-25.3";
+  "2026-08-25.4";
 
 /*
   正式なURLが決まった場合だけ設定する公開リンク。
@@ -1231,13 +1231,7 @@ function renderGoogleAccountOptions() {
     );
 
   if (finishButton) {
-    finishButton.disabled =
-      googleScreenMode === "manage"
-        ? false
-        : googleScreenMode === "login"
-          ? !googleEmail ||
-            !googleLoginVerified
-          : !googleEmail;
+    finishButton.disabled = false;
   }
 }
 
@@ -1371,14 +1365,23 @@ async function removeGoogleAccount() {
 function finishGoogleAccountLinking() {
   if (
     googleScreenMode === "login" &&
-    (
-      !googleEmail ||
-      !googleLoginVerified
-    )
+    !googleEmail
   ) {
     setText(
       "googleError",
-      "アカウントの連携を済ませてください"
+      "監視用Googleアカウントを設定してください。"
+    );
+
+    return;
+  }
+
+  if (
+    googleScreenMode === "login" &&
+    !googleLoginVerified
+  ) {
+    setText(
+      "googleError",
+      "Googleでログインしてください。"
     );
 
     return;
@@ -1459,6 +1462,10 @@ function startGoogleLogin(
         : "link"
     );
 
+  if (googleAuthMode === "login") {
+    googleLoginVerified = false;
+  }
+
   setText(
     "googleError",
     ""
@@ -1504,6 +1511,8 @@ async function handleGoogleTokenResponse(
         GOOGLE_GMAIL_SCOPE
       )
     ) {
+      googleLoginVerified = false;
+
       setText(
         "googleError",
         "Gmailの閲覧権限が必要です。もう一度ログインして許可してください。"
@@ -1552,6 +1561,8 @@ async function handleGoogleTokenResponse(
         selectedEmail
       )
     ) {
+      googleLoginVerified = false;
+
       setText(
         "googleError",
         "選択したアカウントは、設定済みの監視用Googleアカウントと一致しません。登録済みのアカウントを選択してください。"
@@ -1590,7 +1601,7 @@ async function handleGoogleTokenResponse(
     if (googleAuthMode === "login") {
       setText(
         "googleError",
-        "監視用Googleアカウントで本人確認が完了しました。"
+        ""
       );
     } else if (
       googleAuthMode === "replace" &&
@@ -1616,6 +1627,8 @@ async function handleGoogleTokenResponse(
       );
     }
   } catch (error) {
+    googleLoginVerified = false;
+
     console.error(
       "Googleログインに失敗しました。",
       error
@@ -1623,13 +1636,15 @@ async function handleGoogleTokenResponse(
 
     setText(
       "googleError",
-      "Googleログインを完了できませんでした。もう一度お試しください。"
+      "Googleログインに失敗しました。もう一度お試しください。"
     );
   }
 }
 
 
 function handleGoogleLoginError(error) {
+  googleLoginVerified = false;
+
   console.error(
     "Googleログイン画面を開けませんでした。",
     error
@@ -1637,7 +1652,7 @@ function handleGoogleLoginError(error) {
 
   setText(
     "googleError",
-    "Googleログイン画面を開けませんでした。もう一度お試しください。"
+    "Googleログインに失敗しました。もう一度お試しください。"
   );
 }
 
@@ -2319,6 +2334,7 @@ async function logout() {
 
   googleAccessToken = "";
   googleTokenClient = null;
+  googleLoginVerified = false;
 
   setupMode =
     "login";
