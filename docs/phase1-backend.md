@@ -45,7 +45,9 @@ Deferred until later phases:
 Run `pnpm test:postgres` only against a dedicated database whose name contains
 `test` or `acceptance`. This suite truncates data in that database and verifies
 real PostgreSQL transaction behavior, including concurrent redemption of the last
-available seats.
+available seats. It also covers paid-increase idempotency, safe and pending
+reductions, parent/link invalidation and expiration, member access revocation,
+shared security throttles, and multi-team membership rules.
 
 Mailpit is available on port 8025. Magic-link values are delivered to Mailpit rather
 than printed to logs.
