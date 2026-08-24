@@ -799,6 +799,28 @@ footer {
   color: var(--subtext);
 }
 
+.connected-account-summary {
+  margin-top: 0;
+
+  color: var(--blue);
+
+  font-weight: 800;
+}
+
+.connected-account-email {
+  overflow-wrap: anywhere;
+}
+
+.connected-account-empty {
+  margin: 0;
+
+  color: var(--subtext);
+}
+
+.account-manage-button {
+  margin-top: 18px;
+}
+
 .account-avatar {
   display: flex;
 

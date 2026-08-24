@@ -168,7 +168,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-25.2";
+  "2026-08-25.3";
 
 /*
   正式なURLが決まった場合だけ設定する公開リンク。
@@ -2140,6 +2140,8 @@ function openApp() {
 
   renderContractInformation();
 
+  renderConnectedGoogleAccounts();
+
   showAppPage(
     "homePage"
   );
@@ -2147,6 +2149,67 @@ function openApp() {
   window.scrollTo({
     top: 0
   });
+}
+
+
+function renderConnectedGoogleAccounts() {
+  const container =
+    document.getElementById(
+      "connectedGoogleAccounts"
+    );
+
+  if (!container) {
+    return;
+  }
+
+  container.replaceChildren();
+
+  if (!googleEmail) {
+    const emptyMessage =
+      document.createElement("p");
+
+    emptyMessage.className =
+      "connected-account-empty";
+
+    emptyMessage.textContent =
+      "監視用Googleアカウントが設定されていません";
+
+    container.appendChild(
+      emptyMessage
+    );
+
+    setText(
+      "homeGoogleAccountActionButton",
+      "Googleアカウントを設定"
+    );
+
+    return;
+  }
+
+  const summary =
+    document.createElement("p");
+
+  summary.className =
+    "connected-account-summary";
+
+  summary.textContent =
+    "1件連携中";
+
+  const email =
+    document.createElement("p");
+
+  email.className =
+    "connected-account-email";
+
+  email.textContent = googleEmail;
+
+  container.appendChild(summary);
+  container.appendChild(email);
+
+  setText(
+    "homeGoogleAccountActionButton",
+    "Googleアカウントを管理"
+  );
 }
 
 

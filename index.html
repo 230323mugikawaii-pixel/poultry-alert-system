@@ -13,7 +13,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=14">
+    <link rel="stylesheet" href="css/style.css?v=15">
 </head>
 
 <body>
@@ -877,6 +877,30 @@
           <article class="card">
 
             <h2>
+              接続中のGoogleアカウント
+            </h2>
+
+
+            <div id="connectedGoogleAccounts">
+              監視用Googleアカウントが設定されていません
+            </div>
+
+
+            <button
+              id="homeGoogleAccountActionButton"
+              type="button"
+              class="btn outline full-width account-manage-button"
+              onclick="openGoogleAccountManager()"
+            >
+              Googleアカウントを設定
+            </button>
+
+          </article>
+
+
+          <article class="card">
+
+            <h2>
               お知らせ
             </h2>
 
@@ -1320,7 +1344,7 @@
   async
   defer
 ></script>
-    <script src="js/app.js?v=14"></script>
+    <script src="js/app.js?v=15"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";
