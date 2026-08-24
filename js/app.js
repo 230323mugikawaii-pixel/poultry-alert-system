@@ -195,6 +195,10 @@ let alarmRepeatTimer = null;
 let alarmActiveNodes = [];
 let alarmIsActive = false;
 let alarmFocusBeforeOpen = null;
+let appDialogFocusBeforeOpen = null;
+let appDialogResolver = null;
+let appDialogQueue =
+  Promise.resolve();
 
 let keywords = ["停電", "通電", "警報"];
 let accountCount = 1;
@@ -232,6 +236,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   loadSavedData();
   initializeContactInfoPersistence();
+  initializeAppDialog();
   initializeAlarmNotification();
   normalizeKeywords();
   syncAccountCountInput();
@@ -818,7 +823,7 @@ function updateSetupScreenText() {
 }
 
 
-function continueFromSetup() {
+async function continueFromSetup() {
   if (!validateKeywords()) {
     return;
   }
@@ -884,7 +889,7 @@ if (setupMode === "edit") {
   openApp();
 
   if (totalPrice < paidAnnualPrice) {
-    window.alert(
+    await showAppAlert(
       `契約内容を変更しました。
 
 現在の契約期間中の返金はありません。
@@ -894,7 +899,7 @@ ${formatYen(totalPrice)}
 になります。`
     );
   } else {
-    window.alert(
+    await showAppAlert(
       "契約内容の変更を保存しました。"
     );
   }
@@ -993,7 +998,7 @@ function openPayment() {
   });
 }
 
-function completeDemoPayment() {
+async function completeDemoPayment() {
   if (paymentMode === "renewal") {
     extendContractByOneYear();
 
@@ -1041,7 +1046,7 @@ function completeDemoPayment() {
       openApp();
     }
 
-    window.alert(
+    await showAppAlert(
       `契約内容を変更しました。
 
 追加料金：
@@ -1280,7 +1285,7 @@ function updateGoogleAuthActionText() {
 }
 
 
-function removeGoogleAccount(index) {
+async function removeGoogleAccount(index) {
   if (
     !Number.isInteger(index) ||
     index < 0 ||
@@ -1293,8 +1298,13 @@ function removeGoogleAccount(index) {
     googleAccounts[index];
 
   const confirmed =
-    window.confirm(
-      `${email} の連携を解除しますか？`
+    await showAppConfirm(
+      `${email} の連携を解除しますか？`,
+      {
+        title: "Googleアカウントの連携解除",
+        confirmText: "解除する",
+        tone: "danger"
+      }
     );
 
   if (!confirmed) {
@@ -2051,12 +2061,17 @@ function showAppPage(
    ログアウト
 ======================================== */
 
-function logout() {
+async function logout() {
   const confirmed =
-    window.confirm(
+    await showAppConfirm(
       `Call Nowからログアウトしますか？
 
-契約情報・キーワード・Googleアカウント情報は保存されたままです。`
+契約情報・キーワード・Googleアカウント情報は保存されたままです。`,
+      {
+        title: "ログアウトの確認",
+        confirmText: "ログアウトする",
+        tone: "warning"
+      }
     );
 
   if (!confirmed) {
@@ -2127,6 +2142,377 @@ function renderSavedKeywordList() {
       );
     }
   );
+}
+
+
+/* ========================================
+   共通ダイアログ
+======================================== */
+
+function initializeAppDialog() {
+  const dialog =
+    document.getElementById(
+      "appDialog"
+    );
+
+  const cancelButton =
+    document.getElementById(
+      "appDialogCancelButton"
+    );
+
+  const confirmButton =
+    document.getElementById(
+      "appDialogConfirmButton"
+    );
+
+  if (
+    !dialog ||
+    !cancelButton ||
+    !confirmButton
+  ) {
+    return;
+  }
+
+  cancelButton.addEventListener(
+    "click",
+    () => {
+      closeAppDialog(false);
+    }
+  );
+
+  confirmButton.addEventListener(
+    "click",
+    () => {
+      closeAppDialog(true);
+    }
+  );
+
+  dialog.addEventListener(
+    "keydown",
+    handleAppDialogKeydown
+  );
+}
+
+
+function showAppDialog(options = {}) {
+  const dialogTask =
+    appDialogQueue.then(
+      () => openAppDialog(options),
+      () => openAppDialog(options)
+    );
+
+  appDialogQueue =
+    dialogTask.then(
+      () => undefined,
+      () => undefined
+    );
+
+  return dialogTask;
+}
+
+
+function openAppDialog(options) {
+  const dialog =
+    document.getElementById(
+      "appDialog"
+    );
+
+  const titleElement =
+    document.getElementById(
+      "appDialogTitle"
+    );
+
+  const messageElement =
+    document.getElementById(
+      "appDialogMessage"
+    );
+
+  const iconElement =
+    document.getElementById(
+      "appDialogIcon"
+    );
+
+  const cancelButton =
+    document.getElementById(
+      "appDialogCancelButton"
+    );
+
+  const confirmButton =
+    document.getElementById(
+      "appDialogConfirmButton"
+    );
+
+  if (
+    !dialog ||
+    !titleElement ||
+    !messageElement ||
+    !iconElement ||
+    !cancelButton ||
+    !confirmButton
+  ) {
+    console.error(
+      "共通ダイアログの要素が見つかりません。"
+    );
+
+    return Promise.resolve(false);
+  }
+
+  const showCancel =
+    Boolean(options.showCancel);
+
+  const tone =
+    ["info", "warning", "danger"]
+      .includes(options.tone)
+      ? options.tone
+      : "info";
+
+  const title =
+    typeof options.title === "string" &&
+    options.title.trim()
+      ? options.title
+      : showCancel
+        ? "確認"
+        : "お知らせ";
+
+  const message =
+    typeof options.message === "string"
+      ? options.message
+      : String(options.message || "");
+
+  const confirmText =
+    typeof options.confirmText === "string" &&
+    options.confirmText.trim()
+      ? options.confirmText
+      : "OK";
+
+  const cancelText =
+    typeof options.cancelText === "string" &&
+    options.cancelText.trim()
+      ? options.cancelText
+      : "キャンセル";
+
+  titleElement.textContent =
+    title;
+
+  messageElement.textContent =
+    message;
+
+  confirmButton.textContent =
+    confirmText;
+
+  cancelButton.textContent =
+    cancelText;
+
+  iconElement.className =
+    `app-dialog-icon ${tone}`;
+
+  iconElement.textContent =
+    showCancel && tone === "info"
+      ? "?"
+      : tone === "info"
+        ? "i"
+        : "!";
+
+  cancelButton.classList.toggle(
+    "hidden",
+    !showCancel
+  );
+
+  dialog.setAttribute(
+    "role",
+    showCancel
+      ? "dialog"
+      : "alertdialog"
+  );
+
+  dialog.setAttribute(
+    "aria-hidden",
+    "false"
+  );
+
+  appDialogFocusBeforeOpen =
+    document.activeElement;
+
+  document.body.classList.add(
+    "app-dialog-open"
+  );
+
+  dialog.classList.remove(
+    "hidden"
+  );
+
+  return new Promise(resolve => {
+    appDialogResolver =
+      resolve;
+
+    confirmButton.focus();
+  });
+}
+
+
+function showAppAlert(
+  message,
+  options = {}
+) {
+  return showAppDialog({
+    ...options,
+    message: message,
+    showCancel: false
+  }).then(() => undefined);
+}
+
+
+function showAppConfirm(
+  message,
+  options = {}
+) {
+  return showAppDialog({
+    ...options,
+    message: message,
+    showCancel: true
+  });
+}
+
+
+function closeAppDialog(result) {
+  if (!appDialogResolver) {
+    return;
+  }
+
+  const resolve =
+    appDialogResolver;
+
+  appDialogResolver = null;
+
+  const dialog =
+    document.getElementById(
+      "appDialog"
+    );
+
+  if (dialog) {
+    dialog.classList.add(
+      "hidden"
+    );
+
+    dialog.setAttribute(
+      "aria-hidden",
+      "true"
+    );
+  }
+
+  document.body.classList.remove(
+    "app-dialog-open"
+  );
+
+  if (
+    appDialogFocusBeforeOpen &&
+    typeof appDialogFocusBeforeOpen.focus ===
+      "function" &&
+    document.contains(
+      appDialogFocusBeforeOpen
+    )
+  ) {
+    appDialogFocusBeforeOpen.focus();
+  }
+
+  appDialogFocusBeforeOpen = null;
+
+  resolve(Boolean(result));
+}
+
+
+function handleAppDialogKeydown(event) {
+  const dialog =
+    document.getElementById(
+      "appDialog"
+    );
+
+  if (
+    !dialog ||
+    dialog.classList.contains(
+      "hidden"
+    )
+  ) {
+    return;
+  }
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+
+    closeAppDialog(false);
+    return;
+  }
+
+  if (event.key !== "Tab") {
+    return;
+  }
+
+  const cancelButton =
+    document.getElementById(
+      "appDialogCancelButton"
+    );
+
+  const confirmButton =
+    document.getElementById(
+      "appDialogConfirmButton"
+    );
+
+  if (!confirmButton) {
+    return;
+  }
+
+  const focusableElements = [];
+
+  if (
+    cancelButton &&
+    !cancelButton.classList.contains(
+      "hidden"
+    )
+  ) {
+    focusableElements.push(
+      cancelButton
+    );
+  }
+
+  focusableElements.push(
+    confirmButton
+  );
+
+  const firstElement =
+    focusableElements[0];
+
+  const lastElement =
+    focusableElements[
+      focusableElements.length - 1
+    ];
+
+  if (
+    event.shiftKey &&
+    document.activeElement === firstElement
+  ) {
+    event.preventDefault();
+    lastElement.focus();
+    return;
+  }
+
+  if (
+    !event.shiftKey &&
+    document.activeElement === lastElement
+  ) {
+    event.preventDefault();
+    firstElement.focus();
+    return;
+  }
+
+  if (
+    !focusableElements.includes(
+      document.activeElement
+    )
+  ) {
+    event.preventDefault();
+    firstElement.focus();
+  }
 }
 
 
@@ -2689,7 +3075,7 @@ const testButtons =
 
   try {
     if (isContractExpired()) {
-      window.alert(
+      await showAppAlert(
         `契約期限が切れています。
 
 契約を更新してください。`
@@ -2698,7 +3084,7 @@ const testButtons =
     }
 
     if (!TEST_API_URL || !TEST_API_TOKEN) {
-      window.alert(
+      await showAppAlert(
         "テストAPIのURLまたはトークンが設定されていません。"
       );
       return;
@@ -2774,7 +3160,7 @@ const testButtons =
         detectedStatus.detectedAt || ""
       );
     } else {
-      window.alert(
+      await showAppAlert(
         `Gmailへの送信処理は行いましたが、
 3分以内に検知結果を確認できませんでした。
 
@@ -2788,7 +3174,7 @@ Gmailにテストメールが届いているか、
       error
     );
 
-    window.alert(
+    await showAppAlert(
       `テスト処理に失敗しました。
 
 ${String(error.message)

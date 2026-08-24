@@ -1443,6 +1443,139 @@ footer {
 
 
 /* ========================================
+   共通ダイアログ
+======================================== */
+
+body.app-dialog-open {
+  overflow: hidden;
+}
+
+.app-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 3200;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 24px;
+
+  overflow-y: auto;
+  overscroll-behavior: contain;
+
+  background: rgba(8, 19, 38, 0.64);
+  backdrop-filter: blur(8px);
+}
+
+.app-dialog-card {
+  width: min(100%, 520px);
+  padding: 36px;
+
+  text-align: center;
+
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 28px;
+  box-shadow: 0 28px 80px rgba(8, 19, 38, 0.32);
+}
+
+.app-dialog-icon {
+  display: inline-grid;
+  place-items: center;
+
+  width: 72px;
+  height: 72px;
+  margin-bottom: 16px;
+
+  color: var(--blue);
+  font-size: 34px;
+  font-weight: 900;
+
+  background: var(--blue-light);
+  border-radius: 50%;
+}
+
+.app-dialog-icon.warning {
+  color: #b54708;
+  background: #fff4e5;
+}
+
+.app-dialog-icon.danger {
+  color: var(--red);
+  background: #fff2f0;
+}
+
+.app-dialog-card h2 {
+  margin: 0;
+
+  font-size: 28px;
+  line-height: 1.35;
+}
+
+.app-dialog-message {
+  margin: 16px 0 0;
+
+  color: var(--subtext);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.8;
+
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.app-dialog-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+
+  gap: 12px;
+
+  margin-top: 28px;
+}
+
+.app-dialog-button {
+  width: 100%;
+}
+
+.app-dialog-button:focus-visible {
+  outline: 4px solid rgba(8, 98, 199, 0.3);
+  outline-offset: 3px;
+}
+
+@media (max-width: 480px) {
+  .app-dialog {
+    align-items: flex-end;
+
+    padding:
+      16px
+      16px
+      calc(
+        16px +
+        env(safe-area-inset-bottom)
+      );
+  }
+
+  .app-dialog-card {
+    padding: 28px 20px 20px;
+
+    border-radius: 24px;
+  }
+
+  .app-dialog-icon {
+    width: 62px;
+    height: 62px;
+
+    font-size: 30px;
+  }
+
+  .app-dialog-card h2 {
+    font-size: 24px;
+  }
+}
+
+
+/* ========================================
    警報画面
 ======================================== */
 

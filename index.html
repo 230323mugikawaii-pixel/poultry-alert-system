@@ -13,7 +13,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=9">
+    <link rel="stylesheet" href="css/style.css?v=10">
 </head>
 
 <body>
@@ -412,6 +412,52 @@
     </div>
 
   </section>
+
+  <div
+    id="appDialog"
+    class="app-dialog hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-hidden="true"
+    aria-labelledby="appDialogTitle"
+    aria-describedby="appDialogMessage"
+  >
+    <div
+      class="app-dialog-card"
+      role="document"
+    >
+      <div
+        id="appDialogIcon"
+        class="app-dialog-icon"
+        aria-hidden="true"
+      >
+        i
+      </div>
+      <h2 id="appDialogTitle">
+        お知らせ
+      </h2>
+      <p
+        id="appDialogMessage"
+        class="app-dialog-message"
+      ></p>
+      <div class="app-dialog-actions">
+        <button
+          id="appDialogCancelButton"
+          type="button"
+          class="btn outline app-dialog-button hidden"
+        >
+          キャンセル
+        </button>
+        <button
+          id="appDialogConfirmButton"
+          type="button"
+          class="btn primary app-dialog-button"
+        >
+          OK
+        </button>
+      </div>
+    </div>
+  </div>
 
   <div
     id="alarmModal"
@@ -1291,7 +1337,7 @@
   async
   defer
 ></script>
-    <script src="js/app.js?v=9"></script>
+    <script src="js/app.js?v=10"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";
