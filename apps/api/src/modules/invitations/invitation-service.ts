@@ -1,6 +1,10 @@
 import { createHmac, randomBytes } from "node:crypto";
 import argon2 from "argon2";
 import { AppError } from "../../lib/app-error.js";
+import type {
+  SecurityThrottleRule,
+  SecurityThrottleService
+} from "../security/security-throttle-service.js";
 import type { TeamService } from "../teams/team-service.js";
 import type {
   AuditEventRecord,
@@ -26,6 +30,7 @@ export interface InvitationServiceOptions {
   readonly invitationTtlDays: number;
   readonly joinGrantTtlMinutes: number;
   readonly lineLinkTtlHours: number;
+  readonly securityThrottle: SecurityThrottleService;
   readonly now?: () => Date;
 }
 
@@ -78,21 +83,22 @@ export class InvitationService {
       throw invalidInvitationError();
     }
     const now = this.now();
-    const throttleKey = this.hashSecret(
-      `invite:${teamCode}:${input.attemptKey}`
-    );
-    const throttle = await this.options.repository.getThrottle(throttleKey);
-    if (throttle?.lockedUntil && throttle.lockedUntil > now) {
-      throw new AppError(
-        "INVITATION_TEMPORARILY_LOCKED",
-        "入力回数が上限に達しました。しばらく待ってからお試しください。",
-        429
-      );
-    }
-
     const invitation = await this.options.repository.findPasswordInvitation(
       teamCode,
       now
+    );
+    const throttleRules = passwordThrottleRules(
+      invitation?.id ?? `team:${teamCode}`,
+      input.attemptKey
+    );
+    const throttleError = {
+      code: "INVITATION_TEMPORARILY_LOCKED",
+      message: "入力回数が上限に達しました。しばらく待ってからお試しください。",
+      statusCode: 429
+    } as const;
+    await this.options.securityThrottle.assertFailuresAllowed(
+      throttleRules,
+      throttleError
     );
     const passwordHash =
       invitation?.passwordHash ?? (await this.dummyPasswordHash);
@@ -100,17 +106,11 @@ export class InvitationService {
       .verify(passwordHash, input.password)
       .catch(() => false);
     if (!verified || !invitation) {
-      await this.options.repository.recordThrottleFailure({
-        keyHash: throttleKey,
-        now,
-        windowMinutes: 15,
-        maximumFailures: 5,
-        lockMinutes: 15
-      });
+      await this.options.securityThrottle.recordFailure(throttleRules);
       throw invalidInvitationError();
     }
 
-    await this.options.repository.clearThrottle(throttleKey);
+    await this.options.securityThrottle.clear([throttleRules[0]]);
     assertInvitationUsable(invitation, now);
     return this.createJoinGrant(invitation.id, null, now);
   }
@@ -316,6 +316,35 @@ export class InvitationService {
       .update(value, "utf8")
       .digest("hex");
   }
+}
+
+function passwordThrottleRules(
+  invitationId: string,
+  source: string
+): readonly [SecurityThrottleRule, SecurityThrottleRule, SecurityThrottleRule] {
+  return [
+    {
+      scope: "invite_pwd_pair",
+      dimensions: [invitationId, source],
+      maximumAttempts: 5,
+      windowMinutes: 15,
+      lockMinutes: 15
+    },
+    {
+      scope: "invite_pwd_invite",
+      dimensions: [invitationId],
+      maximumAttempts: 50,
+      windowMinutes: 15,
+      lockMinutes: 30
+    },
+    {
+      scope: "invite_pwd_source",
+      dimensions: [source],
+      maximumAttempts: 50,
+      windowMinutes: 60,
+      lockMinutes: 60
+    }
+  ];
 }
 
 export function generateInvitationPassword(): string {

@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { InvitationService } from "../src/modules/invitations/invitation-service.js";
 import { TeamService } from "../src/modules/teams/team-service.js";
+import { SecurityThrottleService } from "../src/modules/security/security-throttle-service.js";
 import { MemoryInvitationRepository } from "./helpers/memory-invitation.js";
+import { MemorySecurityThrottleRepository } from "./helpers/memory-security-throttle.js";
 import { MemoryTeamRepository } from "./helpers/memory-team.js";
 
 const ownerUserId = "00000000-0000-0000-0000-000000000001";
@@ -26,6 +28,11 @@ async function createFixture(seatLimit = 5) {
     invitationTtlDays: 30,
     joinGrantTtlMinutes: 15,
     lineLinkTtlHours: 24,
+    securityThrottle: new SecurityThrottleService(
+      new MemorySecurityThrottleRepository(),
+      "test-token-pepper-at-least-thirty-two-characters",
+      () => currentTime
+    ),
     now: () => currentTime
   });
   return {

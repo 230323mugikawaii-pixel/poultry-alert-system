@@ -3,6 +3,7 @@ import { Type } from "@sinclair/typebox";
 import type { AppEnvironment } from "../../config/env.js";
 import { AppError } from "../../lib/app-error.js";
 import type { AuthService } from "../auth/auth-service.js";
+import type { SecurityThrottleService } from "../security/security-throttle-service.js";
 import type { InvitationService } from "./invitation-service.js";
 
 const InvitationResponse = Type.Object({
@@ -33,6 +34,7 @@ const JoinGrantResponse = Type.Object({
 export function createInvitationRoutes(
   authService: AuthService,
   invitationService: InvitationService,
+  securityThrottle: SecurityThrottleService,
   environment: AppEnvironment
 ): FastifyPluginAsyncTypebox {
   return async (app) => {
@@ -200,6 +202,18 @@ export function createInvitationRoutes(
       },
       async (request) => {
         requireSameOrigin(request);
+        await securityThrottle.consume([
+          throttleRule("line_use_global", ["all"], 1_000, 1, 5),
+          throttleRule("line_use_source", [request.ip], 30, 15, 15),
+          throttleRule("line_use_token", [request.body.token], 10, 15, 15),
+          throttleRule(
+            "line_use_pair",
+            [request.body.token, request.ip],
+            10,
+            15,
+            15
+          )
+        ]);
         const result = await invitationService.verifyLineInvitation(
           request.body.token
         );
@@ -230,6 +244,12 @@ export function createInvitationRoutes(
       async (request) => {
         requireSameOrigin(request);
         const userId = await authenticateUserId(request);
+        await securityThrottle.consume([
+          throttleRule("join_global", ["all"], 1_000, 1, 5),
+          throttleRule("join_source", [request.ip], 30, 15, 15),
+          throttleRule("join_user", [userId], 20, 15, 15),
+          throttleRule("join_grant", [request.body.joinToken], 10, 15, 15)
+        ]);
         return invitationService.completeJoin({
           userId,
           joinToken: request.body.joinToken,
@@ -339,6 +359,16 @@ export function createInvitationRoutes(
       }
     );
   };
+}
+
+function throttleRule(
+  scope: string,
+  dimensions: readonly string[],
+  maximumAttempts: number,
+  windowMinutes: number,
+  lockMinutes: number
+) {
+  return { scope, dimensions, maximumAttempts, windowMinutes, lockMinutes };
 }
 
 function serializeInvitation(invitation: {

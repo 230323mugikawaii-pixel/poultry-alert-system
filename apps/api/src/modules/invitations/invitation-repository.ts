@@ -35,11 +35,6 @@ export interface PublicInvitationRecord {
   readonly createdAt: Date;
 }
 
-export interface ThrottleRecord {
-  readonly failureCount: number;
-  readonly lockedUntil: Date | null;
-}
-
 export interface JoinResult {
   readonly teamId: string;
   readonly teamCode: string;
@@ -119,15 +114,6 @@ export interface InvitationRepository {
     readonly actorUserId: string;
     readonly now: Date;
   }): Promise<boolean>;
-  getThrottle(keyHash: string): Promise<ThrottleRecord | null>;
-  recordThrottleFailure(input: {
-    readonly keyHash: string;
-    readonly now: Date;
-    readonly windowMinutes: number;
-    readonly maximumFailures: number;
-    readonly lockMinutes: number;
-  }): Promise<ThrottleRecord>;
-  clearThrottle(keyHash: string): Promise<void>;
   removeMemberAndReconcile(input: {
     readonly teamId: string;
     readonly actorUserId: string;

@@ -13,6 +13,7 @@ const EnvironmentSchema = Type.Object({
   ),
   HOST: Type.String({ default: "0.0.0.0" }),
   PORT: Type.Integer({ minimum: 1, maximum: 65535, default: 8080 }),
+  TRUST_PROXY_HOPS: Type.Integer({ minimum: 0, maximum: 5, default: 0 }),
   LOG_LEVEL: Type.Union(
     [
       Type.Literal("fatal"),
@@ -53,6 +54,7 @@ export function loadEnvironment(
     APP_ENV: source.APP_ENV ?? "development",
     HOST: source.HOST ?? "0.0.0.0",
     PORT: Number(source.PORT ?? "8080"),
+    TRUST_PROXY_HOPS: Number(source.TRUST_PROXY_HOPS ?? "0"),
     LOG_LEVEL: source.LOG_LEVEL ?? "info",
     PUBLIC_ORIGIN: source.PUBLIC_ORIGIN ?? "http://127.0.0.1:8080",
     COOKIE_NAME: source.COOKIE_NAME ?? "callnow_session",

@@ -5,6 +5,8 @@ import { AppError } from "../src/lib/app-error.js";
 import { InvitationService } from "../src/modules/invitations/invitation-service.js";
 import { PrismaInvitationRepository } from "../src/modules/invitations/prisma-invitation-repository.js";
 import { PrismaTeamRepository } from "../src/modules/teams/prisma-team-repository.js";
+import { PrismaSecurityThrottleRepository } from "../src/modules/security/prisma-security-throttle-repository.js";
+import { SecurityThrottleService } from "../src/modules/security/security-throttle-service.js";
 import { TeamService } from "../src/modules/teams/team-service.js";
 
 const databaseUrl = process.env.DATABASE_URL ?? "";
@@ -79,7 +81,11 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       tokenPepper: "postgres-acceptance-pepper-at-least-thirty-two-characters",
       invitationTtlDays: 30,
       joinGrantTtlMinutes: 15,
-      lineLinkTtlHours: 24
+      lineLinkTtlHours: 24,
+      securityThrottle: new SecurityThrottleService(
+        new PrismaSecurityThrottleRepository(database),
+        "postgres-acceptance-pepper-at-least-thirty-two-characters"
+      )
     });
     const issued = await invitationService.issueForTeam(
       team.teamId,

@@ -91,7 +91,7 @@ jobs:
           --allow-unauthenticated
           --service-account "${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}"
           --set-cloudsql-instances "${{ vars.CLOUD_SQL_CONNECTION_NAME }}"
-          --set-env-vars "APP_ENV=${{ inputs.environment }},PUBLIC_ORIGIN=${{ vars.PUBLIC_ORIGIN }},COOKIE_NAME=${{ vars.COOKIE_NAME }},SMTP_HOST=${{ vars.SMTP_HOST }},SMTP_PORT=${{ vars.SMTP_PORT }},SMTP_SECURE=${{ vars.SMTP_SECURE }},EMAIL_FROM=${{ vars.EMAIL_FROM }}"
+          --set-env-vars "APP_ENV=${{ inputs.environment }},TRUST_PROXY_HOPS=1,PUBLIC_ORIGIN=${{ vars.PUBLIC_ORIGIN }},COOKIE_NAME=${{ vars.COOKIE_NAME }},SMTP_HOST=${{ vars.SMTP_HOST }},SMTP_PORT=${{ vars.SMTP_PORT }},SMTP_SECURE=${{ vars.SMTP_SECURE }},EMAIL_FROM=${{ vars.EMAIL_FROM }}"
           --set-secrets "DATABASE_URL=call-now-database-url:${{ vars.DATABASE_URL_SECRET_VERSION }},AUTH_TOKEN_PEPPER=call-now-auth-token-pepper:${{ vars.AUTH_PEPPER_SECRET_VERSION }},SMTP_USER=call-now-smtp-user:${{ vars.SMTP_USER_SECRET_VERSION }},SMTP_PASSWORD=call-now-smtp-password:${{ vars.SMTP_PASSWORD_SECRET_VERSION }}"
           --min 0
           --max 10

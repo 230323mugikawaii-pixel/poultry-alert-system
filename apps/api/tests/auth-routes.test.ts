@@ -2,15 +2,18 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import type { AppEnvironment } from "../src/config/env.js";
 import { AuthService } from "../src/modules/auth/auth-service.js";
+import { SecurityThrottleService } from "../src/modules/security/security-throttle-service.js";
 import {
   MemoryAuthRepository,
   MemoryMagicLinkEmailSender
 } from "./helpers/memory-auth.js";
+import { MemorySecurityThrottleRepository } from "./helpers/memory-security-throttle.js";
 
 const environment: AppEnvironment = {
   APP_ENV: "test",
   HOST: "127.0.0.1",
   PORT: 8080,
+  TRUST_PROXY_HOPS: 0,
   LOG_LEVEL: "silent",
   PUBLIC_ORIGIN: "https://test.call-now.example",
   COOKIE_NAME: "callnow_test_session",
@@ -51,7 +54,12 @@ describe("magic link routes", () => {
       sessionAbsoluteDays: 90,
       maxActiveSessions: 5
     });
-    const app = await buildApp({ environment, authService, logger: false });
+    const app = await buildApp({
+      environment,
+      authService,
+      securityThrottleService: createSecurityThrottle(),
+      logger: false
+    });
     apps.push(app);
 
     const requested = await app.inject({
@@ -101,7 +109,12 @@ describe("magic link routes", () => {
       sessionAbsoluteDays: 90,
       maxActiveSessions: 5
     });
-    const app = await buildApp({ environment, authService, logger: false });
+    const app = await buildApp({
+      environment,
+      authService,
+      securityThrottleService: createSecurityThrottle(),
+      logger: false
+    });
     apps.push(app);
 
     const response = await app.inject({
@@ -116,3 +129,10 @@ describe("magic link routes", () => {
     );
   });
 });
+
+function createSecurityThrottle(): SecurityThrottleService {
+  return new SecurityThrottleService(
+    new MemorySecurityThrottleRepository(),
+    environment.AUTH_TOKEN_PEPPER
+  );
+}

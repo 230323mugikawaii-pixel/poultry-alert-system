@@ -6,6 +6,7 @@ const environment: AppEnvironment = {
   APP_ENV: "test",
   HOST: "127.0.0.1",
   PORT: 8080,
+  TRUST_PROXY_HOPS: 0,
   LOG_LEVEL: "silent",
   PUBLIC_ORIGIN: "https://test.call-now.example",
   COOKIE_NAME: "callnow_test_session",

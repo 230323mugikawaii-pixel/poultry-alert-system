@@ -10,8 +10,7 @@ import type {
   InvitationRepository,
   JoinResult,
   MemberRemovalResult,
-  PublicInvitationRecord,
-  ThrottleRecord
+  PublicInvitationRecord
 } from "./invitation-repository.js";
 
 export class PrismaInvitationRepository implements InvitationRepository {
@@ -589,67 +588,6 @@ export class PrismaInvitationRepository implements InvitationRepository {
       });
       return true;
     });
-  }
-
-  public async getThrottle(keyHash: string): Promise<ThrottleRecord | null> {
-    const throttle = await this.database.securityThrottle.findUnique({
-      where: { keyHash }
-    });
-    return throttle
-      ? {
-          failureCount: throttle.failureCount,
-          lockedUntil: throttle.lockedUntil
-        }
-      : null;
-  }
-
-  public async recordThrottleFailure(input: {
-    readonly keyHash: string;
-    readonly now: Date;
-    readonly windowMinutes: number;
-    readonly maximumFailures: number;
-    readonly lockMinutes: number;
-  }): Promise<ThrottleRecord> {
-    return this.database.$transaction(
-      async (transaction) => {
-        const current = await transaction.securityThrottle.findUnique({
-          where: { keyHash: input.keyHash }
-        });
-        const windowExpired =
-          !current ||
-          current.windowStartedAt.getTime() + input.windowMinutes * 60_000 <=
-            input.now.getTime();
-        const failureCount = windowExpired ? 1 : current.failureCount + 1;
-        const lockedUntil =
-          failureCount >= input.maximumFailures
-            ? new Date(input.now.getTime() + input.lockMinutes * 60_000)
-            : null;
-        const throttle = await transaction.securityThrottle.upsert({
-          where: { keyHash: input.keyHash },
-          create: {
-            keyHash: input.keyHash,
-            scope: "INVITATION_PASSWORD",
-            failureCount,
-            windowStartedAt: input.now,
-            lockedUntil
-          },
-          update: {
-            failureCount,
-            ...(windowExpired ? { windowStartedAt: input.now } : {}),
-            lockedUntil
-          }
-        });
-        return {
-          failureCount: throttle.failureCount,
-          lockedUntil: throttle.lockedUntil
-        };
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    );
-  }
-
-  public async clearThrottle(keyHash: string): Promise<void> {
-    await this.database.securityThrottle.deleteMany({ where: { keyHash } });
   }
 
   public async removeMemberAndReconcile(input: {

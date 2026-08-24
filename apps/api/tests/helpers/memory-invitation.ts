@@ -7,8 +7,7 @@ import type {
   InvitationRepository,
   JoinResult,
   MemberRemovalResult,
-  PublicInvitationRecord,
-  ThrottleRecord
+  PublicInvitationRecord
 } from "../../src/modules/invitations/invitation-repository.js";
 import { calculateSeatSummary } from "../../src/modules/teams/seat-policy.js";
 import type { MemoryTeamRepository } from "./memory-team.js";
@@ -51,7 +50,6 @@ export class MemoryInvitationRepository implements InvitationRepository {
   public readonly invitations: StoredInvitation[] = [];
   public readonly links: StoredLink[] = [];
   public readonly grants: StoredGrant[] = [];
-  public readonly throttles = new Map<string, ThrottleRecord>();
   public readonly redemptions = new Map<
     string,
     JoinResult & { userId: string }
@@ -304,34 +302,6 @@ export class MemoryInvitationRepository implements InvitationRepository {
     if (!link || invitation?.teamId !== input.teamId) return false;
     link.status = "REVOKED";
     return true;
-  }
-
-  public async getThrottle(keyHash: string): Promise<ThrottleRecord | null> {
-    return this.throttles.get(keyHash) ?? null;
-  }
-
-  public async recordThrottleFailure(input: {
-    readonly keyHash: string;
-    readonly now: Date;
-    readonly windowMinutes: number;
-    readonly maximumFailures: number;
-    readonly lockMinutes: number;
-  }): Promise<ThrottleRecord> {
-    const current = this.throttles.get(input.keyHash);
-    const failureCount = (current?.failureCount ?? 0) + 1;
-    const record = {
-      failureCount,
-      lockedUntil:
-        failureCount >= input.maximumFailures
-          ? new Date(input.now.getTime() + input.lockMinutes * 60_000)
-          : null
-    };
-    this.throttles.set(input.keyHash, record);
-    return record;
-  }
-
-  public async clearThrottle(keyHash: string): Promise<void> {
-    this.throttles.delete(keyHash);
   }
 
   public async removeMemberAndReconcile(input: {

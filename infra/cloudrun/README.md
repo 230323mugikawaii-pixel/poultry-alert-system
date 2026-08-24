@@ -60,3 +60,9 @@ approval. Configure these environment variables:
 The deployment workflow is manual. It verifies the code, applies migrations through
 a Cloud Run job, and only then deploys the API service. No deployment is triggered by
 creating or pushing a development branch.
+
+The direct Cloud Run deployment uses one trusted proxy hop. `TRUST_PROXY_HOPS=1`
+means Fastify trusts only the nearest Google frontend rather than every value in an
+incoming `X-Forwarded-For` chain. If an external Application Load Balancer is added,
+validate the observed hop chain before changing this value; never use an unconditional
+`trustProxy: true` setting.

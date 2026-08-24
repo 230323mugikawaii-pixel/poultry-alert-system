@@ -8,9 +8,15 @@ import { InvitationService } from "./modules/invitations/invitation-service.js";
 import { PrismaInvitationRepository } from "./modules/invitations/prisma-invitation-repository.js";
 import { PrismaTeamRepository } from "./modules/teams/prisma-team-repository.js";
 import { TeamService } from "./modules/teams/team-service.js";
+import { PrismaSecurityThrottleRepository } from "./modules/security/prisma-security-throttle-repository.js";
+import { SecurityThrottleService } from "./modules/security/security-throttle-service.js";
 
 const environment = loadEnvironment();
 const database = createDatabaseClient(environment.DATABASE_URL);
+const securityThrottleService = new SecurityThrottleService(
+  new PrismaSecurityThrottleRepository(database),
+  environment.AUTH_TOKEN_PEPPER
+);
 const emailSender = new SmtpMagicLinkEmailSender({
   host: environment.SMTP_HOST,
   port: environment.SMTP_PORT,
@@ -39,13 +45,15 @@ const invitationService = new InvitationService({
   tokenPepper: environment.AUTH_TOKEN_PEPPER,
   invitationTtlDays: environment.INVITATION_TTL_DAYS,
   joinGrantTtlMinutes: environment.JOIN_GRANT_TTL_MINUTES,
-  lineLinkTtlHours: environment.LINE_LINK_TTL_HOURS
+  lineLinkTtlHours: environment.LINE_LINK_TTL_HOURS,
+  securityThrottle: securityThrottleService
 });
 const app = await buildApp({
   environment,
   authService,
   teamService,
   invitationService,
+  securityThrottleService,
   readinessCheck: async () => {
     await database.$queryRaw`SELECT 1`;
   }

@@ -2,7 +2,12 @@ import type { FastifyPluginAsyncTypebox } from "@fastify/type-provider-typebox";
 import { Type } from "@sinclair/typebox";
 import type { AppEnvironment } from "../../config/env.js";
 import { AppError } from "../../lib/app-error.js";
-import type { AuthenticatedSession, AuthService } from "./auth-service.js";
+import type { SecurityThrottleService } from "../security/security-throttle-service.js";
+import {
+  normalizeEmail,
+  type AuthenticatedSession,
+  type AuthService
+} from "./auth-service.js";
 
 const AcceptedResponse = Type.Object({ accepted: Type.Literal(true) });
 const UserResponse = Type.Object({
@@ -22,6 +27,7 @@ const SessionResponse = Type.Object({
 
 export function createAuthRoutes(
   authService: AuthService,
+  securityThrottle: SecurityThrottleService,
   environment: AppEnvironment
 ): FastifyPluginAsyncTypebox {
   return async (app) => {
@@ -60,6 +66,13 @@ export function createAuthRoutes(
       },
       async (request, reply) => {
         requireSameOrigin(request);
+        const email = normalizeEmail(request.body.email);
+        await securityThrottle.consume([
+          throttleRule("magic_req_global", ["all"], 500, 1, 5),
+          throttleRule("magic_req_source", [request.ip], 20, 60, 60),
+          throttleRule("magic_req_email", [email], 5, 15, 15),
+          throttleRule("magic_req_pair", [email, request.ip], 5, 15, 15)
+        ]);
         await authService.requestMagicLink(request.body.email);
         await reply.status(202).send({ accepted: true });
       }
@@ -81,6 +94,18 @@ export function createAuthRoutes(
       },
       async (request, reply) => {
         requireSameOrigin(request);
+        await securityThrottle.consume([
+          throttleRule("magic_use_global", ["all"], 1_000, 1, 5),
+          throttleRule("magic_use_source", [request.ip], 30, 15, 15),
+          throttleRule("magic_use_token", [request.body.token], 10, 15, 15),
+          throttleRule(
+            "magic_use_pair",
+            [request.body.token, request.ip],
+            10,
+            15,
+            15
+          )
+        ]);
         const result = await authService.consumeMagicLink(request.body.token, {
           ...(request.body.deviceName
             ? { deviceName: request.body.deviceName }
@@ -191,6 +216,16 @@ export function createAuthRoutes(
       }
     );
   };
+}
+
+function throttleRule(
+  scope: string,
+  dimensions: readonly string[],
+  maximumAttempts: number,
+  windowMinutes: number,
+  lockMinutes: number
+) {
+  return { scope, dimensions, maximumAttempts, windowMinutes, lockMinutes };
 }
 
 function publicUser(user: {

@@ -58,6 +58,10 @@ than printed to logs.
 - Session cookies are HttpOnly, SameSite=Lax, and Secure in staging/production.
 - Sensitive request fields and authentication headers are redacted from logs.
 - Five failed invitation-password attempts lock the team/source pair for 15 minutes.
+- Security-sensitive rate limits are stored in PostgreSQL and shared by all API
+  instances. Keys are HMACs over source and action-specific subjects such as email,
+  invitation, team, link token, or user ID; raw values are not stored in the throttle
+  table.
 - Team capacity is checked again inside a serializable transaction.
 - MEMBER removal revokes sessions and disables notification targets immediately.
 

@@ -9,6 +9,7 @@ import { AppError } from "./lib/app-error.js";
 import type { AuthService } from "./modules/auth/auth-service.js";
 import { createAuthRoutes } from "./modules/auth/auth-routes.js";
 import type { InvitationService } from "./modules/invitations/invitation-service.js";
+import type { SecurityThrottleService } from "./modules/security/security-throttle-service.js";
 import { createInvitationRoutes } from "./modules/invitations/invitation-routes.js";
 import type { TeamService } from "./modules/teams/team-service.js";
 import { createTeamRoutes } from "./modules/teams/team-routes.js";
@@ -20,6 +21,7 @@ export interface BuildAppOptions {
   readonly authService?: AuthService;
   readonly teamService?: TeamService;
   readonly invitationService?: InvitationService;
+  readonly securityThrottleService?: SecurityThrottleService;
   readonly readinessCheck?: () => Promise<void>;
 }
 
@@ -46,7 +48,11 @@ export async function buildApp(
               censor: "[REDACTED]"
             }
           },
-    trustProxy: true,
+    trustProxy:
+      options.environment.TRUST_PROXY_HOPS === 0
+        ? false
+        : (_address: string, hop: number) =>
+            hop < options.environment.TRUST_PROXY_HOPS,
     requestIdHeader: "x-request-id"
   }).withTypeProvider<TypeBoxTypeProvider>();
 
@@ -108,8 +114,15 @@ export async function buildApp(
   await app.register(createSystemRoutes(options.readinessCheck));
 
   if (options.authService) {
+    if (!options.securityThrottleService) {
+      throw new Error("securityThrottleService is required for authentication");
+    }
     await app.register(
-      createAuthRoutes(options.authService, options.environment)
+      createAuthRoutes(
+        options.authService,
+        options.securityThrottleService,
+        options.environment
+      )
     );
   }
 
@@ -125,10 +138,14 @@ export async function buildApp(
   }
 
   if (options.authService && options.invitationService) {
+    if (!options.securityThrottleService) {
+      throw new Error("securityThrottleService is required for invitations");
+    }
     await app.register(
       createInvitationRoutes(
         options.authService,
         options.invitationService,
+        options.securityThrottleService,
         options.environment
       )
     );
