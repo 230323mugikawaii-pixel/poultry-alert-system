@@ -13,7 +13,9 @@ const migration = readFileSync(
 const databases: PGlite[] = [];
 
 afterEach(async () => {
-  await Promise.all(databases.splice(0).map(async (database) => database.close()));
+  await Promise.all(
+    databases.splice(0).map(async (database) => database.close())
+  );
 });
 
 describe("initial PostgreSQL migration", () => {
@@ -55,4 +57,3 @@ describe("initial PostgreSQL migration", () => {
     ).rejects.toThrow();
   });
 });
-

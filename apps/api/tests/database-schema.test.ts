@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url), "utf8");
+const schema = readFileSync(
+  new URL("../prisma/schema.prisma", import.meta.url),
+  "utf8"
+);
 const migration = readFileSync(
   new URL(
     "../prisma/migrations/20260824000100_phase1_foundation/migration.sql",
@@ -35,4 +38,3 @@ describe("database foundation", () => {
     expect(migration).toContain("CHECK (\"publicCode\" ~ '^[0-9]{6}$')");
   });
 });
-

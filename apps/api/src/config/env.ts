@@ -27,7 +27,18 @@ const EnvironmentSchema = Type.Object({
   ),
   PUBLIC_ORIGIN: Type.String({ minLength: 1 }),
   COOKIE_NAME: Type.String({ minLength: 1, default: "callnow_session" }),
-  DATABASE_URL: Type.String({ minLength: 1 })
+  DATABASE_URL: Type.String({ minLength: 1 }),
+  AUTH_TOKEN_PEPPER: Type.String({ minLength: 32 }),
+  MAGIC_LINK_TTL_MINUTES: Type.Integer({ minimum: 5, maximum: 60 }),
+  SESSION_IDLE_DAYS: Type.Integer({ minimum: 1, maximum: 90 }),
+  SESSION_ABSOLUTE_DAYS: Type.Integer({ minimum: 1, maximum: 365 }),
+  MAX_ACTIVE_SESSIONS: Type.Integer({ minimum: 1, maximum: 20 }),
+  SMTP_HOST: Type.String({ minLength: 1 }),
+  SMTP_PORT: Type.Integer({ minimum: 1, maximum: 65535 }),
+  SMTP_SECURE: Type.Boolean(),
+  SMTP_USER: Type.String(),
+  SMTP_PASSWORD: Type.String(),
+  EMAIL_FROM: Type.String({ minLength: 3 })
 });
 
 export type AppEnvironment = Static<typeof EnvironmentSchema>;
@@ -44,7 +55,20 @@ export function loadEnvironment(
     COOKIE_NAME: source.COOKIE_NAME ?? "callnow_session",
     DATABASE_URL:
       source.DATABASE_URL ??
-      "postgresql://callnow:callnow@127.0.0.1:5432/callnow"
+      "postgresql://callnow:callnow@127.0.0.1:5432/callnow",
+    AUTH_TOKEN_PEPPER:
+      source.AUTH_TOKEN_PEPPER ??
+      "development-only-call-now-token-pepper-change-me",
+    MAGIC_LINK_TTL_MINUTES: Number(source.MAGIC_LINK_TTL_MINUTES ?? "15"),
+    SESSION_IDLE_DAYS: Number(source.SESSION_IDLE_DAYS ?? "30"),
+    SESSION_ABSOLUTE_DAYS: Number(source.SESSION_ABSOLUTE_DAYS ?? "90"),
+    MAX_ACTIVE_SESSIONS: Number(source.MAX_ACTIVE_SESSIONS ?? "5"),
+    SMTP_HOST: source.SMTP_HOST ?? "127.0.0.1",
+    SMTP_PORT: Number(source.SMTP_PORT ?? "1025"),
+    SMTP_SECURE: source.SMTP_SECURE === "true",
+    SMTP_USER: source.SMTP_USER ?? "",
+    SMTP_PASSWORD: source.SMTP_PASSWORD ?? "",
+    EMAIL_FROM: source.EMAIL_FROM ?? "Call Now <no-reply@call-now.local>"
   };
 
   if (!Value.Check(EnvironmentSchema, candidate)) {
@@ -69,6 +93,13 @@ export function loadEnvironment(
     !candidate.PUBLIC_ORIGIN.startsWith("https://")
   ) {
     throw new Error("PUBLIC_ORIGIN must use HTTPS in production");
+  }
+
+  if (
+    candidate.APP_ENV === "production" &&
+    candidate.AUTH_TOKEN_PEPPER.startsWith("development-only-")
+  ) {
+    throw new Error("AUTH_TOKEN_PEPPER must be replaced in production");
   }
 
   return candidate;

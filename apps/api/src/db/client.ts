@@ -8,4 +8,3 @@ export function createDatabaseClient(databaseUrl: string): DatabaseClient {
 
   return new PrismaClient({ adapter });
 }
-

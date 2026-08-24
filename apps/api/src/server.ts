@@ -1,8 +1,32 @@
 import { buildApp } from "./app.js";
 import { loadEnvironment } from "./config/env.js";
+import { createDatabaseClient } from "./db/client.js";
+import { AuthService } from "./modules/auth/auth-service.js";
+import { SmtpMagicLinkEmailSender } from "./modules/auth/email-sender.js";
+import { PrismaAuthRepository } from "./modules/auth/prisma-auth-repository.js";
 
 const environment = loadEnvironment();
-const app = await buildApp({ environment });
+const database = createDatabaseClient(environment.DATABASE_URL);
+const emailSender = new SmtpMagicLinkEmailSender({
+  host: environment.SMTP_HOST,
+  port: environment.SMTP_PORT,
+  secure: environment.SMTP_SECURE,
+  user: environment.SMTP_USER,
+  password: environment.SMTP_PASSWORD,
+  from: environment.EMAIL_FROM
+});
+const authService = new AuthService({
+  repository: new PrismaAuthRepository(database),
+  emailSender,
+  publicOrigin: environment.PUBLIC_ORIGIN,
+  tokenPepper: environment.AUTH_TOKEN_PEPPER,
+  magicLinkTtlMinutes: environment.MAGIC_LINK_TTL_MINUTES,
+  sessionIdleDays: environment.SESSION_IDLE_DAYS,
+  sessionAbsoluteDays: environment.SESSION_ABSOLUTE_DAYS,
+  maxActiveSessions: environment.MAX_ACTIVE_SESSIONS
+});
+const app = await buildApp({ environment, authService });
+app.addHook("onClose", async () => database.$disconnect());
 
 const shutdown = async (signal: string): Promise<void> => {
   app.log.info({ signal }, "Shutting down");
@@ -19,4 +43,3 @@ try {
   app.log.fatal({ err: error }, "API startup failed");
   process.exit(1);
 }
-

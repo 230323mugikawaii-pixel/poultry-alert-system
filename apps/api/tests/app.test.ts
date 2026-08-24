@@ -9,7 +9,18 @@ const environment: AppEnvironment = {
   LOG_LEVEL: "silent",
   PUBLIC_ORIGIN: "https://test.call-now.example",
   COOKIE_NAME: "callnow_test_session",
-  DATABASE_URL: "postgresql://test:test@127.0.0.1:5432/test"
+  DATABASE_URL: "postgresql://test:test@127.0.0.1:5432/test",
+  AUTH_TOKEN_PEPPER: "test-token-pepper-at-least-thirty-two-characters",
+  MAGIC_LINK_TTL_MINUTES: 15,
+  SESSION_IDLE_DAYS: 30,
+  SESSION_ABSOLUTE_DAYS: 90,
+  MAX_ACTIVE_SESSIONS: 5,
+  SMTP_HOST: "127.0.0.1",
+  SMTP_PORT: 1025,
+  SMTP_SECURE: false,
+  SMTP_USER: "",
+  SMTP_PASSWORD: "",
+  EMAIL_FROM: "Call Now <test@example.com>"
 };
 
 const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
@@ -19,15 +30,18 @@ afterEach(async () => {
 });
 
 describe("system routes", () => {
-  it.each(["/healthz", "/readyz"])("returns healthy status for %s", async (url) => {
-    const app = await buildApp({ environment, logger: false });
-    apps.push(app);
+  it.each(["/healthz", "/readyz"])(
+    "returns healthy status for %s",
+    async (url) => {
+      const app = await buildApp({ environment, logger: false });
+      apps.push(app);
 
-    const response = await app.inject({ method: "GET", url });
+      const response = await app.inject({ method: "GET", url });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true, service: "call-now-api" });
-  });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ ok: true, service: "call-now-api" });
+    }
+  );
 
   it("returns a stable error envelope for unknown routes", async () => {
     const app = await buildApp({ environment, logger: false });

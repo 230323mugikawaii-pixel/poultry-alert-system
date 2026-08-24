@@ -15,6 +15,11 @@ services:
     volumes:
       - callnow-postgres:/var/lib/postgresql/data
 
+  mailpit:
+    image: axllent/mailpit:v1.29
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
 volumes:
   callnow-postgres:
-

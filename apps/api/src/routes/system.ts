@@ -27,4 +27,3 @@ export const systemRoutes: FastifyPluginAsyncTypebox = async (app) => {
     async () => ({ ok: true as const, service: "call-now-api" as const })
   );
 };
-

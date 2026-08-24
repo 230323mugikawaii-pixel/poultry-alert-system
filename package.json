@@ -10,6 +10,6 @@
     "test": "pnpm --filter @call-now/api test",
     "test:coverage": "pnpm --filter @call-now/api test:coverage",
     "typecheck": "pnpm --filter @call-now/api typecheck",
-    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   }
 }
