@@ -559,8 +559,6 @@ footer {
 }
 
 .keyword-input-row input,
-.contact-form input,
-.contact-form textarea,
 .google-card input {
   width: 100%;
 
@@ -577,8 +575,6 @@ footer {
 }
 
 .keyword-input-row input:focus,
-.contact-form input:focus,
-.contact-form textarea:focus,
 .google-card input:focus {
   border-color: var(--blue);
 
@@ -1294,63 +1290,131 @@ footer {
 
 
 /* ========================================
-   お問い合わせ
+   ヘルプ・フィードバック
 ======================================== */
 
-.contact-form {
-  display: grid;
-
-  gap: 9px;
+#helpFeedbackPage > h1 {
+  font-size:
+    clamp(28px, 7vw, 55px);
 }
 
-.contact-form label {
-  margin-top: 12px;
-
-  font-weight: 800;
-}
-
-.contact-form textarea {
-  resize: vertical;
-}
-
-.contact-form .btn {
-  margin-top: 12px;
-}
-
-.contact-honeypot {
-  position: absolute;
-
-  width: 1px;
-  height: 1px;
-
-  overflow: hidden;
-
-  clip-path: inset(50%);
-
-  white-space: nowrap;
-}
-
-.contact-status {
-  min-height: 1.5em;
-  margin: 12px 0 0;
+.help-intro {
+  margin-bottom: 24px;
 
   color: var(--subtext);
 
+  font-weight: 700;
+  line-height: 1.8;
+}
+
+.help-grid {
+  display: grid;
+
+  gap: 18px;
+}
+
+.help-card h2 {
+  margin-top: 0;
+  margin-bottom: 18px;
+}
+
+.help-card p {
+  line-height: 1.8;
+}
+
+.help-card .btn {
+  margin-top: 18px;
+}
+
+.help-item {
+  border-top:
+    1px solid var(--border);
+}
+
+.help-item:last-child {
+  border-bottom:
+    1px solid var(--border);
+}
+
+.help-item summary {
+  position: relative;
+
+  padding:
+    17px 42px 17px 0;
+
+  font-weight: 800;
+
+  cursor: pointer;
+
+  list-style: none;
+}
+
+.help-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.help-item summary::after {
+  position: absolute;
+
+  top: 50%;
+  right: 4px;
+
+  content: "+";
+
+  color: var(--blue);
+
+  font-size: 24px;
+
+  transform: translateY(-50%);
+}
+
+.help-item[open] summary::after {
+  content: "−";
+}
+
+.help-item p {
+  margin:
+    0 0 18px;
+
+  color: var(--subtext);
+}
+
+.help-check-list {
+  margin:
+    0;
+
+  padding-left: 24px;
+
+  line-height: 1.9;
+}
+
+.help-check-list li + li {
+  margin-top: 7px;
+}
+
+.bug-report-card {
+  border:
+    2px solid #f2b8b8;
+}
+
+.help-note {
+  margin:
+    20px 0 0;
+
+  padding: 15px;
+
+  color: var(--subtext);
+
+  background: #fff7f7;
+
+  border-radius: 14px;
+
   font-size: 14px;
   font-weight: 700;
-  line-height: 1.6;
 }
 
-.contact-status.success {
-  color: #15803d;
-}
-
-.contact-status.error {
-  color: #b91c1c;
-}
-
-.contact-status.sending {
-  color: var(--blue);
+.feedback-card {
+  background: var(--blue-light);
 }
 
 
