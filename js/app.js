@@ -173,8 +173,6 @@ const EXTRA_ACCOUNT_PRICE = 100;
 const MAX_ACCOUNT_COUNT = 100;
 const STORAGE_KEY = "callNowContract";
 const SESSION_KEY = "callNowSession";
-const CONTACT_INFO_STORAGE_KEY =
-  "callNowContactInfo";
 const GOOGLE_CLIENT_ID =
   "187445333976-dpqiiqq2a46ljquoqfiqsh5vnq109hqu.apps.googleusercontent.com";
 const GOOGLE_GMAIL_SCOPE =
@@ -188,7 +186,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-21.1";
+  "2026-08-24.1";
 
 let alarmAudioContext = null;
 let alarmRepeatTimer = null;
@@ -235,7 +233,7 @@ window.addEventListener("DOMContentLoaded", () => {
   );
 
   loadSavedData();
-  initializeContactInfoPersistence();
+  clearLegacyContactInfo();
   initializeAppDialog();
   initializeAlarmNotification();
   normalizeKeywords();
@@ -2031,7 +2029,7 @@ function showAppPage(
       testPage: 1,
       contractPage: 2,
       keywordPage: 3,
-      contactPage: 4
+      helpFeedbackPage: 4
     };
 
     const buttonIndex =
@@ -3478,136 +3476,17 @@ function sleep(milliseconds) {
 
 
 /* ========================================
-   お問い合わせ入力情報を保存
+   旧お問い合わせフォームの保存情報を削除
 ======================================== */
 
-function initializeContactInfoPersistence() {
-  const fieldIds = [
-    "contactName",
-    "contactCompany",
-    "contactEmail"
-  ];
-
-  loadContactInfo();
-
-  fieldIds.forEach((fieldId) => {
-    const field =
-      document.getElementById(
-        fieldId
-      );
-
-    if (!field) {
-      return;
-    }
-
-    field.addEventListener(
-      "input",
-      saveContactInfo
-    );
-  });
-}
-
-
-function saveContactInfo() {
-  const nameElement =
-    document.getElementById(
-      "contactName"
-    );
-
-  const companyElement =
-    document.getElementById(
-      "contactCompany"
-    );
-
-  const emailElement =
-    document.getElementById(
-      "contactEmail"
-    );
-
-  if (
-    !nameElement ||
-    !companyElement ||
-    !emailElement
-  ) {
-    return;
-  }
-
-  const contactInfo = {
-    name: nameElement.value,
-    company: companyElement.value,
-    email: emailElement.value
-  };
-
+function clearLegacyContactInfo() {
   try {
-    localStorage.setItem(
-      CONTACT_INFO_STORAGE_KEY,
-      JSON.stringify(contactInfo)
+    localStorage.removeItem(
+      "callNowContactInfo"
     );
   } catch (error) {
     console.error(
-      "お問い合わせ情報の保存に失敗しました。",
-      error
-    );
-  }
-}
-
-
-function loadContactInfo() {
-  let savedContactInfo;
-
-  try {
-    savedContactInfo =
-      localStorage.getItem(
-        CONTACT_INFO_STORAGE_KEY
-      );
-  } catch (error) {
-    console.error(
-      "お問い合わせ情報の読み込みに失敗しました。",
-      error
-    );
-    return;
-  }
-
-  if (!savedContactInfo) {
-    return;
-  }
-
-  try {
-    const contactInfo =
-      JSON.parse(savedContactInfo);
-
-    const nameElement =
-      document.getElementById(
-        "contactName"
-      );
-
-    const companyElement =
-      document.getElementById(
-        "contactCompany"
-      );
-
-    const emailElement =
-      document.getElementById(
-        "contactEmail"
-      );
-
-    if (nameElement) {
-      nameElement.value =
-        String(contactInfo.name || "");
-    }
-
-    if (companyElement) {
-      companyElement.value =
-        String(contactInfo.company || "");
-    }
-
-    if (emailElement) {
-      emailElement.value =
-        String(contactInfo.email || "");
-    }
-  } catch (error) {
-    console.error(
-      "お問い合わせ情報の読み込みに失敗しました。",
+      "旧お問い合わせ情報の削除に失敗しました。",
       error
     );
   }
@@ -3615,185 +3494,13 @@ function loadContactInfo() {
 
 
 /* ========================================
-   お問い合わせをGmailへ送信
+   GASの旧お問い合わせ処理
 ======================================== */
 
-async function sendContact(event) {
-  if (event) {
-    event.preventDefault();
-  }
-
-  const form =
-    document.getElementById(
-      "contactForm"
-    );
-
-  const submitButton =
-    document.getElementById(
-      "contactSubmitButton"
-    );
-
-  const statusElement =
-    document.getElementById(
-      "contactStatus"
-    );
-
-  if (
-    !form ||
-    !submitButton ||
-    !statusElement
-  ) {
-    return;
-  }
-
-  if (!form.checkValidity()) {
-    form.reportValidity();
-    return;
-  }
-
-  const name =
-    document.getElementById(
-      "contactName"
-    ).value.trim();
-
-  const company =
-    document.getElementById(
-      "contactCompany"
-    ).value.trim();
-
-  const email =
-    document.getElementById(
-      "contactEmail"
-    ).value.trim();
-
-  const message =
-    document.getElementById(
-      "contactMessage"
-    ).value.trim();
-
-  const website =
-    document.getElementById(
-      "contactWebsite"
-    ).value.trim();
-
-  saveContactInfo();
-
-  if (
-    !name ||
-    !email ||
-    !message
-  ) {
-    setContactStatus(
-      "必須項目を入力してください。",
-      "error"
-    );
-    return;
-  }
-
-  if (!TEST_API_URL) {
-    setContactStatus(
-      "現在、お問い合わせを送信できません。時間をおいて再度お試しください。",
-      "error"
-    );
-    return;
-  }
-
-  const originalButtonText =
-    submitButton.textContent.trim();
-
-  submitButton.disabled = true;
-  submitButton.textContent =
-    "送信中...";
-
-  setContactStatus(
-    "お問い合わせを送信しています。",
-    "sending"
-  );
-
-  try {
-    const response =
-      await fetch(
-        TEST_API_URL,
-        {
-          method: "POST",
-          redirect: "follow",
-          body: JSON.stringify({
-            action: "sendContact",
-            token: TEST_API_TOKEN,
-            requestId:
-              createTestRequestId(),
-            name: name,
-            company: company,
-            email: email,
-            message: message,
-            website: website
-          })
-        }
-      );
-
-    const result =
-      await response.json();
-
-    if (!result.ok) {
-      throw new Error(
-        result.error ||
-        "送信できませんでした"
-      );
-    }
-
-    form.reset();
-    loadContactInfo();
-
-    setContactStatus(
-      "お問い合わせを送信しました。内容を確認後、メールでご連絡します。（メールはgmailに直接返信されます）",
-      "success"
-    );
-
-  } catch (error) {
-    console.error(
-      "お問い合わせの送信に失敗しました。",
-      error
-    );
-
-    const errorMessage =
-      String(error.message) ===
-      "too_many_requests"
-        ? "短時間に複数回送信されています。しばらく待ってから再度お試しください。"
-        : "送信できませんでした。通信状況を確認して、もう一度お試しください。";
-
-    setContactStatus(
-      errorMessage,
-      "error"
-    );
-
-  } finally {
-    submitButton.disabled = false;
-    submitButton.textContent =
-      originalButtonText;
-  }
-}
-
-
-function setContactStatus(
-  message,
-  state
-) {
-  const statusElement =
-    document.getElementById(
-      "contactStatus"
-    );
-
-  if (!statusElement) {
-    return;
-  }
-
-  statusElement.textContent =
-    message;
-
-  statusElement.className =
-    `contact-status ${state || ""}`
-      .trim();
-}
+/*
+  GAS側のsendContact actionは後方互換のため残す。
+  現在のフロントエンドからは呼び出さない。
+*/
 
 
 /* ========================================

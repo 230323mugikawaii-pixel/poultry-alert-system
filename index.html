@@ -13,7 +13,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=10">
+    <link rel="stylesheet" href="css/style.css?v=11">
 </head>
 
 <body>
@@ -1160,110 +1160,153 @@
 
 
 
-      <!-- お問い合わせ -->
+      <!-- ヘルプ・フィードバック -->
 
       <section
-        id="contactPage"
+        id="helpFeedbackPage"
         class="app-page"
       >
 
         <h1>
-          お問い合わせ
+          ヘルプ・フィードバック
         </h1>
 
 
-        <form
-          id="contactForm"
-          class="card contact-form"
-          onsubmit="sendContact(event)"
-        >
-
-          <label for="contactName">
-            お名前
-          </label>
-
-          <input
-            id="contactName"
-            type="text"
-            name="name"
-            autocomplete="name"
-            maxlength="80"
-            required
-          >
+        <p class="help-intro">
+          困ったときの確認方法と、不具合を報告する前に必要な情報をご案内します。
+        </p>
 
 
-          <label for="contactCompany">
-            会社名・農場名（任意）
-          </label>
+        <div class="help-grid">
 
-          <input
-            id="contactCompany"
-            type="text"
-            name="company"
-            autocomplete="organization"
-            maxlength="120"
-          >
+          <article class="card help-card">
+
+            <h2>
+              よくある質問
+            </h2>
+
+            <details class="help-item">
+              <summary>
+                通知テストにはどのくらい時間がかかりますか？
+              </summary>
+
+              <p>
+                Gmailへの到着とCall Now側の検知を含め、最大3分ほどかかる場合があります。
+                結果が表示されるまでは、テストメールを削除・移動しないでください。
+              </p>
+            </details>
+
+            <details class="help-item">
+              <summary>
+                キーワードはどこで変更できますか？
+              </summary>
+
+              <p>
+                下部の「キーワード」から現在の登録内容を確認し、
+                「キーワードを編集」を選んで変更できます。
+              </p>
+            </details>
+
+            <details class="help-item">
+              <summary>
+                契約期間や料金はどこで確認できますか？
+              </summary>
+
+              <p>
+                下部の「契約」に、契約期間、登録数、更新料金が表示されます。
+              </p>
+            </details>
+
+          </article>
 
 
-          <label for="contactEmail">
-            メールアドレス
-          </label>
+          <article class="card help-card">
 
-          <input
-            id="contactEmail"
-            type="email"
-            name="email"
-            autocomplete="email"
-            maxlength="254"
-            required
-          >
+            <h2>
+              通知が鳴らない場合
+            </h2>
 
+            <ol class="help-check-list">
+              <li>端末の音量と消音モードを確認します。</li>
+              <li>ブラウザでCall Nowを開いたままにします。</li>
+              <li>登録キーワードと受信メールの件名・本文を確認します。</li>
+              <li>通知テストを実行し、最大3分待ちます。</li>
+            </ol>
 
-          <label for="contactMessage">
-            お問い合わせ内容
-          </label>
-
-          <textarea
-            id="contactMessage"
-            name="message"
-            rows="6"
-            maxlength="5000"
-            required
-          ></textarea>
-
-          <div
-            class="contact-honeypot"
-            aria-hidden="true"
-          >
-            <label for="contactWebsite">
-              ウェブサイト
-            </label>
-
-            <input
-              id="contactWebsite"
-              type="text"
-              name="website"
-              tabindex="-1"
-              autocomplete="off"
+            <button
+              type="button"
+              class="btn outline full-width"
+              onclick="showAppPage('testPage')"
             >
-          </div>
+              通知テストを開く
+            </button>
 
-          <p
-            id="contactStatus"
-            class="contact-status"
-            role="status"
-            aria-live="polite"
-          ></p>
+          </article>
 
-          <button
-            id="contactSubmitButton"
-            type="submit"
-            class="btn primary full-width"
-          >
-            お問い合わせを送信
-          </button>
 
-        </form>
+          <article class="card help-card">
+
+            <h2>
+              Gmail連携・ログインで困った場合
+            </h2>
+
+            <ul class="help-check-list">
+              <li>利用するGoogleアカウントが正しいか確認します。</li>
+              <li>Googleの連携画面を途中で閉じず、最後まで完了します。</li>
+              <li>再ログイン後も改善しない場合は、連携状態を確認します。</li>
+            </ul>
+
+            <button
+              type="button"
+              class="btn outline full-width"
+              onclick="openGoogleAccountManager()"
+            >
+              Googleアカウントを確認
+            </button>
+
+          </article>
+
+
+          <article class="card help-card bug-report-card">
+
+            <h2>
+              不具合を報告
+            </h2>
+
+            <p>
+              個別サポートへ連絡する際は、次の情報をご用意ください。
+              原因の確認がしやすくなります。
+            </p>
+
+            <ul class="help-check-list">
+              <li>不具合が起きた日時</li>
+              <li>操作していた画面と手順</li>
+              <li>表示されたメッセージ</li>
+              <li>端末とブラウザの種類</li>
+            </ul>
+
+            <p class="help-note">
+              一般問い合わせフォームは終了しました。
+              不具合は、運営者から案内された個別サポート窓口へお知らせください。
+            </p>
+
+          </article>
+
+
+          <article class="card help-card feedback-card">
+
+            <h2>
+              ご意見・評価
+            </h2>
+
+            <p>
+              正式公開後は、App StoreまたはGoogle Playのレビューで受け付ける予定です。
+              現在はストアページ未公開のため、レビューリンクは掲載していません。
+            </p>
+
+          </article>
+
+        </div>
 
       </section>
 
@@ -1318,10 +1361,10 @@
       <button
         type="button"
         class="tab-button"
-        onclick="showAppPage('contactPage', this)"
+        onclick="showAppPage('helpFeedbackPage', this)"
       >
-        <span>✉️</span>
-        <small>連絡</small>
+        <span>❓</span>
+        <small>ヘルプ</small>
       </button>
 
     </nav>
@@ -1337,7 +1380,7 @@
   async
   defer
 ></script>
-    <script src="js/app.js?v=10"></script>
+    <script src="js/app.js?v=11"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";
