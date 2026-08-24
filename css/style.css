@@ -59,6 +59,8 @@ button {
 ======================================== */
 
 .btn {
+  display: inline-block;
+
   border: none;
 
   border-radius: 16px;
@@ -67,6 +69,9 @@ button {
 
   font-size: 16px;
   font-weight: 800;
+
+  text-align: center;
+  text-decoration: none;
 
   transition:
     transform 0.15s,
@@ -708,12 +713,6 @@ footer {
   gap: 16px;
 }
 
-.linked-accounts-heading span {
-  color: var(--blue);
-
-  font-weight: 800;
-}
-
 #linkedGoogleAccounts {
   display: grid;
 
@@ -810,6 +809,12 @@ footer {
 
 .connected-account-email {
   overflow-wrap: anywhere;
+}
+
+.connected-account-empty {
+  margin: 0;
+
+  color: var(--subtext);
 }
 
 .account-manage-button {
@@ -1079,6 +1084,76 @@ footer {
   display: grid;
 
   gap: 20px;
+}
+
+.announcement-list {
+  display: grid;
+
+  gap: 0;
+
+  margin: 0;
+  padding: 0;
+
+  list-style: none;
+}
+
+.announcement-item {
+  border-top:
+    1px solid var(--border);
+}
+
+.announcement-item:last-child {
+  border-bottom:
+    1px solid var(--border);
+}
+
+.announcement-item > span,
+.announcement-item a {
+  display: flex;
+
+  min-width: 0;
+
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 12px;
+
+  padding: 16px 2px;
+
+  overflow-wrap: anywhere;
+}
+
+.announcement-item > span {
+  color: var(--text);
+}
+
+.announcement-item a {
+  color: var(--blue);
+
+  font-weight: 800;
+
+  text-decoration: none;
+}
+
+.announcement-item a:hover {
+  text-decoration: underline;
+}
+
+.announcement-link-indicator {
+  flex: 0 0 auto;
+
+  font-size: 18px;
+}
+
+.announcement-empty {
+  padding: 16px 2px;
+
+  color: var(--subtext);
+
+  border-top:
+    1px solid var(--border);
+  border-bottom:
+    1px solid var(--border);
 }
 
 
@@ -1378,9 +1453,9 @@ footer {
   margin-top: 7px;
 }
 
-.bug-report-card {
+.support-card {
   border:
-    2px solid #f2b8b8;
+    2px solid #acd0f8;
 }
 
 .help-note {
@@ -1391,7 +1466,7 @@ footer {
 
   color: var(--subtext);
 
-  background: #fff7f7;
+  background: var(--blue-light);
 
   border-radius: 14px;
 
@@ -1401,6 +1476,24 @@ footer {
 
 .feedback-card {
   background: var(--blue-light);
+}
+
+.store-review-links {
+  display: grid;
+
+  grid-template-columns:
+    repeat(
+      auto-fit,
+      minmax(180px, 1fr)
+    );
+
+  gap: 12px;
+
+  margin-top: 18px;
+}
+
+.store-review-links .btn {
+  margin-top: 0;
 }
 
 
@@ -1821,13 +1914,6 @@ body.app-dialog-open {
 
   .linked-accounts-card {
     grid-template-columns: 1fr;
-  }
-
-  .linked-accounts-heading {
-    align-items: flex-start;
-    flex-direction: column;
-
-    gap: 6px;
   }
 
   .linked-google-account {

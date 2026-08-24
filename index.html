@@ -13,7 +13,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=12">
+    <link rel="stylesheet" href="css/style.css?v=15">
 </head>
 
 <body>
@@ -721,7 +721,7 @@
 
 
       <h1 id="googleScreenTitle">
-        Googleアカウントを連携
+        Googleアカウントを設定
       </h1>
 
 
@@ -729,23 +729,16 @@
         id="googleScreenDescription"
         class="description"
       >
-        通知を確認するGmailを1件連携します。
+        通知の確認と本人確認に使うGoogleアカウントを設定します。
       </p>
 
 
-      <div class="notice-box">
-        <strong>監視用アカウントは1件です</strong>
-        <p>
-          1利用者につき、通知を確認するGoogleアカウントを1件だけ連携できます。
-          別のアカウントを使う場合は、連携後に「アカウントを変更」を選択してください。
-        </p>
-      </div>
-
-
-      <div class="google-account-card linked-accounts-card">
+      <div
+        id="linkedGoogleAccountCard"
+        class="google-account-card linked-accounts-card"
+      >
         <div class="linked-accounts-heading">
-          <strong>監視用Googleアカウント</strong>
-          <span id="linkedGoogleAccountCount">未連携</span>
+          <strong>現在設定されている監視用Googleアカウント</strong>
         </div>
 
         <div id="linkedGoogleAccounts"></div>
@@ -764,7 +757,7 @@
         <div class="google-card-content">
 
           <h2 id="googleCardTitle">
-            Googleアカウントを連携
+            Googleアカウントを設定
           </h2>
 
 
@@ -787,7 +780,7 @@
             class="google-button"
             onclick="startGoogleLogin()"
           >
-            Googleアカウントを連携
+            Googleアカウントを設定
           </button>
 
         </div>
@@ -800,7 +793,7 @@
         class="btn primary full-width"
         onclick="finishGoogleAccountLinking()"
       >
-        連携を完了してホームへ
+        設定を完了してホームへ
       </button>
 
     </div>
@@ -889,16 +882,17 @@
 
 
             <div id="connectedGoogleAccounts">
-              未選択
+              監視用Googleアカウントが設定されていません
             </div>
 
 
             <button
+              id="homeGoogleAccountActionButton"
               type="button"
               class="btn outline full-width account-manage-button"
               onclick="openGoogleAccountManager()"
             >
-              Googleアカウントを管理
+              Googleアカウントを設定
             </button>
 
           </article>
@@ -911,17 +905,11 @@
             </h2>
 
 
-            <p>
-              ・システムメンテナンスのお知らせ
-            </p>
-
-            <p>
-              ・新機能追加のお知らせ
-            </p>
-
-            <p>
-              ・契約更新のお願い
-            </p>
+            <ul
+              id="announcementList"
+              class="announcement-list"
+              aria-label="お知らせ一覧"
+            ></ul>
 
           </article>
 
@@ -1001,32 +989,6 @@
 
             <strong id="contractStartDate">
               ―
-            </strong>
-
-          </div>
-
-
-          <div class="contract-row">
-
-            <span>
-              監視用Googleアカウント
-            </span>
-
-            <strong id="contractGoogleAccountLimit">
-              1件（固定）
-            </strong>
-
-          </div>
-
-
-          <div class="contract-row">
-
-            <span>
-              現在の連携状態
-            </span>
-
-            <strong id="contractGoogleAccountStatus">
-              未連携
             </strong>
 
           </div>
@@ -1236,21 +1198,21 @@
               class="btn outline full-width"
               onclick="openGoogleAccountManager()"
             >
-              Googleアカウントを確認
+              Googleアカウント設定を開く
             </button>
 
           </article>
 
 
-          <article class="card help-card bug-report-card">
+          <article class="card help-card support-card">
 
             <h2>
-              不具合を報告
+              解決しない場合
             </h2>
 
             <p>
-              個別サポートへ連絡する際は、次の情報をご用意ください。
-              原因の確認がしやすくなります。
+              個別の不具合、アカウント、契約の問題は個別サポートで確認します。
+              ご連絡の際は、次の情報をご用意ください。
             </p>
 
             <ul class="help-check-list">
@@ -1260,10 +1222,18 @@
               <li>端末とブラウザの種類</li>
             </ul>
 
-            <p class="help-note">
-              一般問い合わせフォームは終了しました。
-              不具合は、運営者から案内された個別サポート窓口へお知らせください。
+            <p id="supportStatus" class="help-note" aria-live="polite">
+              個別サポート窓口は準備中です。
             </p>
+
+            <a
+              id="supportLink"
+              class="btn outline full-width hidden"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              個別サポートを開く
+            </a>
 
           </article>
 
@@ -1274,10 +1244,29 @@
               ご意見・評価
             </h2>
 
-            <p>
+            <p id="storeReviewStatus" aria-live="polite">
               正式公開後は、App StoreまたはGoogle Playのレビューで受け付ける予定です。
               現在はストアページ未公開のため、レビューリンクは掲載していません。
             </p>
+
+            <div id="storeReviewLinks" class="store-review-links hidden">
+              <a
+                id="appStoreReviewLink"
+                class="btn outline"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                App Storeで評価
+              </a>
+              <a
+                id="googlePlayReviewLink"
+                class="btn outline"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Google Playで評価
+              </a>
+            </div>
 
           </article>
 
@@ -1355,7 +1344,7 @@
   async
   defer
 ></script>
-    <script src="js/app.js?v=12"></script>
+    <script src="js/app.js?v=16"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";
