@@ -63,7 +63,13 @@ describe("team routes", () => {
       repository: teamRepository,
       teamCodeGenerator: () => "482731"
     });
-    await teamService.createTeam({ ownerUserId: owner.userId, seatLimit: 5 });
+    await teamService.createTeam(
+      { ownerUserId: owner.userId, seatLimit: 5 },
+      {
+        passwordHash: "$argon2id$fixture",
+        expiresAt: new Date("2026-09-23T00:00:00.000Z")
+      }
+    );
     teamRepository.addMember(member.userId);
 
     const app = await buildApp({

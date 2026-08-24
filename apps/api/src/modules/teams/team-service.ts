@@ -38,6 +38,13 @@ export class TeamService {
     initialInvitation: InvitationDraft | null = null
   ): Promise<TeamCreationResult> {
     calculateSeatSummary(input.seatLimit, 0);
+    if (input.seatLimit > 0 && !initialInvitation) {
+      throw new AppError(
+        "INITIAL_INVITATION_REQUIRED",
+        "追加メンバー枠には初回招待情報が必要です。",
+        500
+      );
+    }
     const keywords = normalizeKeywords(input.keywords ?? []);
     const now = this.now();
     const termEnd = new Date(now);

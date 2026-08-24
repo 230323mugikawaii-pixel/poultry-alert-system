@@ -14,15 +14,33 @@ async function createFixture(seatLimit = 5) {
     now: () => new Date("2026-08-24T00:00:00.000Z"),
     teamCodeGenerator: () => codes.shift() ?? "999999"
   });
-  const { team } = await service.createTeam({
-    ownerUserId,
-    seatLimit,
-    keywords: ["停電", "通電", "警報"]
-  });
+  const { team } = await service.createTeam(
+    {
+      ownerUserId,
+      seatLimit,
+      keywords: ["停電", "通電", "警報"]
+    },
+    seatLimit > 0
+      ? {
+          passwordHash: "$argon2id$fixture",
+          expiresAt: new Date("2026-09-23T00:00:00.000Z")
+        }
+      : null
+  );
   return { repository, service, team };
 }
 
 describe("TeamService", () => {
+  it("rejects creating paid member capacity without an atomic initial invitation", async () => {
+    const service = new TeamService({
+      repository: new MemoryTeamRepository(),
+      teamCodeGenerator: () => "482731"
+    });
+    await expect(
+      service.createTeam({ ownerUserId, seatLimit: 1 })
+    ).rejects.toMatchObject({ code: "INITIAL_INVITATION_REQUIRED" });
+  });
+
   it("creates one owner outside five contracted member seats", async () => {
     const fixture = await createFixture(5);
     expect(fixture.team.seatSummary).toMatchObject({

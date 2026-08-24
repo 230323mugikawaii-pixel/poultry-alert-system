@@ -73,10 +73,17 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       repository: new PrismaTeamRepository(database),
       teamCodeGenerator: () => "482731"
     });
-    const { team } = await teamService.createTeam({
-      ownerUserId: owner?.id ?? "",
-      seatLimit: 5
+    const initialCredential = await prepareInvitationCredential({
+      now: new Date(),
+      ttlDays: 30
     });
+    const { team } = await teamService.createTeam(
+      {
+        ownerUserId: owner?.id ?? "",
+        seatLimit: 5
+      },
+      initialCredential
+    );
     const invitationService = new InvitationService({
       repository: new PrismaInvitationRepository(database),
       teamService,

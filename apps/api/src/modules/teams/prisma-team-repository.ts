@@ -21,6 +21,9 @@ export class PrismaTeamRepository implements TeamRepository {
   public constructor(private readonly database: DatabaseClient) {}
 
   public async createTeam(input: CreateTeamInput): Promise<TeamCreationResult> {
+    if (input.seatLimit > 0 && !input.initialInvitation) {
+      throw new Error("initial_invitation_required");
+    }
     try {
       return await this.database.$transaction(
         async (transaction) => {
@@ -257,6 +260,9 @@ export class PrismaTeamRepository implements TeamRepository {
             input.requestedSeatLimit - activeMemberCount,
             0
           );
+          if (availableSeats > 0 && !input.replacementInvitation) {
+            throw new Error("replacement_invitation_required");
+          }
           if (availableSeats > 0 && input.replacementInvitation) {
             invitation = await createInvitation(transaction, {
               teamId: input.teamId,

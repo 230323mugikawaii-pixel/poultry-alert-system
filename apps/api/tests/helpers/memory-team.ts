@@ -32,6 +32,9 @@ export class MemoryTeamRepository implements TeamRepository {
   public failNextTeamCode = false;
 
   public async createTeam(input: CreateTeamInput): Promise<TeamCreationResult> {
+    if (input.seatLimit > 0 && !input.initialInvitation) {
+      throw new Error("initial_invitation_required");
+    }
     if (this.failNextTeamCode) {
       this.failNextTeamCode = false;
       throw new AppError("TEAM_CODE_CONFLICT", "collision", 409);
@@ -120,12 +123,15 @@ export class MemoryTeamRepository implements TeamRepository {
     } else if (input.requestedSeatLimit >= activeMemberCount) {
       status = "APPLIED";
       appliedSeatLimit = input.requestedSeatLimit;
+      const availableSeats = Math.max(appliedSeatLimit - activeMemberCount, 0);
+      if (availableSeats > 0 && !input.replacementInvitation) {
+        throw new Error("replacement_invitation_required");
+      }
       this.context = {
         ...this.context,
         pendingSeatLimit: null,
         seatSummary: calculateSeatSummary(appliedSeatLimit, activeMemberCount)
       };
-      const availableSeats = Math.max(appliedSeatLimit - activeMemberCount, 0);
       if (availableSeats > 0 && input.replacementInvitation) {
         invitation = this.createInvitation(
           availableSeats,
