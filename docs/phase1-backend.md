@@ -12,7 +12,8 @@ Implemented areas:
 - PostgreSQL schema and tracked migrations
 - Required email address and one-time magic-link login
 - Individual, revocable, device-associated sessions
-- Future Passkey credential and challenge storage; no Call Now password login
+- Future Passkey credential and challenge storage
+- No Call Now password credential type, hash storage, or password login route
 - Team, OWNER/MEMBER membership, subscription, and additional-member seat limits
 - Hashed capacity invitations and one-use LINE invitation links
 - Transactional join and member-removal operations

@@ -16,6 +16,13 @@ const migration =
       import.meta.url
     ),
     "utf8"
+  ) +
+  readFileSync(
+    new URL(
+      "../prisma/migrations/20260824000300_remove_password_credential/migration.sql",
+      import.meta.url
+    ),
+    "utf8"
   );
 
 const databases: PGlite[] = [];
@@ -63,5 +70,23 @@ describe("initial PostgreSQL migration", () => {
         VALUES ('10000000-0000-0000-0000-000000000002', 'ABC123', now());
       `)
     ).rejects.toThrow();
+
+    const credentialColumns = await database.query<{ column_name: string }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'auth_credentials';
+    `);
+    expect(
+      credentialColumns.rows.map(({ column_name }) => column_name)
+    ).not.toContain("passwordHash");
+
+    const credentialTypes = await database.query<{ enumlabel: string }>(`
+      SELECT enumlabel
+      FROM pg_enum
+      JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+      WHERE pg_type.typname = 'CredentialType'
+      ORDER BY enumsortorder;
+    `);
+    expect(credentialTypes.rows).toEqual([{ enumlabel: "PASSKEY" }]);
   });
 });

@@ -38,4 +38,15 @@ describe("database foundation", () => {
     expect(migration).toContain("invitations_one_active_password_per_team");
     expect(migration).toContain("CHECK (\"publicCode\" ~ '^[0-9]{6}$')");
   });
+
+  it("does not define Call Now password credentials in the initial release", () => {
+    const credentialType = schema.match(/enum CredentialType \{([^}]*)\}/)?.[1];
+    const credentialModel = schema.match(
+      /model AuthCredential \{([^}]*)\}/
+    )?.[1];
+
+    expect(credentialType).toContain("PASSKEY");
+    expect(credentialType).not.toContain("PASSWORD");
+    expect(credentialModel).not.toContain("passwordHash");
+  });
 });

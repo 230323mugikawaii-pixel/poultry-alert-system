@@ -15,7 +15,6 @@ enum UserStatus {
 
 enum CredentialType {
   PASSKEY
-  PASSWORD
 }
 
 enum ChallengeKind {
@@ -131,7 +130,6 @@ model AuthCredential {
   publicKey           Bytes?
   signCount           BigInt?        @default(0)
   transports          String[]       @default([])
-  passwordHash        String?        @db.VarChar(255)
   label               String?        @db.VarChar(100)
   backupEligible      Boolean?       @default(false)
   backupState         Boolean?       @default(false)
