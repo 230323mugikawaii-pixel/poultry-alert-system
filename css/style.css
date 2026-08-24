@@ -449,7 +449,7 @@ footer {
     30px 0;
 }
 
-.account-count-section {
+.single-google-account-section {
   margin:
     30px 0;
 
@@ -463,37 +463,10 @@ footer {
   border-radius: 20px;
 }
 
-.account-count-section label {
+.single-google-account-section strong {
   display: block;
 
-  margin-bottom: 10px;
-
   font-weight: 800;
-}
-
-.account-count-section input {
-  width: 100%;
-
-  border:
-    2px solid var(--border);
-
-  border-radius: 14px;
-
-  padding: 15px;
-
-  color: var(--text);
-
-  background: var(--white);
-}
-
-.account-count-section input:focus {
-  border-color: var(--blue);
-
-  outline: none;
-
-  box-shadow:
-    0 0 0 4px
-    rgba(8, 98, 199, 0.1);
 }
 
 .input-help {
@@ -780,6 +753,17 @@ footer {
   font-weight: 700;
 }
 
+.linked-google-actions {
+  display: flex;
+
+  flex-wrap: wrap;
+
+  justify-content: flex-end;
+
+  gap: 8px;
+}
+
+.account-change-button,
 .account-remove-button {
   border: 1px solid #f2b8b5;
 
@@ -794,6 +778,18 @@ footer {
   font-weight: 800;
 }
 
+.account-change-button {
+  color: var(--blue);
+
+  background: var(--blue-light);
+
+  border-color: #acd0f8;
+}
+
+.account-change-button:hover {
+  background: #dcecff;
+}
+
 .account-remove-button:hover {
   background: #ffe4e2;
 }
@@ -804,16 +800,6 @@ footer {
   color: var(--subtext);
 }
 
-.connected-account-list {
-  display: grid;
-
-  gap: 8px;
-
-  margin: 0;
-
-  padding-left: 22px;
-}
-
 .connected-account-summary {
   margin-top: 0;
 
@@ -822,7 +808,7 @@ footer {
   font-weight: 800;
 }
 
-.connected-account-list li {
+.connected-account-email {
   overflow-wrap: anywhere;
 }
 
@@ -1848,10 +1834,15 @@ body.app-dialog-open {
     grid-template-columns: 42px 1fr;
   }
 
-  .account-remove-button {
+  .linked-google-actions {
     grid-column: 1 / -1;
 
     width: 100%;
+  }
+
+  .account-change-button,
+  .account-remove-button {
+    flex: 1 1 160px;
   }
 
   .account-select-button {
