@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: callnow
+      POSTGRES_USER: callnow
+      POSTGRES_PASSWORD: callnow
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U callnow -d callnow"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - callnow-postgres:/var/lib/postgresql/data
+
+  mailpit:
+    image: axllent/mailpit:v1.29
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  callnow-postgres:

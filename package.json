@@ -1,0 +1,19 @@
+{
+  "name": "call-now",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "build": "pnpm --filter @call-now/api build",
+    "db:generate": "pnpm --filter @call-now/migrations db:generate",
+    "db:migrate:deploy": "pnpm --filter @call-now/migrations db:migrate:deploy",
+    "db:validate": "pnpm --filter @call-now/migrations db:validate",
+    "dev:api": "pnpm --filter @call-now/api dev",
+    "format:check": "pnpm --filter @call-now/api format:check",
+    "lint": "pnpm --filter @call-now/api lint",
+    "test": "pnpm --filter @call-now/api test",
+    "test:postgres": "pnpm --filter @call-now/api test:postgres",
+    "test:coverage": "pnpm --filter @call-now/api test:coverage",
+    "typecheck": "pnpm --filter @call-now/api typecheck",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  }
+}
