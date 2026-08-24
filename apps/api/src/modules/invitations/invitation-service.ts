@@ -1,5 +1,4 @@
 import { createHmac, randomBytes } from "node:crypto";
-import argon2 from "argon2";
 import { AppError } from "../../lib/app-error.js";
 import type {
   SecurityThrottleRule,
@@ -14,13 +13,12 @@ import type {
   MemberRemovalResult,
   PublicInvitationRecord
 } from "./invitation-repository.js";
-
-const ARGON_OPTIONS = {
-  type: argon2.argon2id,
-  memoryCost: 19_456,
-  timeCost: 2,
-  parallelism: 1
-} as const;
+import {
+  hashInvitationPassword,
+  prepareInvitationCredential,
+  verifyInvitationPassword,
+  type PreparedInvitationCredential
+} from "./invitation-credential.js";
 
 export interface InvitationServiceOptions {
   readonly repository: InvitationRepository;
@@ -40,9 +38,8 @@ export class InvitationService {
 
   public constructor(private readonly options: InvitationServiceOptions) {
     this.now = options.now ?? (() => new Date());
-    this.dummyPasswordHash = argon2.hash(
-      "call-now-dummy-invitation-password",
-      ARGON_OPTIONS
+    this.dummyPasswordHash = hashInvitationPassword(
+      "call-now-dummy-invitation-password"
     );
   }
 
@@ -62,15 +59,27 @@ export class InvitationService {
     readonly password: string;
   }> {
     const now = this.now();
-    const password = generateInvitationPassword();
+    const credential = await this.preparePasswordInvitation(now);
     const invitation = await this.options.repository.issuePasswordInvitation({
       teamId,
       actorUserId,
-      passwordHash: await argon2.hash(password, ARGON_OPTIONS),
-      expiresAt: addDays(now, this.options.invitationTtlDays),
+      passwordHash: credential.passwordHash,
+      expiresAt: credential.expiresAt,
       now
     });
-    return { invitation: publicInvitation(invitation), password };
+    return {
+      invitation: publicInvitation(invitation),
+      password: credential.password
+    };
+  }
+
+  public preparePasswordInvitation(
+    now: Date = this.now()
+  ): Promise<PreparedInvitationCredential> {
+    return prepareInvitationCredential({
+      now,
+      ttlDays: this.options.invitationTtlDays
+    });
   }
 
   public async verifyPasswordInvitation(input: {
@@ -102,9 +111,10 @@ export class InvitationService {
     );
     const passwordHash =
       invitation?.passwordHash ?? (await this.dummyPasswordHash);
-    const verified = await argon2
-      .verify(passwordHash, input.password)
-      .catch(() => false);
+    const verified = await verifyInvitationPassword(
+      passwordHash,
+      input.password
+    );
     if (!verified || !invitation) {
       await this.options.securityThrottle.recordFailure(throttleRules);
       throw invalidInvitationError();
@@ -261,19 +271,19 @@ export class InvitationService {
     MemberRemovalResult & { readonly invitationPassword: string | null }
   > {
     const context = await this.options.teamService.requireOwner(ownerUserId);
-    const password = generateInvitationPassword();
     const now = this.now();
+    const credential = await this.preparePasswordInvitation(now);
     const result = await this.options.repository.removeMemberAndReconcile({
       teamId: context.teamId,
       actorUserId: ownerUserId,
       membershipId,
-      replacementPasswordHash: await argon2.hash(password, ARGON_OPTIONS),
-      invitationExpiresAt: addDays(now, this.options.invitationTtlDays),
+      replacementPasswordHash: credential.passwordHash,
+      invitationExpiresAt: credential.expiresAt,
       now
     });
     return {
       ...result,
-      invitationPassword: result.invitation ? password : null
+      invitationPassword: result.invitation ? credential.password : null
     };
   }
 
@@ -347,10 +357,6 @@ function passwordThrottleRules(
   ];
 }
 
-export function generateInvitationPassword(): string {
-  return randomBytes(18).toString("base64url");
-}
-
 function publicInvitation(
   invitation: InvitationRecord
 ): PublicInvitationRecord {
@@ -406,8 +412,4 @@ function addMinutes(value: Date, minutes: number): Date {
 
 function addHours(value: Date, hours: number): Date {
   return new Date(value.getTime() + hours * 3_600_000);
-}
-
-function addDays(value: Date, days: number): Date {
-  return new Date(value.getTime() + days * 86_400_000);
 }

@@ -3,7 +3,10 @@ import { AppError } from "../../src/lib/app-error.js";
 import { calculateSeatSummary } from "../../src/modules/teams/seat-policy.js";
 import type {
   CreateTeamInput,
+  InvitationDraft,
+  IssuedInvitationRecord,
   SeatLimitChangeResult,
+  TeamCreationResult,
   TeamContextRecord,
   TeamMemberRecord,
   TeamRepository
@@ -17,15 +20,18 @@ interface StoredChange {
   requestedSeatLimit: number;
   activeMemberCount: number;
   availableSeats: number;
+  invitation: IssuedInvitationRecord | null;
+  paymentEventId: string | null;
 }
 
 export class MemoryTeamRepository implements TeamRepository {
   public context: TeamContextRecord | null = null;
   public members: TeamMemberRecord[] = [];
   public changes: StoredChange[] = [];
+  public invitations: IssuedInvitationRecord[] = [];
   public failNextTeamCode = false;
 
-  public async createTeam(input: CreateTeamInput): Promise<TeamContextRecord> {
+  public async createTeam(input: CreateTeamInput): Promise<TeamCreationResult> {
     if (this.failNextTeamCode) {
       this.failNextTeamCode = false;
       throw new AppError("TEAM_CODE_CONFLICT", "collision", 409);
@@ -57,7 +63,11 @@ export class MemoryTeamRepository implements TeamRepository {
         joinedAt: input.currentTermStartedAt
       }
     ];
-    return this.context;
+    const invitation =
+      input.initialInvitation && input.seatLimit > 0
+        ? this.createInvitation(input.seatLimit, input.initialInvitation)
+        : null;
+    return { team: this.context, invitation };
   }
 
   public async findCurrentTeam(
@@ -85,6 +95,7 @@ export class MemoryTeamRepository implements TeamRepository {
     readonly requestedByUserId: string;
     readonly requestedSeatLimit: number;
     readonly now: Date;
+    readonly replacementInvitation: InvitationDraft | null;
   }): Promise<SeatLimitChangeResult> {
     if (!this.context || this.context.teamId !== input.teamId) {
       throw new AppError("TEAM_NOT_FOUND", "missing", 404);
@@ -101,6 +112,7 @@ export class MemoryTeamRepository implements TeamRepository {
     ).length;
     let status: SeatLimitChangeResult["status"];
     let appliedSeatLimit = previousSeatLimit;
+    let invitation: IssuedInvitationRecord | null = null;
 
     if (input.requestedSeatLimit > previousSeatLimit) {
       status = "AWAITING_PAYMENT";
@@ -113,6 +125,13 @@ export class MemoryTeamRepository implements TeamRepository {
         pendingSeatLimit: null,
         seatSummary: calculateSeatSummary(appliedSeatLimit, activeMemberCount)
       };
+      const availableSeats = Math.max(appliedSeatLimit - activeMemberCount, 0);
+      if (availableSeats > 0 && input.replacementInvitation) {
+        invitation = this.createInvitation(
+          availableSeats,
+          input.replacementInvitation
+        );
+      }
     } else {
       status = "PENDING_CAPACITY";
       this.context = {
@@ -129,7 +148,10 @@ export class MemoryTeamRepository implements TeamRepository {
       previousSeatLimit,
       requestedSeatLimit: input.requestedSeatLimit,
       activeMemberCount,
-      availableSeats: status === "PENDING_CAPACITY" ? 0 : summary.availableSeats
+      availableSeats:
+        status === "PENDING_CAPACITY" ? 0 : summary.availableSeats,
+      invitation,
+      paymentEventId: null
     };
     this.changes.push(change);
     return change;
@@ -137,13 +159,33 @@ export class MemoryTeamRepository implements TeamRepository {
 
   public async applyPaidSeatIncrease(input: {
     readonly changeId: string;
+    readonly paymentEventId: string;
     readonly now: Date;
+    readonly invitation: InvitationDraft;
   }): Promise<SeatLimitChangeResult> {
     const change = this.changes.find(
       ({ changeId }) => changeId === input.changeId
     );
-    if (!change || change.status !== "AWAITING_PAYMENT" || !this.context) {
+    if (!change || !this.context) {
       throw new AppError("SEAT_INCREASE_NOT_PAYABLE", "missing", 409);
+    }
+    if (change.status === "APPLIED") {
+      if (change.paymentEventId !== input.paymentEventId) {
+        throw new AppError("PAYMENT_EVENT_CONFLICT", "conflict", 409);
+      }
+      return change;
+    }
+    if (change.status !== "AWAITING_PAYMENT") {
+      throw new AppError("SEAT_INCREASE_NOT_PAYABLE", "missing", 409);
+    }
+    if (
+      this.changes.some(
+        (candidate) =>
+          candidate.changeId !== change.changeId &&
+          candidate.paymentEventId === input.paymentEventId
+      )
+    ) {
+      throw new AppError("PAYMENT_EVENT_CONFLICT", "conflict", 409);
     }
     const activeMemberCount = this.members.filter(
       ({ role }) => role === "MEMBER"
@@ -154,6 +196,11 @@ export class MemoryTeamRepository implements TeamRepository {
     );
     change.status = "APPLIED";
     change.availableSeats = summary.availableSeats;
+    change.paymentEventId = input.paymentEventId;
+    change.invitation = this.createInvitation(
+      summary.availableSeats,
+      input.invitation
+    );
     this.context = {
       ...this.context,
       pendingSeatLimit: null,
@@ -181,5 +228,20 @@ export class MemoryTeamRepository implements TeamRepository {
         this.members.filter(({ role }) => role === "MEMBER").length
       )
     };
+  }
+
+  private createInvitation(
+    maxUses: number,
+    draft: InvitationDraft
+  ): IssuedInvitationRecord {
+    const invitation = {
+      id: randomUUID(),
+      maxUses,
+      usedCount: 0,
+      expiresAt: draft.expiresAt,
+      createdAt: new Date()
+    };
+    this.invitations.push(invitation);
+    return invitation;
   }
 }

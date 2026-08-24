@@ -98,63 +98,63 @@ enum OwnerTransferStatus {
 }
 
 model User {
-  id                        String               @id @default(uuid()) @db.Uuid
-  email                     String               @unique @db.VarChar(320)
-  displayName               String?              @db.VarChar(120)
-  status                    UserStatus           @default(ACTIVE)
-  emailVerifiedAt           DateTime?            @db.Timestamptz(3)
-  lockedUntil               DateTime?            @db.Timestamptz(3)
-  createdAt                 DateTime             @default(now()) @db.Timestamptz(3)
-  updatedAt                 DateTime             @updatedAt @db.Timestamptz(3)
-  deletedAt                 DateTime?            @db.Timestamptz(3)
-  credentials               AuthCredential[]
-  challenges                AuthChallenge[]
-  sessions                  Session[]
-  devices                   Device[]
-  memberships               TeamMembership[]
-  removedMemberships        TeamMembership[]     @relation("MembershipRemover")
-  requestedChanges          SubscriptionChange[]
-  createdInvitations        Invitation[]
-  redemptions               InvitationRedemption[]
-  initiatedOwnerTransfers   OwnerTransfer[]
-  auditEvents               AuditEvent[]
+  id                      String                 @id @default(uuid()) @db.Uuid
+  email                   String                 @unique @db.VarChar(320)
+  displayName             String?                @db.VarChar(120)
+  status                  UserStatus             @default(ACTIVE)
+  emailVerifiedAt         DateTime?              @db.Timestamptz(3)
+  lockedUntil             DateTime?              @db.Timestamptz(3)
+  createdAt               DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime               @updatedAt @db.Timestamptz(3)
+  deletedAt               DateTime?              @db.Timestamptz(3)
+  credentials             AuthCredential[]
+  challenges              AuthChallenge[]
+  sessions                Session[]
+  devices                 Device[]
+  memberships             TeamMembership[]
+  removedMemberships      TeamMembership[]       @relation("MembershipRemover")
+  requestedChanges        SubscriptionChange[]
+  createdInvitations      Invitation[]
+  redemptions             InvitationRedemption[]
+  initiatedOwnerTransfers OwnerTransfer[]
+  auditEvents             AuditEvent[]
 
   @@map("users")
 }
 
 model AuthCredential {
-  id                 String         @id @default(uuid()) @db.Uuid
-  userId             String         @db.Uuid
-  type               CredentialType
-  credentialId       String?        @unique @db.VarChar(1024)
-  publicKey           Bytes?
-  signCount           BigInt?        @default(0)
-  transports          String[]       @default([])
-  label               String?        @db.VarChar(100)
-  backupEligible      Boolean?       @default(false)
-  backupState         Boolean?       @default(false)
-  createdAt           DateTime       @default(now()) @db.Timestamptz(3)
-  lastUsedAt          DateTime?      @db.Timestamptz(3)
-  revokedAt           DateTime?      @db.Timestamptz(3)
-  user                User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String         @id @default(uuid()) @db.Uuid
+  userId         String         @db.Uuid
+  type           CredentialType
+  credentialId   String?        @unique @db.VarChar(1024)
+  publicKey      Bytes?
+  signCount      BigInt?        @default(0)
+  transports     String[]       @default([])
+  label          String?        @db.VarChar(100)
+  backupEligible Boolean?       @default(false)
+  backupState    Boolean?       @default(false)
+  createdAt      DateTime       @default(now()) @db.Timestamptz(3)
+  lastUsedAt     DateTime?      @db.Timestamptz(3)
+  revokedAt      DateTime?      @db.Timestamptz(3)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, type])
   @@map("auth_credentials")
 }
 
 model AuthChallenge {
-  id                 String        @id @default(uuid()) @db.Uuid
-  userId             String?       @db.Uuid
-  kind               ChallengeKind
-  email              String?       @db.VarChar(320)
-  secretHash         String        @unique @db.Char(64)
-  payload            Json?
-  attemptCount       Int           @default(0)
-  maxAttempts        Int           @default(5)
-  expiresAt          DateTime      @db.Timestamptz(3)
-  consumedAt         DateTime?     @db.Timestamptz(3)
-  createdAt          DateTime      @default(now()) @db.Timestamptz(3)
-  user               User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String        @id @default(uuid()) @db.Uuid
+  userId       String?       @db.Uuid
+  kind         ChallengeKind
+  email        String?       @db.VarChar(320)
+  secretHash   String        @unique @db.Char(64)
+  payload      Json?
+  attemptCount Int           @default(0)
+  maxAttempts  Int           @default(5)
+  expiresAt    DateTime      @db.Timestamptz(3)
+  consumedAt   DateTime?     @db.Timestamptz(3)
+  createdAt    DateTime      @default(now()) @db.Timestamptz(3)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([email, kind, createdAt])
   @@index([expiresAt])
@@ -198,12 +198,12 @@ model Session {
 }
 
 model Team {
-  id              String             @id @default(uuid()) @db.Uuid
-  publicCode      String             @unique @db.Char(6)
-  name            String?            @db.VarChar(120)
-  status          TeamStatus         @default(ACTIVE)
-  createdAt       DateTime           @default(now()) @db.Timestamptz(3)
-  updatedAt       DateTime           @updatedAt @db.Timestamptz(3)
+  id              String           @id @default(uuid()) @db.Uuid
+  publicCode      String           @unique @db.Char(6)
+  name            String?          @db.VarChar(120)
+  status          TeamStatus       @default(ACTIVE)
+  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime         @updatedAt @db.Timestamptz(3)
   memberships     TeamMembership[]
   subscription    Subscription?
   keywords        TeamKeyword[]
@@ -238,35 +238,38 @@ model TeamMembership {
 }
 
 model Subscription {
-  id                    String               @id @default(uuid()) @db.Uuid
-  teamId                String               @unique @db.Uuid
-  status                SubscriptionStatus   @default(ACTIVE)
-  seatLimit             Int                  @default(0)
-  pendingSeatLimit      Int?
-  currentTermAmountYen  Int                  @default(6000)
-  currentTermStartedAt  DateTime             @db.Timestamptz(3)
-  currentTermEndsAt     DateTime             @db.Timestamptz(3)
-  pricingVersion        String               @default("2026-08") @db.VarChar(32)
-  createdAt             DateTime             @default(now()) @db.Timestamptz(3)
-  updatedAt             DateTime             @updatedAt @db.Timestamptz(3)
-  team                  Team                 @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  changes               SubscriptionChange[]
+  id                   String               @id @default(uuid()) @db.Uuid
+  teamId               String               @unique @db.Uuid
+  status               SubscriptionStatus   @default(ACTIVE)
+  seatLimit            Int                  @default(0)
+  pendingSeatLimit     Int?
+  currentTermAmountYen Int                  @default(6000)
+  currentTermStartedAt DateTime             @db.Timestamptz(3)
+  currentTermEndsAt    DateTime             @db.Timestamptz(3)
+  pricingVersion       String               @default("2026-08") @db.VarChar(32)
+  createdAt            DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime             @updatedAt @db.Timestamptz(3)
+  team                 Team                 @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  changes              SubscriptionChange[]
 
   @@map("subscriptions")
 }
 
 model SubscriptionChange {
-  id                    String                   @id @default(uuid()) @db.Uuid
-  subscriptionId        String                   @db.Uuid
-  requestedByUserId     String                   @db.Uuid
-  previousSeatLimit     Int
-  requestedSeatLimit    Int
-  status                SubscriptionChangeStatus
-  createdAt             DateTime                 @default(now()) @db.Timestamptz(3)
-  appliedAt             DateTime?                @db.Timestamptz(3)
-  canceledAt            DateTime?                @db.Timestamptz(3)
-  subscription          Subscription             @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-  requestedByUser       User                     @relation(fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  id                 String                   @id @default(uuid()) @db.Uuid
+  subscriptionId     String                   @db.Uuid
+  requestedByUserId  String                   @db.Uuid
+  previousSeatLimit  Int
+  requestedSeatLimit Int
+  status             SubscriptionChangeStatus
+  createdAt          DateTime                 @default(now()) @db.Timestamptz(3)
+  appliedAt          DateTime?                @db.Timestamptz(3)
+  canceledAt         DateTime?                @db.Timestamptz(3)
+  paymentEventId     String?                  @unique @db.VarChar(191)
+  issuedInvitationId String?                  @unique @db.Uuid
+  subscription       Subscription             @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  requestedByUser    User                     @relation(fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  issuedInvitation   Invitation?              @relation("SeatIncreaseInvitation", fields: [issuedInvitationId], references: [id], onDelete: SetNull)
 
   @@index([subscriptionId, status])
   @@map("subscription_changes")
@@ -285,25 +288,26 @@ model TeamKeyword {
 }
 
 model Invitation {
-  id               String                 @id @default(uuid()) @db.Uuid
-  teamId           String                 @db.Uuid
-  kind             InvitationKind         @default(PASSWORD_CAPACITY)
-  status           InvitationStatus       @default(ACTIVE)
-  passwordHash     String                 @db.VarChar(255)
-  maxUses          Int
-  usedCount        Int                    @default(0)
-  expiresAt        DateTime               @db.Timestamptz(3)
-  createdByUserId  String                 @db.Uuid
-  replacedById     String?                @unique @db.Uuid
-  invalidatedAt    DateTime?              @db.Timestamptz(3)
-  invalidationNote String?                @db.VarChar(120)
-  createdAt        DateTime               @default(now()) @db.Timestamptz(3)
-  team             Team                   @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  createdByUser    User                   @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
-  replacedBy       Invitation?            @relation("InvitationReplacement", fields: [replacedById], references: [id], onDelete: SetNull)
-  replaces         Invitation?            @relation("InvitationReplacement")
-  links            InvitationLink[]
-  redemptions      InvitationRedemption[]
+  id                 String                 @id @default(uuid()) @db.Uuid
+  teamId             String                 @db.Uuid
+  kind               InvitationKind         @default(PASSWORD_CAPACITY)
+  status             InvitationStatus       @default(ACTIVE)
+  passwordHash       String                 @db.VarChar(255)
+  maxUses            Int
+  usedCount          Int                    @default(0)
+  expiresAt          DateTime               @db.Timestamptz(3)
+  createdByUserId    String                 @db.Uuid
+  replacedById       String?                @unique @db.Uuid
+  invalidatedAt      DateTime?              @db.Timestamptz(3)
+  invalidationNote   String?                @db.VarChar(120)
+  createdAt          DateTime               @default(now()) @db.Timestamptz(3)
+  team               Team                   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdByUser      User                   @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  replacedBy         Invitation?            @relation("InvitationReplacement", fields: [replacedById], references: [id], onDelete: SetNull)
+  replaces           Invitation?            @relation("InvitationReplacement")
+  links              InvitationLink[]
+  redemptions        InvitationRedemption[]
+  seatIncreaseChange SubscriptionChange?    @relation("SeatIncreaseInvitation")
 
   @@index([teamId, status])
   @@index([expiresAt])
@@ -329,19 +333,19 @@ model InvitationLink {
 }
 
 model InvitationRedemption {
-  id             String            @id @default(uuid()) @db.Uuid
-  invitationId   String            @db.Uuid
-  linkId         String?           @db.Uuid
-  userId         String            @db.Uuid
-  membershipId   String?           @db.Uuid
-  status         RedemptionStatus  @default(STARTED)
-  idempotencyKey String            @unique @db.VarChar(100)
-  createdAt      DateTime          @default(now()) @db.Timestamptz(3)
-  completedAt    DateTime?         @db.Timestamptz(3)
-  invitation     Invitation        @relation(fields: [invitationId], references: [id], onDelete: Restrict)
-  link           InvitationLink?   @relation(fields: [linkId], references: [id], onDelete: Restrict)
-  user           User              @relation(fields: [userId], references: [id], onDelete: Restrict)
-  membership     TeamMembership?   @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  id             String           @id @default(uuid()) @db.Uuid
+  invitationId   String           @db.Uuid
+  linkId         String?          @db.Uuid
+  userId         String           @db.Uuid
+  membershipId   String?          @db.Uuid
+  status         RedemptionStatus @default(STARTED)
+  idempotencyKey String           @unique @db.VarChar(100)
+  createdAt      DateTime         @default(now()) @db.Timestamptz(3)
+  completedAt    DateTime?        @db.Timestamptz(3)
+  invitation     Invitation       @relation(fields: [invitationId], references: [id], onDelete: Restrict)
+  link           InvitationLink?  @relation(fields: [linkId], references: [id], onDelete: Restrict)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  membership     TeamMembership?  @relation(fields: [membershipId], references: [id], onDelete: SetNull)
 
   @@index([invitationId, status])
   @@map("invitation_redemptions")
@@ -383,19 +387,19 @@ model GmailConnection {
 }
 
 model OwnerTransfer {
-  id                   String              @id @default(uuid()) @db.Uuid
-  teamId               String              @db.Uuid
-  targetMembershipId   String              @db.Uuid
-  initiatedByUserId    String              @db.Uuid
-  status               OwnerTransferStatus @default(PENDING)
-  acceptanceTokenHash  String              @unique @db.Char(64)
-  expiresAt            DateTime            @db.Timestamptz(3)
-  createdAt            DateTime            @default(now()) @db.Timestamptz(3)
-  acceptedAt           DateTime?           @db.Timestamptz(3)
-  canceledAt           DateTime?           @db.Timestamptz(3)
-  team                 Team                @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  targetMembership     TeamMembership      @relation(fields: [targetMembershipId], references: [id], onDelete: Restrict)
-  initiatedByUser      User                @relation(fields: [initiatedByUserId], references: [id], onDelete: Restrict)
+  id                  String              @id @default(uuid()) @db.Uuid
+  teamId              String              @db.Uuid
+  targetMembershipId  String              @db.Uuid
+  initiatedByUserId   String              @db.Uuid
+  status              OwnerTransferStatus @default(PENDING)
+  acceptanceTokenHash String              @unique @db.Char(64)
+  expiresAt           DateTime            @db.Timestamptz(3)
+  createdAt           DateTime            @default(now()) @db.Timestamptz(3)
+  acceptedAt          DateTime?           @db.Timestamptz(3)
+  canceledAt          DateTime?           @db.Timestamptz(3)
+  team                Team                @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  targetMembership    TeamMembership      @relation(fields: [targetMembershipId], references: [id], onDelete: Restrict)
+  initiatedByUser     User                @relation(fields: [initiatedByUserId], references: [id], onDelete: Restrict)
 
   @@index([teamId, status])
   @@map("owner_transfers")

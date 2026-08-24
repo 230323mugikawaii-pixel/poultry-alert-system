@@ -33,6 +33,25 @@ export interface CreateTeamInput {
   readonly currentTermStartedAt: Date;
   readonly currentTermEndsAt: Date;
   readonly currentTermAmountYen: number;
+  readonly initialInvitation: InvitationDraft | null;
+}
+
+export interface InvitationDraft {
+  readonly passwordHash: string;
+  readonly expiresAt: Date;
+}
+
+export interface IssuedInvitationRecord {
+  readonly id: string;
+  readonly maxUses: number;
+  readonly usedCount: number;
+  readonly expiresAt: Date;
+  readonly createdAt: Date;
+}
+
+export interface TeamCreationResult {
+  readonly team: TeamContextRecord;
+  readonly invitation: IssuedInvitationRecord | null;
 }
 
 export interface SeatLimitChangeResult {
@@ -42,10 +61,11 @@ export interface SeatLimitChangeResult {
   readonly requestedSeatLimit: number;
   readonly activeMemberCount: number;
   readonly availableSeats: number;
+  readonly invitation: IssuedInvitationRecord | null;
 }
 
 export interface TeamRepository {
-  createTeam(input: CreateTeamInput): Promise<TeamContextRecord>;
+  createTeam(input: CreateTeamInput): Promise<TeamCreationResult>;
   findCurrentTeam(userId: string): Promise<TeamContextRecord | null>;
   listActiveMembers(teamId: string): Promise<readonly TeamMemberRecord[]>;
   requestSeatLimitChange(input: {
@@ -53,9 +73,12 @@ export interface TeamRepository {
     readonly requestedByUserId: string;
     readonly requestedSeatLimit: number;
     readonly now: Date;
+    readonly replacementInvitation: InvitationDraft | null;
   }): Promise<SeatLimitChangeResult>;
   applyPaidSeatIncrease(input: {
     readonly changeId: string;
+    readonly paymentEventId: string;
     readonly now: Date;
+    readonly invitation: InvitationDraft;
   }): Promise<SeatLimitChangeResult>;
 }

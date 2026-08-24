@@ -18,7 +18,7 @@ async function createFixture(seatLimit = 5) {
     now: () => currentTime,
     teamCodeGenerator: () => "482731"
   });
-  const team = await teamService.createTeam({ ownerUserId, seatLimit });
+  const { team } = await teamService.createTeam({ ownerUserId, seatLimit });
   const invitationRepository = new MemoryInvitationRepository(teamRepository);
   const invitationService = new InvitationService({
     repository: invitationRepository,

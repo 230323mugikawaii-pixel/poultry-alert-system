@@ -1,7 +1,9 @@
 import { randomInt } from "node:crypto";
 import { AppError } from "../../lib/app-error.js";
 import type {
+  InvitationDraft,
   SeatLimitChangeResult,
+  TeamCreationResult,
   TeamContextRecord,
   TeamMemberRecord,
   TeamRepository
@@ -26,12 +28,15 @@ export class TeamService {
     this.teamCodeGenerator = options.teamCodeGenerator ?? generateTeamCode;
   }
 
-  public async createTeam(input: {
-    readonly ownerUserId: string;
-    readonly name?: string;
-    readonly seatLimit: number;
-    readonly keywords?: readonly string[];
-  }): Promise<TeamContextRecord> {
+  public async createTeam(
+    input: {
+      readonly ownerUserId: string;
+      readonly name?: string;
+      readonly seatLimit: number;
+      readonly keywords?: readonly string[];
+    },
+    initialInvitation: InvitationDraft | null = null
+  ): Promise<TeamCreationResult> {
     calculateSeatSummary(input.seatLimit, 0);
     const keywords = normalizeKeywords(input.keywords ?? []);
     const now = this.now();
@@ -51,7 +56,8 @@ export class TeamService {
           currentTermAmountYen: calculateAnnualPriceYen(
             input.seatLimit,
             keywords.length
-          )
+          ),
+          initialInvitation
         });
       } catch (error) {
         if (!isTeamCodeConflict(error)) {
@@ -84,7 +90,8 @@ export class TeamService {
 
   public async requestSeatLimitChange(
     userId: string,
-    requestedSeatLimit: number
+    requestedSeatLimit: number,
+    replacementInvitation: InvitationDraft | null = null
   ): Promise<SeatLimitChangeResult> {
     calculateSeatSummary(requestedSeatLimit, 0);
     const context = await this.requireOwner(userId);
@@ -92,16 +99,8 @@ export class TeamService {
       teamId: context.teamId,
       requestedByUserId: userId,
       requestedSeatLimit,
-      now: this.now()
-    });
-  }
-
-  public async applyPaidSeatIncrease(
-    changeId: string
-  ): Promise<SeatLimitChangeResult> {
-    return this.options.repository.applyPaidSeatIncrease({
-      changeId,
-      now: this.now()
+      now: this.now(),
+      replacementInvitation
     });
   }
 

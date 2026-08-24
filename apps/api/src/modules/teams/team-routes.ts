@@ -91,27 +91,38 @@ export function createTeamRoutes(
       async (request, reply) => {
         requireSameOrigin(request);
         const userId = await authenticateUserId(request);
-        const team = await teamService.createTeam({
-          ownerUserId: userId,
-          ...(request.body.name ? { name: request.body.name } : {}),
-          seatLimit: request.body.seatLimit,
-          ...(request.body.keywords ? { keywords: request.body.keywords } : {})
-        });
-        const invitation =
-          invitationService && team.seatSummary.availableSeats > 0
-            ? await invitationService.issueForTeam(team.teamId, userId)
+        const credential =
+          invitationService && request.body.seatLimit > 0
+            ? await invitationService.preparePasswordInvitation()
             : null;
-        await reply.status(201).send({
-          team: serializeTeam(team),
-          invitation: invitation
+        const created = await teamService.createTeam(
+          {
+            ownerUserId: userId,
+            ...(request.body.name ? { name: request.body.name } : {}),
+            seatLimit: request.body.seatLimit,
+            ...(request.body.keywords
+              ? { keywords: request.body.keywords }
+              : {})
+          },
+          credential
             ? {
-                id: invitation.invitation.id,
-                maxUses: invitation.invitation.maxUses,
-                usedCount: invitation.invitation.usedCount,
-                expiresAt: invitation.invitation.expiresAt.toISOString(),
-                password: invitation.password
+                passwordHash: credential.passwordHash,
+                expiresAt: credential.expiresAt
               }
             : null
+        );
+        await reply.status(201).send({
+          team: serializeTeam(created.team),
+          invitation:
+            created.invitation && credential
+              ? {
+                  id: created.invitation.id,
+                  maxUses: created.invitation.maxUses,
+                  usedCount: created.invitation.usedCount,
+                  expiresAt: created.invitation.expiresAt.toISOString(),
+                  password: credential.password
+                }
+              : null
         });
       }
     );
@@ -200,30 +211,31 @@ export function createTeamRoutes(
       async (request, reply) => {
         requireSameOrigin(request);
         const userId = await authenticateUserId(request);
+        const credential = invitationService
+          ? await invitationService.preparePasswordInvitation()
+          : null;
         const result = await teamService.requestSeatLimitChange(
           userId,
-          request.body.seatLimit
-        );
-        const invitation =
-          invitationService &&
-          result.status === "APPLIED" &&
-          result.availableSeats > 0
-            ? await invitationService.issueForTeam(
-                (await teamService.requireOwner(userId)).teamId,
-                userId
-              )
-            : null;
-        await reply.status(202).send({
-          ...result,
-          invitation: invitation
+          request.body.seatLimit,
+          credential
             ? {
-                id: invitation.invitation.id,
-                maxUses: invitation.invitation.maxUses,
-                usedCount: invitation.invitation.usedCount,
-                expiresAt: invitation.invitation.expiresAt.toISOString(),
-                password: invitation.password
+                passwordHash: credential.passwordHash,
+                expiresAt: credential.expiresAt
               }
             : null
+        );
+        await reply.status(202).send({
+          ...result,
+          invitation:
+            result.invitation && credential
+              ? {
+                  id: result.invitation.id,
+                  maxUses: result.invitation.maxUses,
+                  usedCount: result.invitation.usedCount,
+                  expiresAt: result.invitation.expiresAt.toISOString(),
+                  password: credential.password
+                }
+              : null
         });
       }
     );

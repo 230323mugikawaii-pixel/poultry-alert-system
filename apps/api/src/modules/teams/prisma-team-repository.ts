@@ -1,4 +1,5 @@
 import type { DatabaseClient } from "../../db/client.js";
+import { retrySerializableTransaction } from "../../db/transaction-retry.js";
 import { Prisma } from "../../generated/prisma/client.js";
 import { AppError } from "../../lib/app-error.js";
 import {
@@ -7,7 +8,10 @@ import {
 } from "./seat-policy.js";
 import type {
   CreateTeamInput,
+  InvitationDraft,
+  IssuedInvitationRecord,
   SeatLimitChangeResult,
+  TeamCreationResult,
   TeamContextRecord,
   TeamMemberRecord,
   TeamRepository
@@ -16,7 +20,7 @@ import type {
 export class PrismaTeamRepository implements TeamRepository {
   public constructor(private readonly database: DatabaseClient) {}
 
-  public async createTeam(input: CreateTeamInput): Promise<TeamContextRecord> {
+  public async createTeam(input: CreateTeamInput): Promise<TeamCreationResult> {
     try {
       return await this.database.$transaction(
         async (transaction) => {
@@ -73,12 +77,27 @@ export class PrismaTeamRepository implements TeamRepository {
             throw new Error("team_creation_invariant_failed");
           }
 
-          return mapTeamContext({
-            team,
-            membership,
-            subscription: team.subscription,
-            activeMemberCount: 0
-          });
+          const invitation =
+            input.initialInvitation && input.seatLimit > 0
+              ? await createInvitation(transaction, {
+                  teamId: team.id,
+                  actorUserId: input.ownerUserId,
+                  maxUses: input.seatLimit,
+                  draft: input.initialInvitation,
+                  now: input.currentTermStartedAt,
+                  auditAction: "INITIAL_INVITATION_ISSUED"
+                })
+              : null;
+
+          return {
+            team: mapTeamContext({
+              team,
+              membership,
+              subscription: team.subscription,
+              activeMemberCount: 0
+            }),
+            invitation
+          };
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
       );
@@ -148,6 +167,7 @@ export class PrismaTeamRepository implements TeamRepository {
     readonly requestedByUserId: string;
     readonly requestedSeatLimit: number;
     readonly now: Date;
+    readonly replacementInvitation: InvitationDraft | null;
   }): Promise<SeatLimitChangeResult> {
     return this.database.$transaction(
       async (transaction) => {
@@ -214,6 +234,7 @@ export class PrismaTeamRepository implements TeamRepository {
 
         let status: SeatLimitChangeResult["status"];
         let appliedSeatLimit = subscription.seatLimit;
+        let invitation: IssuedInvitationRecord | null = null;
 
         if (input.requestedSeatLimit > subscription.seatLimit) {
           status = "AWAITING_PAYMENT";
@@ -232,6 +253,20 @@ export class PrismaTeamRepository implements TeamRepository {
             }
           });
           await replaceActiveInvitations(transaction, input.teamId, input.now);
+          const availableSeats = Math.max(
+            input.requestedSeatLimit - activeMemberCount,
+            0
+          );
+          if (availableSeats > 0 && input.replacementInvitation) {
+            invitation = await createInvitation(transaction, {
+              teamId: input.teamId,
+              actorUserId: input.requestedByUserId,
+              maxUses: availableSeats,
+              draft: input.replacementInvitation,
+              now: input.now,
+              auditAction: "INVITATION_ISSUED_AFTER_SEAT_CHANGE"
+            });
+          }
         } else {
           status = "PENDING_CAPACITY";
           await transaction.subscription.update({
@@ -284,7 +319,8 @@ export class PrismaTeamRepository implements TeamRepository {
           requestedSeatLimit: input.requestedSeatLimit,
           activeMemberCount,
           availableSeats:
-            status === "PENDING_CAPACITY" ? 0 : summary.availableSeats
+            status === "PENDING_CAPACITY" ? 0 : summary.availableSeats,
+          invitation
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
@@ -293,99 +329,180 @@ export class PrismaTeamRepository implements TeamRepository {
 
   public async applyPaidSeatIncrease(input: {
     readonly changeId: string;
+    readonly paymentEventId: string;
     readonly now: Date;
+    readonly invitation: InvitationDraft;
   }): Promise<SeatLimitChangeResult> {
-    return this.database.$transaction(
-      async (transaction) => {
-        const pendingChange = await transaction.subscriptionChange.findUnique({
-          where: { id: input.changeId },
-          include: { subscription: true }
-        });
-        if (!pendingChange || pendingChange.status !== "AWAITING_PAYMENT") {
-          throw new AppError(
-            "SEAT_INCREASE_NOT_PAYABLE",
-            "適用できる増員申請が見つかりません。",
+    try {
+      return await retrySerializableTransaction(
+        () =>
+          this.database.$transaction(
+            async (transaction) => {
+              const changeIdentity =
+                await transaction.subscriptionChange.findUnique({
+                  where: { id: input.changeId },
+                  select: { subscriptionId: true }
+                });
+              if (!changeIdentity) {
+                throw seatIncreaseNotPayableError();
+              }
+
+              await transaction.$queryRaw(
+                Prisma.sql`SELECT id FROM subscriptions WHERE id = ${changeIdentity.subscriptionId}::uuid FOR UPDATE`
+              );
+              const change =
+                await transaction.subscriptionChange.findUniqueOrThrow({
+                  where: { id: input.changeId },
+                  include: {
+                    subscription: true,
+                    issuedInvitation: true
+                  }
+                });
+              const subscription = change.subscription;
+              const activeMemberCount = await transaction.teamMembership.count({
+                where: {
+                  teamId: subscription.teamId,
+                  role: "MEMBER",
+                  status: "ACTIVE"
+                }
+              });
+
+              if (change.status === "APPLIED") {
+                if (
+                  change.paymentEventId !== input.paymentEventId ||
+                  !change.issuedInvitation
+                ) {
+                  throw new AppError(
+                    "PAYMENT_EVENT_CONFLICT",
+                    "この決済イベントは別の増員処理に使用されています。",
+                    409
+                  );
+                }
+                const summary = calculateSeatSummary(
+                  subscription.seatLimit,
+                  activeMemberCount
+                );
+                return {
+                  changeId: change.id,
+                  status: "APPLIED" as const,
+                  previousSeatLimit: change.previousSeatLimit,
+                  requestedSeatLimit: change.requestedSeatLimit,
+                  activeMemberCount,
+                  availableSeats: summary.availableSeats,
+                  invitation: publicIssuedInvitation(change.issuedInvitation)
+                };
+              }
+              if (change.status !== "AWAITING_PAYMENT") {
+                throw seatIncreaseNotPayableError();
+              }
+
+              const eventOwner =
+                await transaction.subscriptionChange.findUnique({
+                  where: { paymentEventId: input.paymentEventId },
+                  select: { id: true }
+                });
+              if (eventOwner && eventOwner.id !== change.id) {
+                throw new AppError(
+                  "PAYMENT_EVENT_CONFLICT",
+                  "この決済イベントは別の増員処理に使用されています。",
+                  409
+                );
+              }
+              if (change.requestedSeatLimit <= subscription.seatLimit) {
+                throw new AppError(
+                  "SEAT_INCREASE_STALE",
+                  "この増員申請は現在の契約へ適用できません。",
+                  409
+                );
+              }
+
+              const keywordCount = await transaction.teamKeyword.count({
+                where: { teamId: subscription.teamId }
+              });
+              const summary = calculateSeatSummary(
+                change.requestedSeatLimit,
+                activeMemberCount
+              );
+              await replaceActiveInvitations(
+                transaction,
+                subscription.teamId,
+                input.now
+              );
+              const invitation = await createInvitation(transaction, {
+                teamId: subscription.teamId,
+                actorUserId: change.requestedByUserId,
+                maxUses: summary.availableSeats,
+                draft: input.invitation,
+                now: input.now,
+                auditAction: "INVITATION_ISSUED_AFTER_PAID_INCREASE"
+              });
+              await transaction.subscription.update({
+                where: { id: subscription.id },
+                data: {
+                  seatLimit: change.requestedSeatLimit,
+                  pendingSeatLimit: null,
+                  currentTermAmountYen: calculateAnnualPriceYen(
+                    change.requestedSeatLimit,
+                    keywordCount
+                  )
+                }
+              });
+              await transaction.subscriptionChange.update({
+                where: { id: change.id },
+                data: {
+                  status: "APPLIED",
+                  appliedAt: input.now,
+                  paymentEventId: input.paymentEventId,
+                  issuedInvitationId: invitation.id
+                }
+              });
+              await transaction.auditEvent.create({
+                data: {
+                  teamId: subscription.teamId,
+                  actorUserId: change.requestedByUserId,
+                  action: "SEAT_LIMIT_INCREASE_APPLIED",
+                  targetType: "SubscriptionChange",
+                  targetId: change.id,
+                  metadata: {
+                    paymentEventId: input.paymentEventId,
+                    previousSeatLimit: subscription.seatLimit,
+                    requestedSeatLimit: change.requestedSeatLimit,
+                    activeMemberCount,
+                    invitationId: invitation.id,
+                    invitationMaxUses: invitation.maxUses
+                  }
+                }
+              });
+
+              return {
+                changeId: change.id,
+                status: "APPLIED" as const,
+                previousSeatLimit: subscription.seatLimit,
+                requestedSeatLimit: change.requestedSeatLimit,
+                activeMemberCount,
+                availableSeats: summary.availableSeats,
+                invitation
+              };
+            },
+            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+          ),
+        () =>
+          new AppError(
+            "SEAT_INCREASE_TRANSACTION_CONFLICT",
+            "増員処理が競合しました。決済イベントを再送してください。",
             409
-          );
-        }
-
-        await transaction.$queryRaw(
-          Prisma.sql`SELECT id FROM subscriptions WHERE id = ${pendingChange.subscriptionId}::uuid FOR UPDATE`
+          )
+      );
+    } catch (error) {
+      if (isPaymentEventUniqueConstraintError(error)) {
+        throw new AppError(
+          "PAYMENT_EVENT_CONFLICT",
+          "この決済イベントは別の増員処理に使用されています。",
+          409
         );
-        const subscription = await transaction.subscription.findUniqueOrThrow({
-          where: { id: pendingChange.subscriptionId }
-        });
-        if (pendingChange.requestedSeatLimit <= subscription.seatLimit) {
-          throw new AppError(
-            "SEAT_INCREASE_STALE",
-            "この増員申請は現在の契約へ適用できません。",
-            409
-          );
-        }
-
-        const [activeMemberCount, keywordCount] = await Promise.all([
-          transaction.teamMembership.count({
-            where: {
-              teamId: subscription.teamId,
-              role: "MEMBER",
-              status: "ACTIVE"
-            }
-          }),
-          transaction.teamKeyword.count({
-            where: { teamId: subscription.teamId }
-          })
-        ]);
-
-        await transaction.subscription.update({
-          where: { id: subscription.id },
-          data: {
-            seatLimit: pendingChange.requestedSeatLimit,
-            pendingSeatLimit: null,
-            currentTermAmountYen: calculateAnnualPriceYen(
-              pendingChange.requestedSeatLimit,
-              keywordCount
-            )
-          }
-        });
-        await transaction.subscriptionChange.update({
-          where: { id: pendingChange.id },
-          data: { status: "APPLIED", appliedAt: input.now }
-        });
-        await replaceActiveInvitations(
-          transaction,
-          subscription.teamId,
-          input.now
-        );
-        await transaction.auditEvent.create({
-          data: {
-            teamId: subscription.teamId,
-            actorUserId: pendingChange.requestedByUserId,
-            action: "SEAT_LIMIT_INCREASE_APPLIED",
-            targetType: "SubscriptionChange",
-            targetId: pendingChange.id,
-            metadata: {
-              previousSeatLimit: subscription.seatLimit,
-              requestedSeatLimit: pendingChange.requestedSeatLimit,
-              activeMemberCount
-            }
-          }
-        });
-
-        const summary = calculateSeatSummary(
-          pendingChange.requestedSeatLimit,
-          activeMemberCount
-        );
-        return {
-          changeId: pendingChange.id,
-          status: "APPLIED",
-          previousSeatLimit: subscription.seatLimit,
-          requestedSeatLimit: pendingChange.requestedSeatLimit,
-          activeMemberCount,
-          availableSeats: summary.availableSeats
-        };
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    );
+      }
+      throw error;
+    }
   }
 }
 
@@ -437,6 +554,80 @@ function isUniqueConstraintError(error: unknown): boolean {
   return JSON.stringify(
     (error as { readonly meta?: unknown }).meta ?? {}
   ).includes("publicCode");
+}
+
+function isPaymentEventUniqueConstraintError(error: unknown): boolean {
+  if (
+    !(error instanceof Error) ||
+    !("code" in error) ||
+    (error as { readonly code?: unknown }).code !== "P2002"
+  ) {
+    return false;
+  }
+  return JSON.stringify(
+    (error as { readonly meta?: unknown }).meta ?? {}
+  ).includes("paymentEventId");
+}
+
+function seatIncreaseNotPayableError(): AppError {
+  return new AppError(
+    "SEAT_INCREASE_NOT_PAYABLE",
+    "適用できる増員申請が見つかりません。",
+    409
+  );
+}
+
+async function createInvitation(
+  transaction: Prisma.TransactionClient,
+  input: {
+    readonly teamId: string;
+    readonly actorUserId: string;
+    readonly maxUses: number;
+    readonly draft: InvitationDraft;
+    readonly now: Date;
+    readonly auditAction: string;
+  }
+): Promise<IssuedInvitationRecord> {
+  if (input.maxUses < 1) {
+    throw new Error("invitation_requires_available_seat");
+  }
+  const invitation = await transaction.invitation.create({
+    data: {
+      teamId: input.teamId,
+      createdByUserId: input.actorUserId,
+      passwordHash: input.draft.passwordHash,
+      maxUses: input.maxUses,
+      usedCount: 0,
+      expiresAt: input.draft.expiresAt
+    }
+  });
+  await transaction.auditEvent.create({
+    data: {
+      teamId: input.teamId,
+      actorUserId: input.actorUserId,
+      action: input.auditAction,
+      targetType: "Invitation",
+      targetId: invitation.id,
+      metadata: { maxUses: input.maxUses }
+    }
+  });
+  return publicIssuedInvitation(invitation);
+}
+
+function publicIssuedInvitation(invitation: {
+  readonly id: string;
+  readonly maxUses: number;
+  readonly usedCount: number;
+  readonly expiresAt: Date;
+  readonly createdAt: Date;
+}): IssuedInvitationRecord {
+  return {
+    id: invitation.id,
+    maxUses: invitation.maxUses,
+    usedCount: invitation.usedCount,
+    expiresAt: invitation.expiresAt,
+    createdAt: invitation.createdAt
+  };
 }
 
 async function replaceActiveInvitations(
