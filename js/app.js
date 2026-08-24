@@ -147,9 +147,21 @@ function loadSavedData() {
     );
   }
 }
-const BASE_PRICE = 6000;
-const INCLUDED_KEYWORD_LIMIT = 3;
-const EXTRA_KEYWORD_PRICE = 100;
+const keywordPolicy =
+  window.CallNowKeywordPolicy;
+
+if (!keywordPolicy) {
+  throw new Error(
+    "キーワード検証機能を読み込めませんでした。"
+  );
+}
+
+const BASE_PRICE =
+  keywordPolicy.BASE_PRICE_YEN;
+const INCLUDED_KEYWORD_LIMIT =
+  keywordPolicy.INCLUDED_KEYWORD_LIMIT;
+const EXTRA_KEYWORD_PRICE =
+  keywordPolicy.EXTRA_KEYWORD_PRICE_YEN;
 const STORAGE_VERSION = 2;
 const STORAGE_KEY = "callNowContract";
 const LEGACY_GOOGLE_ACCOUNTS_BACKUP_KEY =
@@ -168,7 +180,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-25.4";
+  "2026-08-25.6";
 
 /*
   正式なURLが決まった場合だけ設定する公開リンク。
@@ -355,9 +367,10 @@ function renderKeywordInputs() {
       <input
         type="text"
         value="${escapeHtml(keyword)}"
-        placeholder="例：停電"
-        maxlength="30"
+        placeholder="例：停電のお知らせ"
+        maxlength="${keywordPolicy.KEYWORD_MAX_LENGTH}"
         oninput="changeKeyword(${index}, this.value, this)"
+        onblur="normalizeKeywordAt(${index}, this)"
       >
 
       <button
@@ -424,13 +437,18 @@ function changeKeyword(
 ) {
   keywords[index] = value;
 
-  const trimmedValue =
-    String(value).trim();
-
+  const normalizedValue =
+    keywordPolicy.normalizeKeyword(
+      value
+    );
+  const validation =
+    keywordPolicy.validateKeyword(
+      value
+    );
   const errorMessage =
-    trimmedValue &&
-    !isSingleWordKeyword(trimmedValue)
-      ? "キーワードは1つの欄に1単語だけ入力してください。"
+    normalizedValue &&
+    !validation.valid
+      ? validation.message
       : "";
 
   if (inputElement) {
@@ -445,10 +463,36 @@ function changeKeyword(
 }
 
 
+function normalizeKeywordAt(
+  index,
+  inputElement
+) {
+  const normalizedValue =
+    keywordPolicy.normalizeKeyword(
+      keywords[index]
+    );
+
+  keywords[index] = normalizedValue;
+
+  if (inputElement) {
+    inputElement.value =
+      normalizedValue;
+  }
+
+  changeKeyword(
+    index,
+    normalizedValue,
+    inputElement
+  );
+}
+
+
 function getValidKeywords() {
   return keywords
     .map((keyword) =>
-      String(keyword).trim()
+      keywordPolicy.normalizeKeyword(
+        keyword
+      )
     )
     .filter((keyword) =>
       keyword.length > 0
@@ -468,91 +512,20 @@ function normalizeKeywords() {
 
 
 function validateKeywords() {
-  const validKeywords =
-    getValidKeywords();
+  const validation =
+    keywordPolicy.validateKeywordList(
+      keywords
+    );
 
-  if (validKeywords.length === 0) {
+  if (!validation.valid) {
     showSetupError(
-      "最低1個のキーワードを入力してください。"
-    );
-
-    return false;
-  }
-
-  const invalidKeyword =
-    validKeywords.find(
-      (keyword) =>
-        !isSingleWordKeyword(keyword)
-    );
-
-  if (invalidKeyword) {
-    showSetupError(
-      `「${invalidKeyword}」は複数の単語を含んでいます。1つの欄には1単語だけ入力してください。`
-    );
-
-    return false;
-  }
-
-  const normalized =
-    validKeywords.map((keyword) =>
-      keyword.toLowerCase()
-    );
-
-  if (
-    new Set(normalized).size !==
-    normalized.length
-  ) {
-    showSetupError(
-      "同じキーワードが重複しています。"
+      validation.message
     );
 
     return false;
   }
 
   showSetupError("");
-
-  return true;
-}
-
-
-function isSingleWordKeyword(value) {
-  const keyword =
-    String(value).trim();
-
-  if (!keyword) {
-    return false;
-  }
-
-  if (
-    /[\s、。・,，/／]+/u.test(
-      keyword
-    )
-  ) {
-    return false;
-  }
-
-  if (
-    typeof Intl.Segmenter ===
-      "function"
-  ) {
-    const segmenter =
-      new Intl.Segmenter(
-        "ja",
-        {
-          granularity: "word"
-        }
-      );
-
-    const wordSegments =
-      Array.from(
-        segmenter.segment(keyword)
-      ).filter(
-        (segment) =>
-          segment.isWordLike
-      );
-
-    return wordSegments.length === 1;
-  }
 
   return true;
 }
@@ -714,8 +687,9 @@ function updatePrice() {
     EXTRA_KEYWORD_PRICE;
 
   totalPrice =
-    BASE_PRICE +
-    extraPrice;
+    keywordPolicy.calculateAnnualPriceYen(
+      keywordCount
+    );
 
   setText(
     "keywordCount",
@@ -3362,6 +3336,7 @@ const testButtons =
           body: JSON.stringify({
             action: "sendTest",
             token: TEST_API_TOKEN,
+            // キーワードはJSON本文で送り、URLやGmail検索式へ連結しない。
             keyword: keyword,
             requestId: requestId
           })
@@ -3528,7 +3503,11 @@ async function findTestMailInConnectedGmail(
 
     searchUrl.searchParams.set(
       "q",
-      `in:inbox newer_than:1d label:CallNow-Test-Detected "${requestId}"`
+      `in:inbox newer_than:1d label:CallNow-Test-Detected ${
+        keywordPolicy.quoteGmailSearchPhrase(
+          requestId
+        )
+      }`
     );
 
     searchUrl.searchParams.set(
