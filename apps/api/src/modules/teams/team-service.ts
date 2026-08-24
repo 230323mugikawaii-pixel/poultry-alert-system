@@ -12,6 +12,7 @@ import {
   calculateAnnualPriceYen,
   calculateSeatSummary
 } from "./seat-policy.js";
+import { normalizeTeamKeywords } from "./keyword-policy.js";
 
 export interface TeamServiceOptions {
   readonly repository: TeamRepository;
@@ -45,7 +46,7 @@ export class TeamService {
         500
       );
     }
-    const keywords = normalizeKeywords(input.keywords ?? []);
+    const keywords = normalizeTeamKeywords(input.keywords ?? []);
     const now = this.now();
     const termEnd = new Date(now);
     termEnd.setUTCFullYear(termEnd.getUTCFullYear() + 1);
@@ -126,20 +127,6 @@ export class TeamService {
 
 export function generateTeamCode(): string {
   return randomInt(0, 1_000_000).toString().padStart(6, "0");
-}
-
-function normalizeKeywords(values: readonly string[]): string[] {
-  const keywords: string[] = [];
-  const normalizedValues = new Set<string>();
-  for (const value of values) {
-    const keyword = value.trim().slice(0, 100);
-    const normalized = keyword.normalize("NFKC").toLowerCase();
-    if (keyword && !normalizedValues.has(normalized)) {
-      normalizedValues.add(normalized);
-      keywords.push(keyword);
-    }
-  }
-  return keywords;
 }
 
 function isTeamCodeConflict(error: unknown): boolean {
