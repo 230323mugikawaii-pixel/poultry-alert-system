@@ -1,4 +1,5 @@
 import type { DatabaseClient } from "../../db/client.js";
+import { retrySerializableTransaction } from "../../db/transaction-retry.js";
 import { Prisma } from "../../generated/prisma/client.js";
 import { AppError } from "../../lib/app-error.js";
 import { calculateSeatSummary } from "../teams/seat-policy.js";
@@ -251,203 +252,216 @@ export class PrismaInvitationRepository implements InvitationRepository {
     readonly idempotencyKey: string;
     readonly now: Date;
   }): Promise<JoinResult> {
-    return this.database.$transaction(
-      async (transaction) => {
-        const existingRedemption =
-          await transaction.invitationRedemption.findUnique({
-            where: { idempotencyKey: input.idempotencyKey },
-            include: {
-              membership: {
-                include: { team: { include: { subscription: true } } }
-              }
-            }
-          });
-        if (existingRedemption) {
-          if (
-            existingRedemption.userId !== input.userId ||
-            existingRedemption.status !== "COMPLETED" ||
-            !existingRedemption.membership?.team.subscription
-          ) {
-            throw new AppError(
-              "IDEMPOTENCY_KEY_CONFLICT",
-              "この参加処理は再利用できません。",
-              409
-            );
-          }
-          const activeMemberCount = await countActiveMembers(
-            transaction,
-            existingRedemption.membership.teamId
-          );
-          return joinResult(
-            existingRedemption.membership.team,
-            existingRedemption.membership.id,
-            activeMemberCount
-          );
-        }
-
-        const challenge = await transaction.authChallenge.findUnique({
-          where: { secretHash: input.secretHash }
-        });
-        const payload = parseJoinGrantPayload(challenge?.payload);
-        if (
-          !challenge ||
-          challenge.kind !== "JOIN_GRANT" ||
-          !payload ||
-          challenge.consumedAt ||
-          challenge.expiresAt <= input.now
-        ) {
-          throw invalidInvitationError();
-        }
-
-        const invitationBeforeLock = await transaction.invitation.findUnique({
-          where: { id: payload.invitationId }
-        });
-        if (!invitationBeforeLock) {
-          throw invalidInvitationError();
-        }
-        const subscription = await lockSubscription(
-          transaction,
-          invitationBeforeLock.teamId
-        );
-        const invitation = await transaction.invitation.findUniqueOrThrow({
-          where: { id: payload.invitationId },
-          include: { team: true }
-        });
-        const activeMemberCount = await countActiveMembers(
-          transaction,
-          invitation.teamId
-        );
-        if (
-          invitation.status !== "ACTIVE" ||
-          invitation.expiresAt <= input.now ||
-          invitation.usedCount >= invitation.maxUses ||
-          subscription.pendingSeatLimit !== null ||
-          activeMemberCount >= subscription.seatLimit
-        ) {
-          throw invitationExhaustedError();
-        }
-
-        const link = payload.linkId
-          ? await transaction.invitationLink.findUnique({
-              where: { id: payload.linkId }
-            })
-          : null;
-        if (
-          payload.linkId &&
-          (!link ||
-            link.invitationId !== invitation.id ||
-            link.status !== "ACTIVE" ||
-            link.expiresAt <= input.now ||
-            link.usedCount >= link.maxUses)
-        ) {
-          throw invalidInvitationError();
-        }
-
-        const otherMembership = await transaction.teamMembership.findFirst({
-          where: { userId: input.userId, status: "ACTIVE" }
-        });
-        if (otherMembership) {
-          throw new AppError(
-            "ALREADY_TEAM_MEMBER",
-            "すでにチームへ参加しています。",
-            409
-          );
-        }
-
-        const membership = await transaction.teamMembership.upsert({
-          where: {
-            teamId_userId: { teamId: invitation.teamId, userId: input.userId }
-          },
-          create: {
-            teamId: invitation.teamId,
-            userId: input.userId,
-            role: "MEMBER",
-            status: "ACTIVE",
-            joinedAt: input.now
-          },
-          update: {
-            role: "MEMBER",
-            status: "ACTIVE",
-            joinedAt: input.now,
-            leftAt: null,
-            removedAt: null,
-            removedByUserId: null
-          }
-        });
-
-        const nextUsedCount = invitation.usedCount + 1;
-        const nextActiveMemberCount = activeMemberCount + 1;
-        const invitationExhausted =
-          nextUsedCount >= invitation.maxUses ||
-          nextActiveMemberCount >= subscription.seatLimit;
-        await transaction.invitation.update({
-          where: { id: invitation.id },
-          data: {
-            usedCount: nextUsedCount,
-            ...(invitationExhausted
-              ? {
-                  status: "EXHAUSTED",
-                  invalidatedAt: input.now,
-                  invalidationNote: "CAPACITY_REACHED"
+    return retrySerializableTransaction(
+      () =>
+        this.database.$transaction(
+          async (transaction) => {
+            const existingRedemption =
+              await transaction.invitationRedemption.findUnique({
+                where: { idempotencyKey: input.idempotencyKey },
+                include: {
+                  membership: {
+                    include: { team: { include: { subscription: true } } }
+                  }
                 }
-              : {})
-          }
-        });
-        if (link) {
-          await transaction.invitationLink.update({
-            where: { id: link.id },
-            data: {
-              usedCount: 1,
-              status: "EXHAUSTED",
-              invalidatedAt: input.now
+              });
+            if (existingRedemption) {
+              if (
+                existingRedemption.userId !== input.userId ||
+                existingRedemption.status !== "COMPLETED" ||
+                !existingRedemption.membership?.team.subscription
+              ) {
+                throw new AppError(
+                  "IDEMPOTENCY_KEY_CONFLICT",
+                  "この参加処理は再利用できません。",
+                  409
+                );
+              }
+              const activeMemberCount = await countActiveMembers(
+                transaction,
+                existingRedemption.membership.teamId
+              );
+              return joinResult(
+                existingRedemption.membership.team,
+                existingRedemption.membership.id,
+                activeMemberCount
+              );
             }
-          });
-        }
-        if (nextActiveMemberCount >= subscription.seatLimit) {
-          await transaction.invitationLink.updateMany({
-            where: { invitationId: invitation.id, status: "ACTIVE" },
-            data: { status: "EXHAUSTED", invalidatedAt: input.now }
-          });
-        }
 
-        await transaction.authChallenge.update({
-          where: { id: challenge.id },
-          data: { consumedAt: input.now, attemptCount: { increment: 1 } }
-        });
-        await transaction.invitationRedemption.create({
-          data: {
-            invitationId: invitation.id,
-            linkId: link?.id ?? null,
-            userId: input.userId,
-            membershipId: membership.id,
-            status: "COMPLETED",
-            idempotencyKey: input.idempotencyKey,
-            completedAt: input.now
-          }
-        });
-        await transaction.auditEvent.create({
-          data: {
-            teamId: invitation.teamId,
-            actorUserId: input.userId,
-            action: "MEMBER_JOINED",
-            targetType: "TeamMembership",
-            targetId: membership.id,
-            metadata: {
-              invitationId: invitation.id,
-              linkId: link?.id ?? null,
-              activeMemberCount: nextActiveMemberCount,
-              seatLimit: subscription.seatLimit
+            const challenge = await transaction.authChallenge.findUnique({
+              where: { secretHash: input.secretHash }
+            });
+            const payload = parseJoinGrantPayload(challenge?.payload);
+            if (
+              !challenge ||
+              challenge.kind !== "JOIN_GRANT" ||
+              !payload ||
+              challenge.consumedAt ||
+              challenge.expiresAt <= input.now
+            ) {
+              throw invalidInvitationError();
             }
-          }
-        });
 
-        return joinResult(
-          { ...invitation.team, subscription },
-          membership.id,
-          nextActiveMemberCount
-        );
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+            const invitationBeforeLock =
+              await transaction.invitation.findUnique({
+                where: { id: payload.invitationId }
+              });
+            if (!invitationBeforeLock) {
+              throw invalidInvitationError();
+            }
+            const subscription = await lockSubscription(
+              transaction,
+              invitationBeforeLock.teamId
+            );
+            const invitation = await transaction.invitation.findUniqueOrThrow({
+              where: { id: payload.invitationId },
+              include: { team: true }
+            });
+            const activeMemberCount = await countActiveMembers(
+              transaction,
+              invitation.teamId
+            );
+            if (
+              invitation.status !== "ACTIVE" ||
+              invitation.expiresAt <= input.now ||
+              invitation.usedCount >= invitation.maxUses ||
+              subscription.pendingSeatLimit !== null ||
+              activeMemberCount >= subscription.seatLimit
+            ) {
+              throw invitationExhaustedError();
+            }
+
+            const link = payload.linkId
+              ? await transaction.invitationLink.findUnique({
+                  where: { id: payload.linkId }
+                })
+              : null;
+            if (
+              payload.linkId &&
+              (!link ||
+                link.invitationId !== invitation.id ||
+                link.status !== "ACTIVE" ||
+                link.expiresAt <= input.now ||
+                link.usedCount >= link.maxUses)
+            ) {
+              throw invalidInvitationError();
+            }
+
+            const otherMembership = await transaction.teamMembership.findFirst({
+              where: { userId: input.userId, status: "ACTIVE" }
+            });
+            if (otherMembership) {
+              throw new AppError(
+                "ALREADY_TEAM_MEMBER",
+                "すでにチームへ参加しています。",
+                409
+              );
+            }
+
+            const membership = await transaction.teamMembership.upsert({
+              where: {
+                teamId_userId: {
+                  teamId: invitation.teamId,
+                  userId: input.userId
+                }
+              },
+              create: {
+                teamId: invitation.teamId,
+                userId: input.userId,
+                role: "MEMBER",
+                status: "ACTIVE",
+                joinedAt: input.now
+              },
+              update: {
+                role: "MEMBER",
+                status: "ACTIVE",
+                joinedAt: input.now,
+                leftAt: null,
+                removedAt: null,
+                removedByUserId: null
+              }
+            });
+
+            const nextUsedCount = invitation.usedCount + 1;
+            const nextActiveMemberCount = activeMemberCount + 1;
+            const invitationExhausted =
+              nextUsedCount >= invitation.maxUses ||
+              nextActiveMemberCount >= subscription.seatLimit;
+            await transaction.invitation.update({
+              where: { id: invitation.id },
+              data: {
+                usedCount: nextUsedCount,
+                ...(invitationExhausted
+                  ? {
+                      status: "EXHAUSTED",
+                      invalidatedAt: input.now,
+                      invalidationNote: "CAPACITY_REACHED"
+                    }
+                  : {})
+              }
+            });
+            if (link) {
+              await transaction.invitationLink.update({
+                where: { id: link.id },
+                data: {
+                  usedCount: 1,
+                  status: "EXHAUSTED",
+                  invalidatedAt: input.now
+                }
+              });
+            }
+            if (nextActiveMemberCount >= subscription.seatLimit) {
+              await transaction.invitationLink.updateMany({
+                where: { invitationId: invitation.id, status: "ACTIVE" },
+                data: { status: "EXHAUSTED", invalidatedAt: input.now }
+              });
+            }
+
+            await transaction.authChallenge.update({
+              where: { id: challenge.id },
+              data: { consumedAt: input.now, attemptCount: { increment: 1 } }
+            });
+            await transaction.invitationRedemption.create({
+              data: {
+                invitationId: invitation.id,
+                linkId: link?.id ?? null,
+                userId: input.userId,
+                membershipId: membership.id,
+                status: "COMPLETED",
+                idempotencyKey: input.idempotencyKey,
+                completedAt: input.now
+              }
+            });
+            await transaction.auditEvent.create({
+              data: {
+                teamId: invitation.teamId,
+                actorUserId: input.userId,
+                action: "MEMBER_JOINED",
+                targetType: "TeamMembership",
+                targetId: membership.id,
+                metadata: {
+                  invitationId: invitation.id,
+                  linkId: link?.id ?? null,
+                  activeMemberCount: nextActiveMemberCount,
+                  seatLimit: subscription.seatLimit
+                }
+              }
+            });
+
+            return joinResult(
+              { ...invitation.team, subscription },
+              membership.id,
+              nextActiveMemberCount
+            );
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
+      () =>
+        new AppError(
+          "JOIN_TRANSACTION_CONFLICT",
+          "参加処理が競合しました。もう一度お試しください。",
+          409
+        )
     );
   }
 
