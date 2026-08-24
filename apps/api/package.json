@@ -13,6 +13,7 @@
     "lint": "eslint .",
     "start": "node dist/server.js",
     "test": "vitest run",
+    "test:postgres": "RUN_POSTGRES_TESTS=true vitest run tests/postgres-concurrency.integration.test.ts --maxWorkers=1",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",

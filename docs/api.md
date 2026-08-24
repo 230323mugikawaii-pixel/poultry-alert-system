@@ -34,9 +34,9 @@ valid email. The raw token is delivered only through email.
 
 - `POST /api/v1/teams`
 - `GET /api/v1/teams/current`
-- `GET /api/v1/teams/current/members`
+- `GET /api/v1/teams/current/members` (OWNER only)
 - `GET /api/v1/teams/current/subscription`
-- `POST /api/v1/teams/current/subscription/seat-limit-changes`
+- `POST /api/v1/teams/current/subscription/seat-limit-changes` (OWNER only)
 
 An increase returns `AWAITING_PAYMENT`; a trusted billing adapter applies it later.
 A safe decrease returns `APPLIED`. An over-capacity decrease returns
@@ -58,7 +58,9 @@ A safe decrease returns `APPLIED`. An over-capacity decrease returns
 
 Password or link verification creates a short-lived join grant. It does not consume
 a seat. `join/complete`, after individual email login, creates the MEMBER and consumes
-the invitation in one transaction.
+the invitation in one transaction. Expired invitations and links are persisted as
+`EXPIRED` when observed. Serializable transaction conflicts are retried and return a
+stable 409 response if contention remains.
 
 ## Important error codes
 

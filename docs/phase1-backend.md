@@ -40,6 +40,11 @@ Deferred until later phases:
 5. Apply migrations with `pnpm --filter @call-now/api db:migrate:deploy`.
 6. Start the API with `pnpm dev:api`.
 
+Run `pnpm test:postgres` only against a dedicated database whose name contains
+`test` or `acceptance`. This suite truncates data in that database and verifies
+real PostgreSQL transaction behavior, including concurrent redemption of the last
+available seats.
+
 Mailpit is available on port 8025. Magic-link values are delivered to Mailpit rather
 than printed to logs.
 

@@ -42,4 +42,5 @@ jobs:
       - run: pnpm --filter @call-now/api db:validate
       - run: pnpm --filter @call-now/api db:generate
       - run: pnpm --filter @call-now/api db:migrate:deploy
+      - run: pnpm test:postgres
       - run: pnpm verify
