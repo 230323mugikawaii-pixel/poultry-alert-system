@@ -1,3 +1,4 @@
+import { config as loadDotenv } from "dotenv";
 import { buildApp } from "./app.js";
 import { loadEnvironment } from "./config/env.js";
 import { createDatabaseClient } from "./db/client.js";
@@ -12,6 +13,12 @@ import { PrismaTeamRepository } from "./modules/teams/prisma-team-repository.js"
 import { TeamService } from "./modules/teams/team-service.js";
 import { PrismaSecurityThrottleRepository } from "./modules/security/prisma-security-throttle-repository.js";
 import { SecurityThrottleService } from "./modules/security/security-throttle-service.js";
+
+loadDotenv({
+  path: new URL("../../../.env", import.meta.url),
+  override: false,
+  quiet: true
+});
 
 const environment = loadEnvironment();
 const database = createDatabaseClient(environment.DATABASE_URL);
