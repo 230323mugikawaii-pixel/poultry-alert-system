@@ -76,7 +76,13 @@ export async function buildApp(
   await app.register(rateLimit, {
     global: true,
     max: 120,
-    timeWindow: "1 minute"
+    timeWindow: "1 minute",
+    errorResponseBuilder: (_request, context) =>
+      new AppError(
+        "RATE_LIMITED",
+        "リクエストが多すぎます。しばらく待ってからお試しください。",
+        context.statusCode
+      )
   });
 
   app.setNotFoundHandler(async (_request, reply) => {

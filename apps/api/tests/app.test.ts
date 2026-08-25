@@ -88,4 +88,35 @@ describe("system routes", () => {
     });
     expect(alive.statusCode).toBe(200);
   });
+
+  it("keeps system probes available and returns a stable rate-limit error elsewhere", async () => {
+    const app = await buildApp({ environment, logger: false });
+    apps.push(app);
+    app.get("/rate-limited-test", async () => ({ ok: true }));
+
+    for (let index = 0; index < 130; index += 1) {
+      const health = await app.inject({ method: "GET", url: "/healthz" });
+      const ready = await app.inject({ method: "GET", url: "/readyz" });
+      expect(health.statusCode).toBe(200);
+      expect(ready.statusCode).toBe(200);
+    }
+
+    for (let index = 0; index < 120; index += 1) {
+      const response = await app.inject({
+        method: "GET",
+        url: "/rate-limited-test"
+      });
+      expect(response.statusCode).toBe(200);
+    }
+
+    const limited = await app.inject({
+      method: "GET",
+      url: "/rate-limited-test"
+    });
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers["retry-after"]).toBeDefined();
+    expect(limited.json()).toMatchObject({
+      error: { code: "RATE_LIMITED" }
+    });
+  });
 });
