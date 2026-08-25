@@ -2,6 +2,13 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseClient, type DatabaseClient } from "../src/db/client.js";
 import { AppError } from "../src/lib/app-error.js";
+import { AuthService } from "../src/modules/auth/auth-service.js";
+import { GoogleAuthService } from "../src/modules/auth/google-auth-service.js";
+import type {
+  GoogleIdentityProfile,
+  GoogleOAuthProvider
+} from "../src/modules/auth/google-oauth-client.js";
+import { PrismaAuthRepository } from "../src/modules/auth/prisma-auth-repository.js";
 import { InvitationService } from "../src/modules/invitations/invitation-service.js";
 import { prepareInvitationCredential } from "../src/modules/invitations/invitation-credential.js";
 import { PrismaInvitationRepository } from "../src/modules/invitations/prisma-invitation-repository.js";
@@ -29,6 +36,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     await database.$executeRawUnsafe(`
       TRUNCATE TABLE
         audit_events,
+        external_identities,
         invitation_redemptions,
         invitation_links,
         auth_challenges,
@@ -52,6 +60,71 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
 
   afterAll(async () => {
     await database?.$disconnect();
+  });
+
+  it("persists a Google identity and creates a one-use Phase 1 session", async () => {
+    const repository = new PrismaAuthRepository(database);
+    const authService = new AuthService({
+      repository,
+      emailSender: { sendMagicLink: async () => undefined },
+      publicOrigin: "https://acceptance.call-now.example",
+      tokenPepper: testPepper,
+      magicLinkTtlMinutes: 15,
+      sessionIdleDays: 30,
+      sessionAbsoluteDays: 90,
+      maxActiveSessions: 5
+    });
+    const googleAuthService = new GoogleAuthService({
+      repository,
+      authService,
+      oauthProvider: new PostgresGoogleOAuthProvider(),
+      tokenPepper: testPepper,
+      stateTtlMinutes: 10
+    });
+
+    const authorization = await googleAuthService.createAuthorizationRequest();
+    const login = await googleAuthService.completeAuthorization(
+      authorization.state,
+      "postgres-google-code",
+      { ipAddress: "198.51.100.1", userAgent: "Acceptance Test" }
+    );
+
+    await expect(
+      authService.authenticate(login.sessionToken)
+    ).resolves.toMatchObject({
+      user: { email: "postgres-google@example.com" }
+    });
+    await expect(
+      database.externalIdentity.findUnique({
+        where: {
+          provider_providerSubject: {
+            provider: "GOOGLE",
+            providerSubject: "postgres-google-subject"
+          }
+        },
+        select: {
+          userId: true,
+          email: true,
+          emailVerified: true,
+          revokedAt: true
+        }
+      })
+    ).resolves.toEqual({
+      userId: login.user.id,
+      email: "postgres-google@example.com",
+      emailVerified: true,
+      revokedAt: null
+    });
+    await expect(
+      googleAuthService.completeAuthorization(
+        authorization.state,
+        "postgres-google-code",
+        {}
+      )
+    ).rejects.toMatchObject({
+      code: "GOOGLE_LOGIN_INVALID_OR_EXPIRED",
+      statusCode: 401
+    });
   });
 
   it("admits only five members to five seats and returns 409 for the loser", async () => {
@@ -601,6 +674,43 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     expect(first.team.teamId).not.toBe(second.team.teamId);
   });
 });
+
+class PostgresGoogleOAuthProvider implements GoogleOAuthProvider {
+  private nonce: string | null = null;
+
+  public createAuthorizationUrl(input: {
+    readonly state: string;
+    readonly codeChallenge: string;
+    readonly nonce: string;
+  }): string {
+    const url = new URL("https://accounts.example/authorize");
+    url.searchParams.set("state", input.state);
+    url.searchParams.set("code_challenge", input.codeChallenge);
+    url.searchParams.set("nonce", input.nonce);
+    this.nonce = input.nonce;
+    return url.toString();
+  }
+
+  public async exchangeCode(input: {
+    readonly code: string;
+    readonly codeVerifier: string;
+    readonly expectedNonce: string;
+  }): Promise<GoogleIdentityProfile> {
+    if (
+      input.code !== "postgres-google-code" ||
+      !input.codeVerifier ||
+      input.expectedNonce !== this.nonce
+    ) {
+      throw new Error("Invalid PostgreSQL Google auth fixture");
+    }
+    return {
+      subject: "postgres-google-subject",
+      email: "postgres-google@example.com",
+      emailVerified: true,
+      displayName: "PostgreSQL Google User"
+    };
+  }
+}
 
 function createServices(
   clock: { value: Date },

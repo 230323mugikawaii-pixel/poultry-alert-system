@@ -26,6 +26,7 @@ target contains Prisma CLI and is deployed only to the Cloud Run migration job.
 
 - `call-now-database-url`
 - `call-now-auth-token-pepper`
+- `call-now-google-oauth-client-secret`
 - `call-now-smtp-user`
 - `call-now-smtp-password`
 
@@ -52,12 +53,15 @@ approval. Configure these environment variables:
 - `CLOUD_SQL_CONNECTION_NAME`
 - `PUBLIC_ORIGIN`
 - `COOKIE_NAME`
+- `GOOGLE_OAUTH_CLIENT_ID`
+- `GOOGLE_OAUTH_REDIRECT_URI`
 - `SMTP_HOST`
 - `SMTP_PORT`
 - `SMTP_SECURE`
 - `EMAIL_FROM`
 - `DATABASE_URL_SECRET_VERSION`
 - `AUTH_PEPPER_SECRET_VERSION`
+- `GOOGLE_OAUTH_CLIENT_SECRET_VERSION`
 - `SMTP_USER_SECRET_VERSION`
 - `SMTP_PASSWORD_SECRET_VERSION`
 
@@ -70,3 +74,8 @@ means Fastify trusts only the nearest Google frontend rather than every value in
 incoming `X-Forwarded-For` chain. If an external Application Load Balancer is added,
 validate the observed hop chain before changing this value; never use an unconditional
 `trustProxy: true` setting.
+
+The Google OAuth client must be a Web application client. Register the exact
+`GOOGLE_OAUTH_REDIRECT_URI` for each environment. Login requests use only
+`openid`, `email`, and `profile`; Gmail authorization and token persistence are
+deliberately outside this phase.

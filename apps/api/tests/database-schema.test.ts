@@ -17,6 +17,7 @@ describe("database foundation", () => {
   it("defines the required Phase 1 models", () => {
     for (const model of [
       "User",
+      "ExternalIdentity",
       "AuthCredential",
       "Session",
       "Team",
@@ -29,6 +30,13 @@ describe("database foundation", () => {
     ]) {
       expect(schema).toContain(`model ${model} {`);
     }
+  });
+
+  it("binds Google identities by provider subject instead of email alone", () => {
+    expect(schema).toContain("enum IdentityProvider");
+    expect(schema).toContain("providerSubject String");
+    expect(schema).toContain("@@unique([provider, providerSubject])");
+    expect(schema).toContain("@@unique([userId, provider])");
   });
 
   it("enforces additional member seat and invitation invariants", () => {

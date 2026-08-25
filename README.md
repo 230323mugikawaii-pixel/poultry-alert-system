@@ -10,7 +10,9 @@
 
 ## Googleアカウント連携
 
-- Gmail監視に使用するGoogleアカウントを1件だけOAuth認証して登録できます。
-- 別のアカウントへ変更する場合は、現在の連携を1対1で置き換えます。
+- Google本人確認はサーバー側OAuthで行い、ログイン状態はHttpOnly Cookieの
+  Phase 1 Sessionだけを正とします。
+- ログインでは `openid`、`email`、`profile` だけを要求します。
 - GoogleのパスワードはCall Nowでは取得・保存しません。
-- 旧形式で複数件が保存されていた場合は、主アカウントを選択し、元の一覧を別のlocalStorageキーへ退避します。
+- Gmail監視用の権限・トークンを保存する`GmailConnection`本実装は後続です。
+- 旧形式のlocalStorageメールアドレスは本人確認に使用しません。

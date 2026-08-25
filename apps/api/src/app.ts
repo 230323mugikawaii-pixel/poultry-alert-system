@@ -1,4 +1,5 @@
 import cookie from "@fastify/cookie";
+import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import { TypeBoxValidatorCompiler } from "@fastify/type-provider-typebox";
@@ -8,6 +9,8 @@ import type { AppEnvironment } from "./config/env.js";
 import { AppError } from "./lib/app-error.js";
 import type { AuthService } from "./modules/auth/auth-service.js";
 import { createAuthRoutes } from "./modules/auth/auth-routes.js";
+import type { GoogleAuthService } from "./modules/auth/google-auth-service.js";
+import { createGoogleAuthRoutes } from "./modules/auth/google-auth-routes.js";
 import type { InvitationService } from "./modules/invitations/invitation-service.js";
 import type { SecurityThrottleService } from "./modules/security/security-throttle-service.js";
 import { createInvitationRoutes } from "./modules/invitations/invitation-routes.js";
@@ -19,6 +22,7 @@ export interface BuildAppOptions {
   readonly environment: AppEnvironment;
   readonly logger?: boolean;
   readonly authService?: AuthService;
+  readonly googleAuthService?: GoogleAuthService;
   readonly teamService?: TeamService;
   readonly invitationService?: InvitationService;
   readonly securityThrottleService?: SecurityThrottleService;
@@ -38,7 +42,10 @@ export async function buildApp(
               paths: [
                 "req.headers.authorization",
                 "req.headers.cookie",
+                "req.url",
                 "res.headers.set-cookie",
+                "query.code",
+                "query.state",
                 "body.token",
                 "body.password",
                 "body.magicLink",
@@ -59,6 +66,10 @@ export async function buildApp(
   app.setValidatorCompiler(TypeBoxValidatorCompiler);
 
   await app.register(cookie);
+  await app.register(cors, {
+    origin: options.environment.PUBLIC_ORIGIN,
+    credentials: true
+  });
   await app.register(helmet, {
     contentSecurityPolicy: false
   });
@@ -124,6 +135,26 @@ export async function buildApp(
         options.environment
       )
     );
+  }
+
+  if (options.googleAuthService && options.authService) {
+    if (!options.securityThrottleService) {
+      throw new Error(
+        "securityThrottleService is required for Google authentication"
+      );
+    }
+    await app.register(
+      createGoogleAuthRoutes(
+        options.googleAuthService,
+        options.authService,
+        options.securityThrottleService,
+        options.environment
+      )
+    );
+  }
+
+  if (options.googleAuthService && !options.authService) {
+    throw new Error("authService is required for Google authentication");
   }
 
   if (options.authService && options.teamService) {

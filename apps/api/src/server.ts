@@ -3,6 +3,8 @@ import { loadEnvironment } from "./config/env.js";
 import { createDatabaseClient } from "./db/client.js";
 import { AuthService } from "./modules/auth/auth-service.js";
 import { SmtpMagicLinkEmailSender } from "./modules/auth/email-sender.js";
+import { GoogleAuthService } from "./modules/auth/google-auth-service.js";
+import { GoogleOAuthClient } from "./modules/auth/google-oauth-client.js";
 import { PrismaAuthRepository } from "./modules/auth/prisma-auth-repository.js";
 import { InvitationService } from "./modules/invitations/invitation-service.js";
 import { PrismaInvitationRepository } from "./modules/invitations/prisma-invitation-repository.js";
@@ -13,6 +15,7 @@ import { SecurityThrottleService } from "./modules/security/security-throttle-se
 
 const environment = loadEnvironment();
 const database = createDatabaseClient(environment.DATABASE_URL);
+const authRepository = new PrismaAuthRepository(database);
 const securityThrottleService = new SecurityThrottleService(
   new PrismaSecurityThrottleRepository(database),
   environment.AUTH_TOKEN_PEPPER
@@ -26,7 +29,7 @@ const emailSender = new SmtpMagicLinkEmailSender({
   from: environment.EMAIL_FROM
 });
 const authService = new AuthService({
-  repository: new PrismaAuthRepository(database),
+  repository: authRepository,
   emailSender,
   publicOrigin: environment.PUBLIC_ORIGIN,
   tokenPepper: environment.AUTH_TOKEN_PEPPER,
@@ -34,6 +37,17 @@ const authService = new AuthService({
   sessionIdleDays: environment.SESSION_IDLE_DAYS,
   sessionAbsoluteDays: environment.SESSION_ABSOLUTE_DAYS,
   maxActiveSessions: environment.MAX_ACTIVE_SESSIONS
+});
+const googleAuthService = new GoogleAuthService({
+  repository: authRepository,
+  authService,
+  oauthProvider: new GoogleOAuthClient({
+    clientId: environment.GOOGLE_OAUTH_CLIENT_ID,
+    clientSecret: environment.GOOGLE_OAUTH_CLIENT_SECRET,
+    redirectUri: environment.GOOGLE_OAUTH_REDIRECT_URI
+  }),
+  tokenPepper: environment.AUTH_TOKEN_PEPPER,
+  stateTtlMinutes: environment.GOOGLE_OAUTH_STATE_TTL_MINUTES
 });
 const teamService = new TeamService({
   repository: new PrismaTeamRepository(database)
@@ -51,6 +65,7 @@ const invitationService = new InvitationService({
 const app = await buildApp({
   environment,
   authService,
+  googleAuthService,
   teamService,
   invitationService,
   securityThrottleService,

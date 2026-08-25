@@ -9,7 +9,6 @@ function saveData() {
     keywords: keywords,
     totalPrice: totalPrice,
     paidAnnualPrice: paidAnnualPrice,
-    googleEmail: googleEmail,
 
     ...(legacyGoogleAccountsFallbackBackup.length > 1
       ? {
@@ -64,6 +63,10 @@ function loadSavedData() {
       Object.prototype.hasOwnProperty.call(
         data,
         "accountCount"
+      ) ||
+      Object.prototype.hasOwnProperty.call(
+        data,
+        "googleEmail"
       );
 
     if (
@@ -105,8 +108,7 @@ function loadSavedData() {
         data.totalPrice;
     }
 
-    googleEmail =
-      resolveSavedGoogleEmail(data);
+    resolveSavedGoogleEmail(data);
 
     if (data.contractStartDate) {
       const startDate =
@@ -166,11 +168,7 @@ const STORAGE_VERSION = 2;
 const STORAGE_KEY = "callNowContract";
 const LEGACY_GOOGLE_ACCOUNTS_BACKUP_KEY =
   "callNowLegacyGoogleAccountsBackup";
-const SESSION_KEY = "callNowSession";
-const GOOGLE_CLIENT_ID =
-  "187445333976-dpqiiqq2a46ljquoqfiqsh5vnq109hqu.apps.googleusercontent.com";
-const GOOGLE_GMAIL_SCOPE =
-  "https://www.googleapis.com/auth/gmail.readonly";
+const API_ORIGIN = resolveApiOrigin();
 const TEST_API_URL =
   "https://script.google.com/macros/s/AKfycbw6hllq-Teht0GXydKn0V9GijokIhaCCUfBAeUKdTgIY2Vi7yqznDG55Xa1BTQtfitMgw/exec";
 
@@ -180,7 +178,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-25.6";
+  "2026-08-25.7";
 
 /*
   正式なURLが決まった場合だけ設定する公開リンク。
@@ -206,15 +204,12 @@ let totalPrice = BASE_PRICE;
 let contractStartDate = null;
 let contractEndDate = null;
 let googleEmail = "";
-let googleTokenClient = null;
-let googleAccessToken = "";
+let authenticatedUser = null;
 let legacyGoogleAccountsFallbackBackup =
   [];
 let contractStorageMigrationPending =
   false;
 let googleScreenMode = "link";
-let googleAuthMode = "link";
-let googleLoginVerified = false;
 let setupMode = "signup";
 /*
   現在の契約期間で、すでに支払った年額
@@ -234,6 +229,11 @@ let paymentMode = "signup";
 let priceBeforeEditing = BASE_PRICE;
 
 window.addEventListener("DOMContentLoaded", () => {
+  void initializeApplication();
+});
+
+
+async function initializeApplication() {
   console.info(
     `Call Now ${APP_BUILD_VERSION}`
   );
@@ -247,26 +247,165 @@ window.addEventListener("DOMContentLoaded", () => {
   renderAnnouncements();
   renderHelpExternalLinks();
 
+  authenticatedUser =
+    await fetchCurrentUser();
+
+  googleEmail =
+    authenticatedUser?.email || "";
+
   if (contractStorageMigrationPending) {
     saveData();
   }
 
   renderKeywordInputs();
 
-  const sessionIsActive =
-    sessionStorage.getItem(SESSION_KEY) === "active";
-
   const canOpenApp =
-    sessionIsActive &&
+    Boolean(authenticatedUser) &&
     contractStartDate &&
     contractEndDate;
+
+  const googleAuthResult =
+    readGoogleAuthResult();
+
+  if (googleAuthResult) {
+    clearGoogleAuthResultFromUrl();
+
+    if (
+      googleAuthResult === "success" &&
+      authenticatedUser
+    ) {
+      if (contractStartDate && contractEndDate) {
+        openApp();
+      } else {
+        showOnlyScreen("landingScreen");
+      }
+      return;
+    }
+
+    openGoogleScreen(
+      contractStartDate && contractEndDate
+        ? "login"
+        : "link"
+    );
+    setText(
+      "googleError",
+      "Googleログインに失敗しました。もう一度お試しください。"
+    );
+    return;
+  }
 
   if (canOpenApp) {
     openApp();
   } else {
     showOnlyScreen("landingScreen");
   }
-});
+}
+
+
+function resolveApiOrigin() {
+  const configuredOrigin =
+    document
+      .querySelector(
+        'meta[name="call-now-api-origin"]'
+      )
+      ?.getAttribute("content")
+      ?.trim();
+
+  if (configuredOrigin) {
+    return configuredOrigin.replace(/\/$/u, "");
+  }
+
+  if (
+    window.location.hostname === "127.0.0.1" ||
+    window.location.hostname === "localhost"
+  ) {
+    return `${window.location.protocol}//${window.location.hostname}:8080`;
+  }
+
+  return window.location.origin;
+}
+
+
+function apiUrl(path) {
+  return new URL(path, `${API_ORIGIN}/`).toString();
+}
+
+
+async function fetchCurrentUser() {
+  try {
+    const response = await fetch(
+      apiUrl("/api/v1/auth/me"),
+      {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Accept: "application/json"
+        },
+        cache: "no-store"
+      }
+    );
+
+    if (response.status === 401) {
+      return null;
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        `auth_me_${response.status}`
+      );
+    }
+
+    const result = await response.json();
+    const user = result?.user;
+
+    if (
+      !user ||
+      typeof user.id !== "string" ||
+      !isValidEmail(user.email)
+    ) {
+      throw new Error("auth_me_invalid");
+    }
+
+    return {
+      id: user.id,
+      email: user.email.trim(),
+      displayName:
+        typeof user.displayName === "string"
+          ? user.displayName
+          : null
+    };
+  } catch (error) {
+    console.warn(
+      "ログイン状態を確認できませんでした。",
+      error
+    );
+    return null;
+  }
+}
+
+
+function readGoogleAuthResult() {
+  const result =
+    new URL(window.location.href)
+      .searchParams
+      .get("googleAuth");
+
+  return result === "success" ||
+    result === "error"
+    ? result
+    : null;
+}
+
+
+function clearGoogleAuthResultFromUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("googleAuth");
+  window.history.replaceState(
+    null,
+    "",
+    `${url.pathname}${url.search}${url.hash}`
+  );
+}
 
 
 /* ========================================
@@ -656,17 +795,6 @@ function resolveSavedGoogleEmail(data) {
 }
 
 
-function isSameGoogleAccount(email) {
-  return Boolean(
-    googleEmail &&
-      googleEmail.toLowerCase() ===
-        String(email || "")
-          .trim()
-          .toLowerCase()
-  );
-}
-
-
 /* ========================================
    料金計算
 ======================================== */
@@ -1048,12 +1176,7 @@ function openGoogleScreen(
 ) {
   googleScreenMode = mode;
   const isLoginMode =
-    mode === "login" &&
-    Boolean(googleEmail);
-
-  if (mode === "login") {
-    googleLoginVerified = false;
-  }
+    mode === "login";
 
   setText(
     "googleBackButton",
@@ -1076,8 +1199,8 @@ function openGoogleScreen(
     isLoginMode
       ? "監視用Googleアカウントで本人確認します。"
       : mode === "manage"
-        ? "監視用Googleアカウントの変更や連携解除ができます。"
-        : "通知の確認と本人確認に使うGoogleアカウントを設定します。"
+        ? "ログイン中のGoogleアカウントを確認できます。"
+        : "Googleアカウントで本人確認します。"
   );
 
   setText(
@@ -1182,14 +1305,14 @@ function renderGoogleAccountOptions() {
           class="account-change-button"
           onclick="startGoogleAccountChange()"
         >
-          アカウントを変更
+          別のGoogleアカウントでログイン
         </button>
         <button
           type="button"
           class="account-remove-button"
           onclick="removeGoogleAccount()"
         >
-          連携を解除
+          ログアウト
         </button>
       </span>
     `;
@@ -1224,28 +1347,6 @@ function updateGoogleAuthActionText() {
     );
   }
 
-  if (
-    googleScreenMode === "login" &&
-    !googleEmail
-  ) {
-    setText(
-      "googleCardTitle",
-      "Googleアカウントを設定"
-    );
-
-    setText(
-      "googleAuthDescription",
-      "Googleの認証画面で、通知を確認するアカウントを選択し、Gmailの閲覧権限を許可してください。連携後、そのまま本人確認が完了します。Call NowがGoogleのパスワードを保存することはありません。"
-    );
-
-    setText(
-      "googleAuthButton",
-      "Googleアカウントを設定"
-    );
-
-    return;
-  }
-
   if (googleScreenMode === "login") {
     setText(
       "googleCardTitle",
@@ -1272,7 +1373,7 @@ function updateGoogleAuthActionText() {
 
   setText(
     "googleAuthDescription",
-    "Googleの認証画面で、通知を確認するアカウントを選択し、Gmailの閲覧権限を許可してください。Call NowがGoogleのパスワードを保存することはありません。"
+    "Googleの認証画面で本人確認してください。Call NowがGoogleのパスワードを保存することはありません。"
   );
 
   setText(
@@ -1290,12 +1391,12 @@ async function startGoogleAccountChange() {
 
   const confirmed =
     await showAppConfirm(
-      `現在連携中のGoogleアカウントを変更しますか？
+      `別のGoogleアカウントでログインしますか？
 
-新しいアカウントの認証が成功した時点で、現在の連携から置き換わります。`,
+Googleでの本人確認が成功すると、現在のセッションが新しい利用者のセッションへ切り替わります。`,
       {
-        title: "Googleアカウントの変更",
-        confirmText: "変更を続ける"
+        title: "Googleアカウントの切り替え",
+        confirmText: "ログインを続ける"
       }
     );
 
@@ -1303,7 +1404,7 @@ async function startGoogleAccountChange() {
     return;
   }
 
-  startGoogleLogin("replace");
+  startGoogleLogin();
 }
 
 
@@ -1314,10 +1415,10 @@ async function removeGoogleAccount() {
 
   const confirmed =
     await showAppConfirm(
-      `${googleEmail} の連携を解除しますか？`,
+      `${googleEmail} からログアウトしますか？`,
       {
-        title: "Googleアカウントの連携解除",
-        confirmText: "解除する",
+        title: "ログアウトの確認",
+        confirmText: "ログアウトする",
         tone: "danger"
       }
     );
@@ -1326,33 +1427,12 @@ async function removeGoogleAccount() {
     return;
   }
 
-  googleAccessToken = "";
-  googleEmail = "";
-  googleLoginVerified = false;
-
-  saveData();
-  renderGoogleAccountOptions();
-  renderConnectedGoogleAccounts();
+  await performLogout();
 }
 
 
 function finishGoogleAccountLinking() {
-  if (
-    googleScreenMode === "login" &&
-    !googleEmail
-  ) {
-    setText(
-      "googleError",
-      "監視用Googleアカウントを設定してください。"
-    );
-
-    return;
-  }
-
-  if (
-    googleScreenMode === "login" &&
-    !googleLoginVerified
-  ) {
+  if (!authenticatedUser) {
     setText(
       "googleError",
       "Googleでログインしてください。"
@@ -1361,18 +1441,8 @@ function finishGoogleAccountLinking() {
     return;
   }
 
-  if (
-    googleScreenMode !== "manage" &&
-    !googleEmail
-  ) {
-    setText(
-      "googleError",
-      "監視用Googleアカウントを設定してください。"
-    );
-
-    return;
-  }
-  finishLogin();
+  saveData();
+  openApp();
 }
 
 
@@ -1396,237 +1466,13 @@ function backFromGoogle() {
 }
 
 
-function initializeGoogleTokenClient() {
-  const oauth2 =
-    window.google &&
-    window.google.accounts &&
-    window.google.accounts.oauth2;
-
-  if (!oauth2) {
-    return false;
-  }
-
-  if (!googleTokenClient) {
-    googleTokenClient =
-      oauth2.initTokenClient({
-        client_id:
-          GOOGLE_CLIENT_ID,
-        scope:
-          GOOGLE_GMAIL_SCOPE,
-        callback:
-          handleGoogleTokenResponse,
-        error_callback:
-          handleGoogleLoginError
-      });
-  }
-
-  return true;
-}
-
-
-function startGoogleLogin(
-  mode = null
-) {
-  googleAuthMode =
-    mode ||
-    (
-      googleScreenMode === "login" &&
-      googleEmail
-        ? "login"
-        : "link"
-    );
-
-  if (googleAuthMode === "login") {
-    googleLoginVerified = false;
-  }
-
+function startGoogleLogin() {
   setText(
     "googleError",
     ""
   );
-
-  if (!initializeGoogleTokenClient()) {
-    setText(
-      "googleError",
-      "Googleログインの準備中です。数秒待って、もう一度押してください。"
-    );
-
-    return;
-  }
-
-  googleTokenClient.requestAccessToken({
-    prompt: "select_account"
-  });
-}
-
-
-async function handleGoogleTokenResponse(
-  response
-) {
-  try {
-    if (
-      !response ||
-      response.error ||
-      !response.access_token
-    ) {
-      throw new Error(
-        response && response.error
-          ? response.error
-          : "access_token_missing"
-      );
-    }
-
-    const oauth2 =
-      window.google.accounts.oauth2;
-
-    if (
-      !oauth2.hasGrantedAllScopes(
-        response,
-        GOOGLE_GMAIL_SCOPE
-      )
-    ) {
-      googleLoginVerified = false;
-
-      setText(
-        "googleError",
-        "Gmailの閲覧権限が必要です。もう一度ログインして許可してください。"
-      );
-
-      return;
-    }
-
-    const accessToken =
-      response.access_token;
-
-    const profileResponse =
-      await fetch(
-        "https://gmail.googleapis.com/gmail/v1/users/me/profile",
-        {
-          headers: {
-            Authorization:
-              `Bearer ${accessToken}`
-          }
-        }
-      );
-
-    if (!profileResponse.ok) {
-      throw new Error(
-        `gmail_profile_${profileResponse.status}`
-      );
-    }
-
-    const profile =
-      await profileResponse.json();
-
-    const selectedEmail =
-      String(
-        profile.emailAddress || ""
-      ).trim();
-
-    if (!isValidEmail(selectedEmail)) {
-      throw new Error(
-        "gmail_email_missing"
-      );
-    }
-
-    if (
-      googleAuthMode === "login" &&
-      !isSameGoogleAccount(
-        selectedEmail
-      )
-    ) {
-      googleLoginVerified = false;
-
-      setText(
-        "googleError",
-        "選択したアカウントは、設定済みの監視用Googleアカウントと一致しません。登録済みのアカウントを選択してください。"
-      );
-
-      return;
-    }
-
-    if (
-      googleAuthMode === "link" &&
-      googleEmail &&
-      !isSameGoogleAccount(
-        selectedEmail
-      )
-    ) {
-      setText(
-        "googleError",
-        "Googleアカウントは1件だけ連携できます。別のアカウントへ切り替える場合は「アカウントを変更」を選択してください。"
-      );
-
-      return;
-    }
-
-    const previousEmail =
-      googleEmail;
-
-    googleAccessToken = "";
-    googleEmail = selectedEmail;
-    googleAccessToken = accessToken;
-
-    googleLoginVerified = true;
-
-    saveData();
-    renderGoogleAccountOptions();
-
-    if (googleAuthMode === "login") {
-      setText(
-        "googleError",
-        ""
-      );
-    } else if (
-      googleAuthMode === "replace" &&
-      previousEmail &&
-      previousEmail.toLowerCase() !==
-        selectedEmail.toLowerCase()
-    ) {
-      setText(
-        "googleError",
-        `${selectedEmail} へ連携を変更しました。`
-      );
-    } else if (
-      googleAuthMode === "replace"
-    ) {
-      setText(
-        "googleError",
-        `${selectedEmail} を再連携しました。`
-      );
-    } else {
-      setText(
-        "googleError",
-        "Googleアカウントの連携が完了しました。"
-      );
-    }
-  } catch (error) {
-    googleLoginVerified = false;
-
-    console.error(
-      "Googleログインに失敗しました。",
-      error
-    );
-
-    setText(
-      "googleError",
-      "Googleログインに失敗しました。もう一度お試しください。"
-    );
-  }
-}
-
-
-function handleGoogleLoginError(error) {
-  googleLoginVerified = false;
-
-  console.error(
-    "Googleログイン画面を開けませんでした。",
-    error
-  );
-
-  setText(
-    "googleError",
-    "Googleログインに失敗しました。もう一度お試しください。"
+  window.location.assign(
+    apiUrl("/api/v1/auth/google/start")
   );
 }
 
@@ -1635,18 +1481,6 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
     value
   );
-}
-
-
-function finishLogin() {
-  sessionStorage.setItem(
-    SESSION_KEY,
-    "active"
-  );
-
-  saveData();
-
-  openApp();
 }
 
 
@@ -2288,7 +2122,7 @@ async function logout() {
     await showAppConfirm(
       `Call Nowからログアウトしますか？
 
-契約情報・キーワード・Googleアカウント情報は保存されたままです。`,
+契約情報とキーワードは保存されたままです。`,
       {
         title: "ログアウトの確認",
         confirmText: "ログアウトする",
@@ -2300,15 +2134,45 @@ async function logout() {
     return;
   }
 
+  await performLogout();
+}
+
+
+async function performLogout() {
+  try {
+    const response = await fetch(
+      apiUrl("/api/v1/auth/logout"),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/json"
+        }
+      }
+    );
+
+    if (
+      !response.ok &&
+      response.status !== 401
+    ) {
+      throw new Error(
+        `auth_logout_${response.status}`
+      );
+    }
+  } catch (error) {
+    console.error(
+      "ログアウトに失敗しました。",
+      error
+    );
+    await showAppAlert(
+      "ログアウトできませんでした。通信状態を確認して、もう一度お試しください。"
+    );
+    return;
+  }
+
   closeAlarmNotification();
-
-  sessionStorage.removeItem(
-    SESSION_KEY
-  );
-
-  googleAccessToken = "";
-  googleTokenClient = null;
-  googleLoginVerified = false;
+  authenticatedUser = null;
+  googleEmail = "";
 
   setupMode =
     "login";
@@ -3488,79 +3352,6 @@ function extractTestDetectionStatus(result) {
 }
 
 
-async function findTestMailInConnectedGmail(
-  requestId
-) {
-  if (!googleAccessToken) {
-    return null;
-  }
-
-  try {
-    const searchUrl =
-      new URL(
-        "https://gmail.googleapis.com/gmail/v1/users/me/messages"
-      );
-
-    searchUrl.searchParams.set(
-      "q",
-      `in:inbox newer_than:1d label:CallNow-Test-Detected ${
-        keywordPolicy.quoteGmailSearchPhrase(
-          requestId
-        )
-      }`
-    );
-
-    searchUrl.searchParams.set(
-      "maxResults",
-      "1"
-    );
-
-    const response =
-      await fetch(
-        searchUrl.toString(),
-        {
-          method: "GET",
-          headers: {
-            Authorization:
-              `Bearer ${googleAccessToken}`
-          },
-          cache: "no-store"
-        }
-      );
-
-    if (!response.ok) {
-      console.warn(
-        "Gmailでのテストメール確認に失敗しました。",
-        response.status
-      );
-      return null;
-    }
-
-    const result =
-      await response.json();
-
-    if (
-      Array.isArray(result.messages) &&
-      result.messages.length > 0
-    ) {
-      return {
-        state: "detected",
-        detectedAt:
-          new Date().toISOString(),
-        source: "gmail-api"
-      };
-    }
-  } catch (error) {
-    console.warn(
-      "Gmailでのテストメール確認に失敗しました。",
-      error
-    );
-  }
-
-  return null;
-}
-
-
 async function waitForTestDetection(
   requestId,
   timeoutMilliseconds
@@ -3568,8 +3359,6 @@ async function waitForTestDetection(
   const endTime =
     Date.now() +
     timeoutMilliseconds;
-
-  let attemptCount = 0;
 
   while (
     Date.now() <
@@ -3579,7 +3368,6 @@ async function waitForTestDetection(
       3秒ごとに検知状況を確認する。
     */
     await sleep(3000);
-    attemptCount += 1;
 
     try {
       const statusUrl =
@@ -3655,23 +3443,6 @@ async function waitForTestDetection(
       );
     }
 
-    /*
-      Apps Scriptの状態取得が遅れた場合も、
-      Gmailに検知済みラベルが付いていれば
-      テスト成功として確認する。
-    */
-    if (
-      attemptCount % 2 === 0
-    ) {
-      const gmailStatus =
-        await findTestMailInConnectedGmail(
-          requestId
-        );
-
-      if (gmailStatus) {
-        return gmailStatus;
-      }
-    }
   }
 
   return null;

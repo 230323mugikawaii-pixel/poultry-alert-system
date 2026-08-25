@@ -2,15 +2,19 @@
 
 ## Scope
 
-Phase 1 adds the server-side foundation without connecting or changing the existing
-Call Now screens. `index.html`, `css/style.css`, and `js/app.js` remain the current
-`ac0cea2` implementation.
+Phase 1 provides the server-side foundation. The Google User/Session integration
+connects the existing login screen to this foundation without adding Gmail token
+persistence.
 
 Implemented areas:
 
 - HTTPS JSON API suitable for Cloud Run
 - PostgreSQL schema and tracked migrations
 - Required email address and one-time magic-link login
+- Server-side Google authorization-code login with state, PKCE, and verified ID
+  tokens (`openid`, `email`, and `profile` only)
+- Google external identities bound by the stable provider subject rather than by
+  an untrusted browser email value
 - Individual, revocable, device-associated sessions
 - Future Passkey credential and challenge storage
 - No Call Now password credential type, hash storage, or password login route
@@ -25,13 +29,15 @@ Implemented areas:
 
 Deferred until later phases:
 
-- Changes to the existing browser screens
 - Production payment provider and billing webhook
-- Gmail refresh-token migration and continuous monitoring
+- Gmail authorization, refresh-token migration, `GmailConnection`, and continuous
+  monitoring
 - Notification delivery transport
 - Passkey registration and authentication ceremonies
 - OWNER transfer completion, which also requires the new OWNER Gmail connection
-- Existing localStorage user migration and production cutover
+- Explicit linking for an existing magic-link User that has the same email as a
+  newly authenticated Google identity
+- Existing localStorage contract/team migration and production cutover
 
 ## Local development
 
@@ -41,6 +47,13 @@ Deferred until later phases:
 4. Generate the client with `pnpm db:generate`.
 5. Apply migrations with `pnpm db:migrate:deploy`.
 6. Start the API with `pnpm dev:api`.
+7. Serve the static frontend at `http://127.0.0.1:5500`.
+
+For local frontend development, an empty `call-now-api-origin` meta value resolves
+to port 8080 on `localhost` or `127.0.0.1`. Staging and production must set this to
+the deployed API origin, or serve the API behind the same origin. The frontend and
+API should use hosts under the same registrable domain so SameSite=Lax cookies work
+without weakening the cookie policy.
 
 Run `pnpm test:postgres` only against a dedicated database whose name contains
 `test` or `acceptance`. This suite truncates data in that database and verifies
@@ -60,6 +73,10 @@ than printed to logs.
 - Invitation passwords use Argon2id.
 - Mutation endpoints require the configured same Origin.
 - Session cookies are HttpOnly, SameSite=Lax, and Secure in staging/production.
+- OAuth state is one-use, short-lived, HMACed in PostgreSQL, and paired with a
+  host-only HttpOnly state cookie, PKCE verifier, and verified OIDC nonce.
+- Google access tokens and refresh tokens are not stored because Gmail access is
+  outside this phase.
 - Sensitive request fields and authentication headers are redacted from logs.
 - Five failed invitation-password attempts lock the team/source pair for 15 minutes.
 - Security-sensitive rate limits are stored in PostgreSQL and shared by all API
@@ -75,3 +92,10 @@ Production uses `prisma migrate deploy`; it never uses `migrate dev`. A migratio
 must finish successfully before a new API revision is deployed. Production backups
 and point-in-time recovery must be enabled and a restore test completed before user
 migration begins.
+
+Legacy `localStorage.googleEmail` values are removed from active contract storage
+and are never accepted as proof of identity. A Google login creates a new User only
+when no matching provider subject and no existing User email exists. A same-email
+existing User is rejected with `GOOGLE_ACCOUNT_LINK_REQUIRED` until an explicit,
+authenticated account-linking flow is implemented; email equality alone must never
+auto-link accounts.

@@ -19,6 +19,11 @@ const environment: AppEnvironment = {
   COOKIE_NAME: "callnow_test_session",
   DATABASE_URL: "postgresql://test:test@127.0.0.1:5432/test",
   AUTH_TOKEN_PEPPER: "test-token-pepper-at-least-thirty-two-characters",
+  GOOGLE_OAUTH_CLIENT_ID: "test-google-client-id",
+  GOOGLE_OAUTH_CLIENT_SECRET: "test-google-client-secret",
+  GOOGLE_OAUTH_REDIRECT_URI:
+    "https://api.test.call-now.example/api/v1/auth/google/callback",
+  GOOGLE_OAUTH_STATE_TTL_MINUTES: 10,
   MAGIC_LINK_TTL_MINUTES: 15,
   SESSION_IDLE_DAYS: 30,
   SESSION_ABSOLUTE_DAYS: 90,
