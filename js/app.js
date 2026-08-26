@@ -178,7 +178,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-25.7";
+  "2026-08-26.1";
 
 /*
   正式なURLが決まった場合だけ設定する公開リンク。
@@ -205,6 +205,8 @@ let contractStartDate = null;
 let contractEndDate = null;
 let googleEmail = "";
 let authenticatedUser = null;
+let currentTeam = null;
+let gmailConnection = null;
 let legacyGoogleAccountsFallbackBackup =
   [];
 let contractStorageMigrationPending =
@@ -253,6 +255,13 @@ async function initializeApplication() {
   googleEmail =
     authenticatedUser?.email || "";
 
+  if (authenticatedUser) {
+    currentTeam =
+      await fetchCurrentTeamContext();
+    gmailConnection =
+      await fetchGmailConnection();
+  }
+
   if (contractStorageMigrationPending) {
     saveData();
   }
@@ -266,9 +275,15 @@ async function initializeApplication() {
 
   const googleAuthResult =
     readGoogleAuthResult();
+  const gmailAuthResult =
+    readGmailAuthResult();
+
+  if (gmailAuthResult) {
+    clearAuthResultFromUrl("gmailAuth");
+  }
 
   if (googleAuthResult) {
-    clearGoogleAuthResultFromUrl();
+    clearAuthResultFromUrl("googleAuth");
 
     if (
       googleAuthResult === "success" &&
@@ -296,6 +311,19 @@ async function initializeApplication() {
 
   if (canOpenApp) {
     openApp();
+    if (gmailAuthResult) {
+      await showAppAlert(
+        gmailAuthResult === "success"
+          ? "Gmail監視アカウントを接続しました。"
+          : "Gmail監視アカウントを接続できませんでした。もう一度お試しください。",
+        {
+          title:
+            gmailAuthResult === "success"
+              ? "Gmail監視の接続完了"
+              : "Gmail監視の接続エラー"
+        }
+      );
+    }
   } else {
     showOnlyScreen("landingScreen");
   }
@@ -384,6 +412,103 @@ async function fetchCurrentUser() {
 }
 
 
+async function fetchCurrentTeamContext() {
+  try {
+    const response = await fetch(
+      apiUrl("/api/v1/teams/current"),
+      {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Accept: "application/json"
+        },
+        cache: "no-store"
+      }
+    );
+
+    if (
+      response.status === 401 ||
+      response.status === 404
+    ) {
+      return null;
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        `team_current_${response.status}`
+      );
+    }
+
+    const team = (await response.json())?.team;
+    if (
+      !team ||
+      typeof team.id !== "string" ||
+      (team.role !== "OWNER" &&
+        team.role !== "MEMBER")
+    ) {
+      throw new Error("team_current_invalid");
+    }
+
+    return {
+      id: team.id,
+      role: team.role
+    };
+  } catch (error) {
+    console.warn(
+      "チーム情報を確認できませんでした。",
+      error
+    );
+    return null;
+  }
+}
+
+
+async function fetchGmailConnection() {
+  if (currentTeam?.role !== "OWNER") {
+    return null;
+  }
+
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/gmail-connection`
+      ),
+      {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Accept: "application/json"
+        },
+        cache: "no-store"
+      }
+    );
+
+    if (response.status === 401) {
+      return null;
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        `gmail_connection_${response.status}`
+      );
+    }
+
+    const connection =
+      (await response.json())?.connection;
+    return connection &&
+      typeof connection.email === "string"
+      ? connection
+      : null;
+  } catch (error) {
+    console.warn(
+      "Gmail監視アカウントの状態を確認できませんでした。",
+      error
+    );
+    return null;
+  }
+}
+
+
 function readGoogleAuthResult() {
   const result =
     new URL(window.location.href)
@@ -397,9 +522,22 @@ function readGoogleAuthResult() {
 }
 
 
-function clearGoogleAuthResultFromUrl() {
+function readGmailAuthResult() {
+  const result =
+    new URL(window.location.href)
+      .searchParams
+      .get("gmailAuth");
+
+  return result === "success" ||
+    result === "error"
+    ? result
+    : null;
+}
+
+
+function clearAuthResultFromUrl(parameterName) {
   const url = new URL(window.location.href);
-  url.searchParams.delete("googleAuth");
+  url.searchParams.delete(parameterName);
   window.history.replaceState(
     null,
     "",
@@ -1197,10 +1335,10 @@ function openGoogleScreen(
   setText(
     "googleScreenDescription",
     isLoginMode
-      ? "監視用Googleアカウントで本人確認します。"
+      ? "Call Nowへのログイン用Googleアカウントで本人確認します。"
       : mode === "manage"
-        ? "ログイン中のGoogleアカウントを確認できます。"
-        : "Googleアカウントで本人確認します。"
+        ? "ログイン用アカウントとGmail監視アカウントを別々に管理できます。"
+        : "Call Nowへのログインに使うGoogleアカウントで本人確認します。"
   );
 
   setText(
@@ -1259,9 +1397,20 @@ function renderGoogleAccountOptions() {
     );
   const showAccountManagement =
     googleScreenMode === "manage";
+  const gmailAccountCard =
+    document.getElementById(
+      "gmailMonitoringAccountCard"
+    );
 
   if (accountCard) {
     accountCard.classList.toggle(
+      "hidden",
+      !showAccountManagement
+    );
+  }
+
+  if (gmailAccountCard) {
+    gmailAccountCard.classList.toggle(
       "hidden",
       !showAccountManagement
     );
@@ -1282,7 +1431,7 @@ function renderGoogleAccountOptions() {
       "google-account-empty";
 
     emptyMessage.textContent =
-      "監視用Googleアカウントは未設定です。";
+      "ログイン中のGoogleアカウントはありません。";
 
     accountList.appendChild(
       emptyMessage
@@ -1330,6 +1479,8 @@ function renderGoogleAccountOptions() {
   if (finishButton) {
     finishButton.disabled = false;
   }
+
+  renderGmailMonitoringAccount();
 }
 
 
@@ -1355,7 +1506,7 @@ function updateGoogleAuthActionText() {
 
     setText(
       "googleAuthDescription",
-      "設定済みの監視用Googleアカウントで本人確認してください。Call NowがGoogleのパスワードを保存することはありません。"
+      "Call Nowへのログイン用Googleアカウントで本人確認してください。Gmail監視権限はここでは要求しません。"
     );
 
     setText(
@@ -1373,7 +1524,7 @@ function updateGoogleAuthActionText() {
 
   setText(
     "googleAuthDescription",
-    "Googleの認証画面で本人確認してください。Call NowがGoogleのパスワードを保存することはありません。"
+    "Googleの認証画面で本人確認してください。Gmail監視アカウントはログイン後に別途接続できます。"
   );
 
   setText(
@@ -1428,6 +1579,190 @@ async function removeGoogleAccount() {
   }
 
   await performLogout();
+}
+
+
+function renderGmailMonitoringAccount() {
+  const status =
+    document.getElementById(
+      "gmailMonitoringAccountStatus"
+    );
+  const connectButton =
+    document.getElementById(
+      "gmailConnectButton"
+    );
+  const reauthorizeButton =
+    document.getElementById(
+      "gmailReauthorizeButton"
+    );
+  const disconnectButton =
+    document.getElementById(
+      "gmailDisconnectButton"
+    );
+
+  if (
+    !status ||
+    !connectButton ||
+    !reauthorizeButton ||
+    !disconnectButton
+  ) {
+    return;
+  }
+
+  connectButton.classList.add("hidden");
+  reauthorizeButton.classList.add("hidden");
+  disconnectButton.classList.add("hidden");
+  connectButton.disabled = false;
+
+  if (!currentTeam) {
+    status.innerHTML = `
+      <p class="connected-account-empty">
+        チーム登録完了後に、代表者がGmail監視アカウントを接続できます。
+      </p>
+    `;
+    connectButton.classList.remove("hidden");
+    connectButton.disabled = true;
+    return;
+  }
+
+  if (currentTeam.role !== "OWNER") {
+    status.innerHTML = `
+      <p class="connected-account-empty">
+        Gmail監視アカウントはチームの代表者が管理します。
+      </p>
+    `;
+    return;
+  }
+
+  if (
+    !gmailConnection ||
+    gmailConnection.connectionStatus === "REVOKED"
+  ) {
+    status.innerHTML = `
+      <p class="connected-account-empty">
+        Gmail監視アカウントは接続されていません。
+      </p>
+    `;
+    connectButton.classList.remove("hidden");
+    return;
+  }
+
+  const requiresReauthorization =
+    gmailConnection.connectionStatus ===
+      "REAUTH_REQUIRED" ||
+    gmailConnection.authorizationStatus ===
+      "REAUTH_REQUIRED" ||
+    gmailConnection.connectionStatus === "ERROR" ||
+    gmailConnection.authorizationStatus === "ERROR";
+
+  status.innerHTML = `
+    <p class="connected-account-summary">
+      ${requiresReauthorization ? "再認証が必要です" : "1件接続中"}
+    </p>
+    <p class="connected-account-email">
+      ${escapeHtml(gmailConnection.email)}
+    </p>
+  `;
+  disconnectButton.classList.remove("hidden");
+
+  if (requiresReauthorization) {
+    reauthorizeButton.classList.remove("hidden");
+  }
+}
+
+
+async function startGmailConnection() {
+  await beginGmailOAuth("oauth/start");
+}
+
+
+async function reauthorizeGmailConnection() {
+  await beginGmailOAuth("reauthorize");
+}
+
+
+async function beginGmailOAuth(action) {
+  if (!authenticatedUser) {
+    await showAppAlert(
+      "先にGoogleでCall Nowへログインしてください。"
+    );
+    return;
+  }
+
+  if (currentTeam?.role !== "OWNER") {
+    await showAppAlert(
+      currentTeam
+        ? "Gmail監視アカウントはチームの代表者だけが管理できます。"
+        : "チーム登録完了後にGmail監視アカウントを接続できます。"
+    );
+    return;
+  }
+
+  const form = document.createElement("form");
+  form.method = "post";
+  form.action = apiUrl(
+    `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/gmail-connection/${action}`
+  );
+  form.hidden = true;
+  document.body.appendChild(form);
+  form.submit();
+}
+
+
+async function disconnectGmailConnection() {
+  if (currentTeam?.role !== "OWNER" ||
+      !gmailConnection) {
+    return;
+  }
+
+  const confirmed = await showAppConfirm(
+    "Gmail監視アカウントの接続を解除しますか？解除後はメール監視が停止します。",
+    {
+      title: "Gmail監視の解除",
+      confirmText: "接続を解除",
+      tone: "danger"
+    }
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/gmail-connection`
+      ),
+      {
+        method: "DELETE",
+        credentials: "include",
+        headers: {
+          Accept: "application/json"
+        }
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `gmail_disconnect_${response.status}`
+      );
+    }
+
+    gmailConnection = null;
+    renderGmailMonitoringAccount();
+    renderConnectedGoogleAccounts();
+    await showAppAlert(
+      "Gmail監視アカウントの接続を解除しました。"
+    );
+  } catch (error) {
+    console.error(
+      "Gmail監視アカウントを解除できませんでした。",
+      error
+    );
+    await showAppAlert(
+      "Gmail監視アカウントを解除できませんでした。通信状態を確認して、もう一度お試しください。"
+    );
+  }
 }
 
 
@@ -1987,47 +2322,54 @@ function renderConnectedGoogleAccounts() {
 
   container.replaceChildren();
 
-  if (!googleEmail) {
-    const emptyMessage =
-      document.createElement("p");
+  const loginAccount =
+    document.createElement("div");
+  loginAccount.className =
+    "google-account-role";
+  loginAccount.innerHTML = `
+    <strong>Call Nowログイン</strong>
+    <span class="connected-account-summary">
+      ${googleEmail ? "ログイン中" : "未ログイン"}
+    </span>
+    <span class="connected-account-email">
+      ${googleEmail ? escapeHtml(googleEmail) : "Googleでログインしてください"}
+    </span>
+  `;
 
-    emptyMessage.className =
-      "connected-account-empty";
+  const monitoringAccount =
+    document.createElement("div");
+  monitoringAccount.className =
+    "google-account-role";
+  const monitoringStatus =
+    gmailConnection &&
+    gmailConnection.connectionStatus === "ACTIVE" &&
+    gmailConnection.authorizationStatus === "ACTIVE"
+      ? "1件接続中"
+      : gmailConnection &&
+          gmailConnection.connectionStatus !== "REVOKED"
+        ? "再認証が必要です"
+        : "未接続";
+  const monitoringDetail =
+    gmailConnection &&
+    gmailConnection.connectionStatus !== "REVOKED"
+      ? escapeHtml(gmailConnection.email)
+      : currentTeam?.role === "OWNER"
+        ? "重要メールの監視用アカウントを接続できます"
+        : currentTeam
+          ? "代表者が管理します"
+          : "チーム登録完了後に接続できます";
+  monitoringAccount.innerHTML = `
+    <strong>Gmail監視</strong>
+    <span class="connected-account-summary">
+      ${monitoringStatus}
+    </span>
+    <span class="connected-account-email">
+      ${monitoringDetail}
+    </span>
+  `;
 
-    emptyMessage.textContent =
-      "監視用Googleアカウントが設定されていません";
-
-    container.appendChild(
-      emptyMessage
-    );
-
-    setText(
-      "homeGoogleAccountActionButton",
-      "Googleアカウントを設定"
-    );
-
-    return;
-  }
-
-  const summary =
-    document.createElement("p");
-
-  summary.className =
-    "connected-account-summary";
-
-  summary.textContent =
-    "1件連携中";
-
-  const email =
-    document.createElement("p");
-
-  email.className =
-    "connected-account-email";
-
-  email.textContent = googleEmail;
-
-  container.appendChild(summary);
-  container.appendChild(email);
+  container.appendChild(loginAccount);
+  container.appendChild(monitoringAccount);
 
   setText(
     "homeGoogleAccountActionButton",
@@ -2173,6 +2515,8 @@ async function performLogout() {
   closeAlarmNotification();
   authenticatedUser = null;
   googleEmail = "";
+  currentTeam = null;
+  gmailConnection = null;
 
   setupMode =
     "login";
