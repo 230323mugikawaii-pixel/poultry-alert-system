@@ -14,6 +14,10 @@ change the monitoring account.
 - Enable the Gmail API and configure the consent screen/test users.
 - Requested scopes are `openid`, `email`, and
   `https://www.googleapis.com/auth/gmail.readonly`.
+- The provider-status endpoint reports only `AVAILABLE` or
+  `NOT_CONFIGURED`; it never returns OAuth credentials or encryption keys.
+  OAuth navigation returns to Call Now with a safe error result if setup is
+  incomplete or the start operation fails.
 - Authorization uses state, PKCE S256, OIDC nonce, `access_type=offline`, and an
   explicit consent prompt. The state challenge is short-lived and one-use.
 

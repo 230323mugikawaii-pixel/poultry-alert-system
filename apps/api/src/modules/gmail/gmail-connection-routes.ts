@@ -9,6 +9,7 @@ import type { SecurityThrottleService } from "../security/security-throttle-serv
 import type { TeamService } from "../teams/team-service.js";
 import type { GmailConnectionRecord } from "./gmail-connection-repository.js";
 import type { GmailConnectionService } from "./gmail-connection-service.js";
+import { getGmailProviderAvailability } from "./gmail-provider-configuration.js";
 
 const TeamParams = Type.Object({
   teamId: Type.String({
@@ -95,14 +96,45 @@ export function createGmailConnectionRoutes(
       }
     );
 
+    app.get(
+      "/api/v1/teams/:teamId/gmail-connection/provider-status",
+      {
+        schema: {
+          params: TeamParams,
+          response: {
+            200: Type.Object({
+              provider: Type.Literal("GOOGLE"),
+              status: Type.Union([
+                Type.Literal("AVAILABLE"),
+                Type.Literal("NOT_CONFIGURED")
+              ])
+            })
+          }
+        }
+      },
+      async (request) => {
+        const userId = await authenticateUserId(request);
+        await teamService.requireOwnerForTeam(userId, request.params.teamId);
+        return {
+          provider: "GOOGLE" as const,
+          status: getGmailProviderAvailability(environment)
+        };
+      }
+    );
+
     const startOAuth = async (
       request: {
+        readonly id: string;
         readonly ip: string;
         readonly params: { readonly teamId: string };
         readonly cookies: Readonly<Record<string, string | undefined>>;
         readonly headers: Readonly<
           Record<string, string | string[] | undefined>
         >;
+        readonly log: {
+          error(data: object, message: string): unknown;
+          warn(data: object, message: string): unknown;
+        };
       },
       reply: {
         setCookie(name: string, value: string, options: object): unknown;
@@ -111,34 +143,61 @@ export function createGmailConnectionRoutes(
       intent: "CONNECT" | "REAUTHORIZE"
     ): Promise<void> => {
       requireSameOrigin(request);
-      const userId = await authenticateUserId(request);
-      await teamService.requireOwnerForTeam(userId, request.params.teamId);
-      await securityThrottle.consume([
-        throttleRule("gmail_start_global", ["all"], 1_000, 1, 5),
-        throttleRule("gmail_start_source", [request.ip], 20, 15, 15),
-        throttleRule("gmail_start_user", [userId], 10, 15, 15),
-        throttleRule(
-          "gmail_start_team_user",
-          [request.params.teamId, userId],
-          10,
-          15,
-          15
-        )
-      ]);
-      const authorization =
-        await gmailConnectionService.createAuthorizationRequest(
-          userId,
-          request.params.teamId,
-          intent
+      try {
+        const userId = await authenticateUserId(request);
+        await teamService.requireOwnerForTeam(userId, request.params.teamId);
+        if (getGmailProviderAvailability(environment) !== "AVAILABLE") {
+          request.log.warn(
+            { code: "GMAIL_PROVIDER_NOT_CONFIGURED", provider: "GOOGLE" },
+            "Gmail OAuth start unavailable"
+          );
+          await reply
+            .status(303)
+            .redirect(frontendResultUrl(environment, "unavailable"));
+          return;
+        }
+        await securityThrottle.consume([
+          throttleRule("gmail_start_global", ["all"], 1_000, 1, 5),
+          throttleRule("gmail_start_source", [request.ip], 20, 15, 15),
+          throttleRule("gmail_start_user", [userId], 10, 15, 15),
+          throttleRule(
+            "gmail_start_team_user",
+            [request.params.teamId, userId],
+            10,
+            15,
+            15
+          )
+        ]);
+        const authorization =
+          await gmailConnectionService.createAuthorizationRequest(
+            userId,
+            request.params.teamId,
+            intent
+          );
+        reply.setCookie(stateCookieName, authorization.state, {
+          httpOnly: true,
+          secure: usesSecureCookies(environment),
+          sameSite: "lax",
+          path: "/api/v1/auth/gmail",
+          maxAge: environment.GMAIL_OAUTH_STATE_TTL_MINUTES * 60
+        });
+        await reply.status(303).redirect(authorization.authorizationUrl);
+      } catch (error) {
+        if (error instanceof AppError && error.statusCode < 500) {
+          throw error;
+        }
+        request.log.error(
+          {
+            err: error,
+            code: "GMAIL_OAUTH_START_FAILED",
+            provider: "GOOGLE"
+          },
+          "Gmail OAuth start failed"
         );
-      reply.setCookie(stateCookieName, authorization.state, {
-        httpOnly: true,
-        secure: usesSecureCookies(environment),
-        sameSite: "lax",
-        path: "/api/v1/auth/gmail",
-        maxAge: environment.GMAIL_OAUTH_STATE_TTL_MINUTES * 60
-      });
-      await reply.status(303).redirect(authorization.authorizationUrl);
+        await reply
+          .status(303)
+          .redirect(frontendResultUrl(environment, "error"));
+      }
     };
 
     app.post(
@@ -244,7 +303,7 @@ function serializeConnection(connection: GmailConnectionRecord) {
 
 function frontendResultUrl(
   environment: AppEnvironment,
-  result: "success" | "error"
+  result: "success" | "error" | "unavailable"
 ): string {
   const url = new URL("/", environment.PUBLIC_ORIGIN);
   url.searchParams.set("gmailAuth", result);

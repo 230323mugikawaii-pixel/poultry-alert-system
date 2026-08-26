@@ -53,6 +53,7 @@ Teams.
 ## Gmail monitoring connection
 
 - `GET /api/v1/teams/:teamId/gmail-connection` (OWNER only)
+- `GET /api/v1/teams/:teamId/gmail-connection/provider-status` (OWNER only)
 - `POST /api/v1/teams/:teamId/gmail-connection/oauth/start` (OWNER only)
 - `POST /api/v1/teams/:teamId/gmail-connection/reauthorize` (OWNER only)
 - `GET /api/v1/auth/gmail/callback`

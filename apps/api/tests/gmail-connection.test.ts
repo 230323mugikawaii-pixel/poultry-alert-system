@@ -11,6 +11,7 @@ import {
   GMAIL_READONLY_SCOPE,
   GoogleGmailOAuthClient
 } from "../src/modules/gmail/gmail-oauth-client.js";
+import { getGmailProviderAvailability } from "../src/modules/gmail/gmail-provider-configuration.js";
 import { LocalAesGcmTokenEncryptionProvider } from "../src/modules/gmail/token-encryption.js";
 import { SecurityThrottleService } from "../src/modules/security/security-throttle-service.js";
 import { TeamService } from "../src/modules/teams/team-service.js";
@@ -43,7 +44,7 @@ const environment: AppEnvironment = {
     "https://api.test.call-now.example/api/v1/auth/gmail/callback",
   GMAIL_OAUTH_STATE_TTL_MINUTES: 10,
   GMAIL_TOKEN_ENCRYPTION_PROVIDER: "local",
-  GMAIL_TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  GMAIL_TOKEN_ENCRYPTION_KEY: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
   GMAIL_TOKEN_ENCRYPTION_KEY_VERSION: "test-local-v1",
   GMAIL_KMS_KEY_NAME: "",
   MAGIC_LINK_TTL_MINUTES: 15,
@@ -63,6 +64,25 @@ const environment: AppEnvironment = {
 
 const syntheticRefreshToken =
   "synthetic-refresh-token-for-tests-only-not-a-real-credential";
+
+describe("Gmail provider configuration", () => {
+  it("distinguishes usable settings from development placeholders", () => {
+    expect(getGmailProviderAvailability(environment)).toBe("AVAILABLE");
+    expect(
+      getGmailProviderAvailability({
+        ...environment,
+        GMAIL_OAUTH_CLIENT_ID: "development-gmail-client-id"
+      })
+    ).toBe("NOT_CONFIGURED");
+    expect(
+      getGmailProviderAvailability({
+        ...environment,
+        GMAIL_TOKEN_ENCRYPTION_KEY:
+          "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      })
+    ).toBe("NOT_CONFIGURED");
+  });
+});
 
 describe("Gmail token encryption", () => {
   it("round-trips with AES-256-GCM without retaining plaintext", async () => {
@@ -309,6 +329,16 @@ describe("Gmail connection routes", () => {
       ),
       logger: false
     });
+    const providerStatus = await app.inject({
+      method: "GET",
+      url: `/api/v1/teams/${team.teamId}/gmail-connection/provider-status`,
+      headers: { cookie: sessionCookie(owner.sessionToken) }
+    });
+    expect(providerStatus.statusCode).toBe(200);
+    expect(providerStatus.json()).toEqual({
+      provider: "GOOGLE",
+      status: "AVAILABLE"
+    });
     const memberStart = await app.inject({
       method: "POST",
       url: `/api/v1/teams/${team.teamId}/gmail-connection/oauth/start`,
@@ -389,6 +419,113 @@ describe("Gmail connection routes", () => {
     expect(disconnected.statusCode).toBe(204);
     expect(provider.revokedTokens).toContain(syntheticRefreshToken);
     await app.close();
+  });
+
+  it("returns provider status and redirects owners when Gmail is not configured", async () => {
+    const unavailableEnvironment: AppEnvironment = {
+      ...environment,
+      GMAIL_OAUTH_CLIENT_ID: "development-gmail-client-id"
+    };
+    const authRepository = new MemoryAuthRepository();
+    const emailSender = new MemoryMagicLinkEmailSender();
+    const authService = new AuthService({
+      repository: authRepository,
+      emailSender,
+      publicOrigin: unavailableEnvironment.PUBLIC_ORIGIN,
+      tokenPepper: unavailableEnvironment.AUTH_TOKEN_PEPPER,
+      magicLinkTtlMinutes: unavailableEnvironment.MAGIC_LINK_TTL_MINUTES,
+      sessionIdleDays: unavailableEnvironment.SESSION_IDLE_DAYS,
+      sessionAbsoluteDays: unavailableEnvironment.SESSION_ABSOLUTE_DAYS,
+      maxActiveSessions: unavailableEnvironment.MAX_ACTIVE_SESSIONS
+    });
+    const owner = await login(authService, emailSender, "owner@example.com");
+    const teamService = new TeamService({
+      repository: new MemoryTeamRepository(),
+      teamCodeGenerator: () => "482731"
+    });
+    const { team } = await teamService.createTeam({
+      ownerUserId: owner.userId,
+      seatLimit: 0
+    });
+    const gmailConnectionService = new GmailConnectionService({
+      repository: new MemoryGmailConnectionRepository(),
+      oauthProvider: new FakeGmailOAuthProvider(),
+      tokenEncryption: createEncryption(),
+      tokenPepper: unavailableEnvironment.AUTH_TOKEN_PEPPER,
+      stateTtlMinutes: unavailableEnvironment.GMAIL_OAUTH_STATE_TTL_MINUTES
+    });
+    const app = await buildApp({
+      environment: unavailableEnvironment,
+      authService,
+      teamService,
+      gmailConnectionService,
+      securityThrottleService: new SecurityThrottleService(
+        new MemorySecurityThrottleRepository(),
+        unavailableEnvironment.AUTH_TOKEN_PEPPER
+      ),
+      logger: false
+    });
+
+    const providerStatus = await app.inject({
+      method: "GET",
+      url: `/api/v1/teams/${team.teamId}/gmail-connection/provider-status`,
+      headers: { cookie: sessionCookie(owner.sessionToken) }
+    });
+    expect(providerStatus.json()).toEqual({
+      provider: "GOOGLE",
+      status: "NOT_CONFIGURED"
+    });
+
+    const started = await app.inject({
+      method: "POST",
+      url: `/api/v1/teams/${team.teamId}/gmail-connection/oauth/start`,
+      headers: {
+        origin: unavailableEnvironment.PUBLIC_ORIGIN,
+        cookie: sessionCookie(owner.sessionToken)
+      }
+    });
+    expect(started.statusCode).toBe(303);
+    expect(started.headers.location).toBe(
+      `${unavailableEnvironment.PUBLIC_ORIGIN}/?gmailAuth=unavailable`
+    );
+    expect(started.headers["set-cookie"]).toBeUndefined();
+    await app.close();
+
+    const failingRepository = new MemoryGmailConnectionRepository();
+    failingRepository.createOAuthChallenge = async () => {
+      throw new Error("synthetic database failure");
+    };
+    const failingApp = await buildApp({
+      environment,
+      authService,
+      teamService,
+      gmailConnectionService: new GmailConnectionService({
+        repository: failingRepository,
+        oauthProvider: new FakeGmailOAuthProvider(),
+        tokenEncryption: createEncryption(),
+        tokenPepper: environment.AUTH_TOKEN_PEPPER,
+        stateTtlMinutes: environment.GMAIL_OAUTH_STATE_TTL_MINUTES
+      }),
+      securityThrottleService: new SecurityThrottleService(
+        new MemorySecurityThrottleRepository(),
+        environment.AUTH_TOKEN_PEPPER
+      ),
+      logger: false
+    });
+    const failedStart = await failingApp.inject({
+      method: "POST",
+      url: `/api/v1/teams/${team.teamId}/gmail-connection/oauth/start`,
+      headers: {
+        origin: environment.PUBLIC_ORIGIN,
+        cookie: sessionCookie(owner.sessionToken)
+      }
+    });
+    expect(failedStart.statusCode).toBe(303);
+    expect(failedStart.headers.location).toBe(
+      `${environment.PUBLIC_ORIGIN}/?gmailAuth=error`
+    );
+    expect(failedStart.body).not.toContain("INTERNAL_ERROR");
+    await failingApp.close();
   });
 });
 

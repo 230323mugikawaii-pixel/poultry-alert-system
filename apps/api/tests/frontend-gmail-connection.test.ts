@@ -38,6 +38,11 @@ describe("frontend Gmail connection boundary", () => {
     expect(script).toContain('beginGmailOAuth("oauth/start")');
     expect(script).toContain('beginGmailOAuth("reauthorize")');
     expect(script).toContain("/gmail-connection/${action}");
+    expect(script).toContain("/gmail-connection/provider-status");
+    expect(script).toContain('gmailProviderAvailability !== "AVAILABLE"');
+    expect(frontend).toContain(
+      "Gmail接続を開始できませんでした。現在サービス設定を確認しています。"
+    );
     expect(script).toContain('method: "DELETE"');
     expect(script).not.toMatch(/refresh[_-]?token/iu);
     expect(script).not.toMatch(/access[_-]?token/iu);

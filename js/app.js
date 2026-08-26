@@ -178,7 +178,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-26.1";
+  "2026-08-26.2";
 
 /*
   正式なURLが決まった場合だけ設定する公開リンク。
@@ -207,6 +207,7 @@ let googleEmail = "";
 let authenticatedUser = null;
 let currentTeam = null;
 let gmailConnection = null;
+let gmailProviderAvailability = "UNKNOWN";
 let legacyGoogleAccountsFallbackBackup =
   [];
 let contractStorageMigrationPending =
@@ -266,6 +267,8 @@ async function initializeApplication() {
       currentTeam =
         await bootstrapInitialTeamContext();
     }
+    gmailProviderAvailability =
+      await fetchGmailProviderAvailability();
     gmailConnection =
       await fetchGmailConnection();
   }
@@ -323,7 +326,9 @@ async function initializeApplication() {
       await showAppAlert(
         gmailAuthResult === "success"
           ? "Gmail監視アカウントを接続しました。"
-          : "Gmail監視アカウントを接続できませんでした。もう一度お試しください。",
+          : gmailAuthResult === "unavailable"
+            ? "Gmail接続を開始できませんでした。現在サービス設定を確認しています。"
+            : "Gmail監視アカウントを接続できませんでした。もう一度お試しください。",
         {
           title:
             gmailAuthResult === "success"
@@ -569,6 +574,48 @@ async function fetchGmailConnection() {
 }
 
 
+async function fetchGmailProviderAvailability() {
+  if (currentTeam?.role !== "OWNER") {
+    return "UNKNOWN";
+  }
+
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/gmail-connection/provider-status`
+      ),
+      {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Accept: "application/json"
+        },
+        cache: "no-store"
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `gmail_provider_status_${response.status}`
+      );
+    }
+
+    const status =
+      (await response.json())?.status;
+    return status === "AVAILABLE" ||
+      status === "NOT_CONFIGURED"
+      ? status
+      : "UNKNOWN";
+  } catch (error) {
+    console.warn(
+      "Gmail接続の準備状況を確認できませんでした。",
+      error
+    );
+    return "UNKNOWN";
+  }
+}
+
+
 function readGoogleAuthResult() {
   const result =
     new URL(window.location.href)
@@ -589,7 +636,8 @@ function readGmailAuthResult() {
       .get("gmailAuth");
 
   return result === "success" ||
-    result === "error"
+    result === "error" ||
+    result === "unavailable"
     ? result
     : null;
 }
@@ -1366,6 +1414,8 @@ ${formatYen(totalPrice)}
       currentTeam ||
       (await fetchCurrentTeamContext()) ||
       (await bootstrapInitialTeamContext());
+    gmailProviderAvailability =
+      await fetchGmailProviderAvailability();
     gmailConnection =
       await fetchGmailConnection();
     openApp();
@@ -1683,6 +1733,7 @@ function renderGmailMonitoringAccount() {
   reauthorizeButton.classList.add("hidden");
   disconnectButton.classList.add("hidden");
   connectButton.disabled = false;
+  reauthorizeButton.disabled = false;
 
   if (!currentTeam) {
     status.innerHTML = `
@@ -1712,10 +1763,14 @@ function renderGmailMonitoringAccount() {
   ) {
     status.innerHTML = `
       <p class="connected-account-empty">
-        Gmail監視アカウントは接続されていません。
+        ${gmailProviderAvailability === "AVAILABLE"
+          ? "Gmail監視アカウントは接続されていません。"
+          : "Gmail接続は現在準備中です。しばらくしてからもう一度お試しください。"}
       </p>
     `;
     connectButton.classList.remove("hidden");
+    connectButton.disabled =
+      gmailProviderAvailability !== "AVAILABLE";
     return;
   }
 
@@ -1739,6 +1794,8 @@ function renderGmailMonitoringAccount() {
 
   if (requiresReauthorization) {
     reauthorizeButton.classList.remove("hidden");
+    reauthorizeButton.disabled =
+      gmailProviderAvailability !== "AVAILABLE";
   }
 }
 
@@ -1766,6 +1823,13 @@ async function beginGmailOAuth(action) {
       currentTeam
         ? "メール監視アカウントの変更は管理者のみ行えます。"
         : "メール監視アカウントの準備を完了できませんでした。ページを再読み込みしてください。"
+    );
+    return;
+  }
+
+  if (gmailProviderAvailability !== "AVAILABLE") {
+    await showAppAlert(
+      "Gmail接続を開始できませんでした。現在サービス設定を確認しています。"
     );
     return;
   }
@@ -2589,6 +2653,7 @@ async function performLogout() {
   googleEmail = "";
   currentTeam = null;
   gmailConnection = null;
+  gmailProviderAvailability = "UNKNOWN";
 
   setupMode =
     "login";
