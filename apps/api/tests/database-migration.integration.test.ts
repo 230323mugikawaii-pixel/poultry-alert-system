@@ -23,6 +23,20 @@ const migration =
       import.meta.url
     ),
     "utf8"
+  ) +
+  readFileSync(
+    new URL(
+      "../prisma/migrations/20260824000400_paid_seat_increase_idempotency/migration.sql",
+      import.meta.url
+    ),
+    "utf8"
+  ) +
+  readFileSync(
+    new URL(
+      "../prisma/migrations/20260825000100_google_user_session/migration.sql",
+      import.meta.url
+    ),
+    "utf8"
   );
 
 const databases: PGlite[] = [];
@@ -33,8 +47,8 @@ afterEach(async () => {
   );
 });
 
-describe("initial PostgreSQL migration", () => {
-  it("applies cleanly and enforces team and owner invariants", async () => {
+describe("PostgreSQL migrations", () => {
+  it("apply cleanly and enforce identity, team, and owner invariants", async () => {
     const database = new PGlite();
     databases.push(database);
     await database.exec(migration);
@@ -88,5 +102,35 @@ describe("initial PostgreSQL migration", () => {
       ORDER BY enumsortorder;
     `);
     expect(credentialTypes.rows).toEqual([{ enumlabel: "PASSKEY" }]);
+
+    const identityProviders = await database.query<{ enumlabel: string }>(`
+      SELECT enumlabel
+      FROM pg_enum
+      JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+      WHERE pg_type.typname = 'IdentityProvider'
+      ORDER BY enumsortorder;
+    `);
+    expect(identityProviders.rows).toEqual([{ enumlabel: "GOOGLE" }]);
+
+    await database.exec(`
+      INSERT INTO external_identities (
+        id, "userId", provider, "providerSubject", email, "updatedAt"
+      ) VALUES (
+        '30000000-0000-0000-0000-000000000001',
+        '00000000-0000-0000-0000-000000000001',
+        'GOOGLE', 'google-subject-1', 'owner@example.com', now()
+      );
+    `);
+    await expect(
+      database.exec(`
+        INSERT INTO external_identities (
+          id, "userId", provider, "providerSubject", email, "updatedAt"
+        ) VALUES (
+          '30000000-0000-0000-0000-000000000002',
+          '00000000-0000-0000-0000-000000000002',
+          'GOOGLE', 'google-subject-1', 'second@example.com', now()
+        );
+      `)
+    ).rejects.toThrow();
   });
 });

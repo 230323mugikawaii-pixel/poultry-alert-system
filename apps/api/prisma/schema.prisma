@@ -17,8 +17,13 @@ enum CredentialType {
   PASSKEY
 }
 
+enum IdentityProvider {
+  GOOGLE
+}
+
 enum ChallengeKind {
   MAGIC_LINK
+  GOOGLE_OAUTH
   PASSKEY_REGISTRATION
   PASSKEY_AUTHENTICATION
   JOIN_GRANT
@@ -108,6 +113,7 @@ model User {
   updatedAt               DateTime               @updatedAt @db.Timestamptz(3)
   deletedAt               DateTime?              @db.Timestamptz(3)
   credentials             AuthCredential[]
+  externalIdentities      ExternalIdentity[]
   challenges              AuthChallenge[]
   sessions                Session[]
   devices                 Device[]
@@ -120,6 +126,25 @@ model User {
   auditEvents             AuditEvent[]
 
   @@map("users")
+}
+
+model ExternalIdentity {
+  id              String           @id @default(uuid()) @db.Uuid
+  userId          String           @db.Uuid
+  provider        IdentityProvider
+  providerSubject String           @db.VarChar(255)
+  email           String           @db.VarChar(320)
+  emailVerified   Boolean          @default(false)
+  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime         @updatedAt @db.Timestamptz(3)
+  lastUsedAt      DateTime?        @db.Timestamptz(3)
+  revokedAt       DateTime?        @db.Timestamptz(3)
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerSubject])
+  @@unique([userId, provider])
+  @@index([userId, revokedAt])
+  @@map("external_identities")
 }
 
 model AuthCredential {

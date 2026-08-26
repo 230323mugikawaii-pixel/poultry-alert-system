@@ -1,11 +1,15 @@
 import { Prisma } from "../../generated/prisma/client.js";
 import type { DatabaseClient } from "../../db/client.js";
+import { retrySerializableTransaction } from "../../db/transaction-retry.js";
+import { AppError } from "../../lib/app-error.js";
 import type {
   AuthRepository,
   AuthSessionRecord,
   AuthUserRecord,
+  CreateGoogleOAuthChallengeInput,
   CreateMagicLinkChallengeInput,
-  CreateSessionInput
+  CreateSessionInput,
+  ResolveGoogleUserInput
 } from "./auth-repository.js";
 
 export class PrismaAuthRepository implements AuthRepository {
@@ -36,6 +40,158 @@ export class PrismaAuthRepository implements AuthRepository {
         });
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
+  }
+
+  public async createGoogleOAuthChallenge(
+    input: CreateGoogleOAuthChallengeInput
+  ): Promise<void> {
+    await this.database.authChallenge.create({
+      data: {
+        kind: "GOOGLE_OAUTH",
+        secretHash: input.secretHash,
+        payload: { codeVerifier: input.codeVerifier, nonce: input.nonce },
+        expiresAt: input.expiresAt,
+        maxAttempts: 1
+      }
+    });
+  }
+
+  public async consumeGoogleOAuthChallenge(
+    secretHash: string,
+    now: Date
+  ): Promise<{
+    readonly codeVerifier: string;
+    readonly nonce: string;
+  } | null> {
+    return retrySerializableTransaction(
+      () =>
+        this.database.$transaction(
+          async (transaction) => {
+            const challenge = await transaction.authChallenge.findUnique({
+              where: { secretHash }
+            });
+            if (
+              !challenge ||
+              challenge.kind !== "GOOGLE_OAUTH" ||
+              challenge.consumedAt ||
+              challenge.expiresAt <= now ||
+              challenge.attemptCount >= challenge.maxAttempts
+            ) {
+              return null;
+            }
+
+            const codeVerifier = readCodeVerifier(challenge.payload);
+            const nonce = readNonce(challenge.payload);
+            if (!codeVerifier || !nonce) {
+              return null;
+            }
+
+            const consumed = await transaction.authChallenge.updateMany({
+              where: {
+                id: challenge.id,
+                consumedAt: null,
+                expiresAt: { gt: now },
+                attemptCount: { lt: challenge.maxAttempts }
+              },
+              data: { consumedAt: now, attemptCount: { increment: 1 } }
+            });
+            return consumed.count === 1 ? { codeVerifier, nonce } : null;
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
+      () =>
+        new AppError(
+          "GOOGLE_LOGIN_CONFLICT",
+          "Googleログインが競合しました。もう一度お試しください。",
+          409
+        )
+    );
+  }
+
+  public async resolveGoogleUser(
+    input: ResolveGoogleUserInput
+  ): Promise<AuthUserRecord> {
+    return retrySerializableTransaction(
+      () =>
+        this.database.$transaction(
+          async (transaction) => {
+            const identity = await transaction.externalIdentity.findUnique({
+              where: {
+                provider_providerSubject: {
+                  provider: "GOOGLE",
+                  providerSubject: input.providerSubject
+                }
+              },
+              include: { user: true }
+            });
+
+            if (identity) {
+              if (identity.revokedAt) {
+                throw new AppError(
+                  "GOOGLE_IDENTITY_REVOKED",
+                  "このGoogleアカウントのログイン連携は解除されています。",
+                  403
+                );
+              }
+              await transaction.externalIdentity.update({
+                where: { id: identity.id },
+                data: {
+                  email: input.email,
+                  emailVerified: input.emailVerified,
+                  lastUsedAt: input.now
+                }
+              });
+              const user = await transaction.user.update({
+                where: { id: identity.userId },
+                data: {
+                  email: input.email,
+                  displayName: input.displayName,
+                  emailVerifiedAt: input.emailVerified
+                    ? (identity.user.emailVerifiedAt ?? input.now)
+                    : identity.user.emailVerifiedAt
+                }
+              });
+              return mapUser(user);
+            }
+
+            const emailUser = await transaction.user.findUnique({
+              where: { email: input.email }
+            });
+            if (emailUser) {
+              throw new AppError(
+                "GOOGLE_ACCOUNT_LINK_REQUIRED",
+                "同じメールアドレスの利用者が存在します。先に既存の方法でログインしてGoogleアカウントを連携してください。",
+                409
+              );
+            }
+
+            const user = await transaction.user.create({
+              data: {
+                email: input.email,
+                displayName: input.displayName,
+                emailVerifiedAt: input.emailVerified ? input.now : null,
+                externalIdentities: {
+                  create: {
+                    provider: "GOOGLE",
+                    providerSubject: input.providerSubject,
+                    email: input.email,
+                    emailVerified: input.emailVerified,
+                    lastUsedAt: input.now
+                  }
+                }
+              }
+            });
+            return mapUser(user);
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
+      () =>
+        new AppError(
+          "GOOGLE_LOGIN_CONFLICT",
+          "Googleログインが競合しました。もう一度お試しください。",
+          409
+        )
     );
   }
 
@@ -238,6 +394,22 @@ export class PrismaAuthRepository implements AuthRepository {
       })
     ]);
   }
+}
+
+function readCodeVerifier(value: Prisma.JsonValue | null): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const codeVerifier = value.codeVerifier;
+  return typeof codeVerifier === "string" ? codeVerifier : null;
+}
+
+function readNonce(value: Prisma.JsonValue | null): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const nonce = value.nonce;
+  return typeof nonce === "string" ? nonce : null;
 }
 
 function mapUser(user: {

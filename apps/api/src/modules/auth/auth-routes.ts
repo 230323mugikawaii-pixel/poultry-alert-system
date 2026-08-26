@@ -8,6 +8,7 @@ import {
   type AuthenticatedSession,
   type AuthService
 } from "./auth-service.js";
+import { clearSessionCookie, setSessionCookie } from "./session-cookie.js";
 
 const AcceptedResponse = Type.Object({ accepted: Type.Literal(true) });
 const UserResponse = Type.Object({
@@ -116,15 +117,7 @@ export function createAuthRoutes(
             : {})
         });
 
-        reply.setCookie(environment.COOKIE_NAME, result.sessionToken, {
-          httpOnly: true,
-          secure:
-            environment.APP_ENV === "production" ||
-            environment.APP_ENV === "staging",
-          sameSite: "lax",
-          path: "/",
-          maxAge: environment.SESSION_ABSOLUTE_DAYS * 86_400
-        });
+        setSessionCookie(reply, environment, result.sessionToken);
         await reply.send({ user: publicUser(result.user) });
       }
     );
@@ -183,7 +176,7 @@ export function createAuthRoutes(
           request.params.sessionId
         );
         if (authenticated.session.id === request.params.sessionId) {
-          reply.clearCookie(environment.COOKIE_NAME, { path: "/" });
+          clearSessionCookie(reply, environment);
         }
         await reply.status(204).send(null);
       }
@@ -199,7 +192,7 @@ export function createAuthRoutes(
           authenticated.user.id,
           authenticated.session.id
         );
-        reply.clearCookie(environment.COOKIE_NAME, { path: "/" });
+        clearSessionCookie(reply, environment);
         await reply.status(204).send(null);
       }
     );
@@ -211,7 +204,7 @@ export function createAuthRoutes(
         requireSameOrigin(request);
         const authenticated = await authenticate(request);
         await authService.revokeAllSessions(authenticated.user.id);
-        reply.clearCookie(environment.COOKIE_NAME, { path: "/" });
+        clearSessionCookie(reply, environment);
         await reply.status(204).send(null);
       }
     );

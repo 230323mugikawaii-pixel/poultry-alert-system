@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
+import { AppError } from "../../src/lib/app-error.js";
 import type {
   AuthRepository,
   AuthSessionRecord,
   AuthUserRecord,
+  CreateGoogleOAuthChallengeInput,
   CreateMagicLinkChallengeInput,
-  CreateSessionInput
+  CreateSessionInput,
+  ResolveGoogleUserInput
 } from "../../src/modules/auth/auth-repository.js";
 import type {
   MagicLinkEmailSender,
@@ -28,8 +31,14 @@ interface StoredSession {
   revokedAt: Date | null;
 }
 
+interface StoredGoogleChallenge extends CreateGoogleOAuthChallengeInput {
+  consumed: boolean;
+}
+
 export class MemoryAuthRepository implements AuthRepository {
   public readonly challenges: StoredChallenge[] = [];
+  public readonly googleChallenges: StoredGoogleChallenge[] = [];
+  public readonly googleIdentities = new Map<string, AuthUserRecord>();
   public readonly users = new Map<string, AuthUserRecord>();
   public readonly sessions: StoredSession[] = [];
 
@@ -42,6 +51,60 @@ export class MemoryAuthRepository implements AuthRepository {
       }
     }
     this.challenges.push({ ...input, consumed: false });
+  }
+
+  public async createGoogleOAuthChallenge(
+    input: CreateGoogleOAuthChallengeInput
+  ): Promise<void> {
+    this.googleChallenges.push({ ...input, consumed: false });
+  }
+
+  public async consumeGoogleOAuthChallenge(
+    secretHash: string,
+    now: Date
+  ): Promise<{
+    readonly codeVerifier: string;
+    readonly nonce: string;
+  } | null> {
+    const challenge = this.googleChallenges.find(
+      (candidate) =>
+        candidate.secretHash === secretHash &&
+        !candidate.consumed &&
+        candidate.expiresAt > now
+    );
+    if (!challenge) {
+      return null;
+    }
+    challenge.consumed = true;
+    return {
+      codeVerifier: challenge.codeVerifier,
+      nonce: challenge.nonce
+    };
+  }
+
+  public async resolveGoogleUser(
+    input: ResolveGoogleUserInput
+  ): Promise<AuthUserRecord> {
+    const identity = this.googleIdentities.get(input.providerSubject);
+    if (identity) {
+      return identity;
+    }
+    if (this.users.has(input.email)) {
+      throw new AppError(
+        "GOOGLE_ACCOUNT_LINK_REQUIRED",
+        "An existing user must explicitly link this Google account.",
+        409
+      );
+    }
+    const user: AuthUserRecord = {
+      id: randomUUID(),
+      email: input.email,
+      displayName: input.displayName,
+      status: "ACTIVE"
+    };
+    this.users.set(input.email, user);
+    this.googleIdentities.set(input.providerSubject, user);
+    return user;
   }
 
   public async consumeMagicLink(

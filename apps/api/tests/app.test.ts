@@ -12,6 +12,11 @@ const environment: AppEnvironment = {
   COOKIE_NAME: "callnow_test_session",
   DATABASE_URL: "postgresql://test:test@127.0.0.1:5432/test",
   AUTH_TOKEN_PEPPER: "test-token-pepper-at-least-thirty-two-characters",
+  GOOGLE_OAUTH_CLIENT_ID: "test-google-client-id",
+  GOOGLE_OAUTH_CLIENT_SECRET: "test-google-client-secret",
+  GOOGLE_OAUTH_REDIRECT_URI:
+    "https://api.test.call-now.example/api/v1/auth/google/callback",
+  GOOGLE_OAUTH_STATE_TTL_MINUTES: 10,
   MAGIC_LINK_TTL_MINUTES: 15,
   SESSION_IDLE_DAYS: 30,
   SESSION_ABSOLUTE_DAYS: 90,
@@ -82,5 +87,36 @@ describe("system routes", () => {
       reason: "dependency_unavailable"
     });
     expect(alive.statusCode).toBe(200);
+  });
+
+  it("keeps system probes available and returns a stable rate-limit error elsewhere", async () => {
+    const app = await buildApp({ environment, logger: false });
+    apps.push(app);
+    app.get("/rate-limited-test", async () => ({ ok: true }));
+
+    for (let index = 0; index < 130; index += 1) {
+      const health = await app.inject({ method: "GET", url: "/healthz" });
+      const ready = await app.inject({ method: "GET", url: "/readyz" });
+      expect(health.statusCode).toBe(200);
+      expect(ready.statusCode).toBe(200);
+    }
+
+    for (let index = 0; index < 120; index += 1) {
+      const response = await app.inject({
+        method: "GET",
+        url: "/rate-limited-test"
+      });
+      expect(response.statusCode).toBe(200);
+    }
+
+    const limited = await app.inject({
+      method: "GET",
+      url: "/rate-limited-test"
+    });
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers["retry-after"]).toBeDefined();
+    expect(limited.json()).toMatchObject({
+      error: { code: "RATE_LIMITED" }
+    });
   });
 });

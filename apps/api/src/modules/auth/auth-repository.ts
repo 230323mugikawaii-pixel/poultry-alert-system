@@ -22,6 +22,21 @@ export interface CreateMagicLinkChallengeInput {
   readonly expiresAt: Date;
 }
 
+export interface CreateGoogleOAuthChallengeInput {
+  readonly secretHash: string;
+  readonly codeVerifier: string;
+  readonly nonce: string;
+  readonly expiresAt: Date;
+}
+
+export interface ResolveGoogleUserInput {
+  readonly providerSubject: string;
+  readonly email: string;
+  readonly displayName: string | null;
+  readonly emailVerified: boolean;
+  readonly now: Date;
+}
+
 export interface CreateSessionInput {
   readonly userId: string;
   readonly tokenHash: string;
@@ -35,6 +50,17 @@ export interface CreateSessionInput {
 
 export interface AuthRepository {
   createMagicLinkChallenge(input: CreateMagicLinkChallengeInput): Promise<void>;
+  createGoogleOAuthChallenge(
+    input: CreateGoogleOAuthChallengeInput
+  ): Promise<void>;
+  consumeGoogleOAuthChallenge(
+    secretHash: string,
+    now: Date
+  ): Promise<{
+    readonly codeVerifier: string;
+    readonly nonce: string;
+  } | null>;
+  resolveGoogleUser(input: ResolveGoogleUserInput): Promise<AuthUserRecord>;
   consumeMagicLink(
     secretHash: string,
     now: Date

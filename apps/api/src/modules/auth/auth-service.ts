@@ -81,16 +81,27 @@ export class AuthService {
       throw invalidMagicLinkError();
     }
 
-    const now = this.now();
     const user = await this.options.repository.consumeMagicLink(
       this.hashSecret(token),
-      now
+      this.now()
     );
 
-    if (!user || user.status !== "ACTIVE") {
+    if (!user) {
       throw invalidMagicLinkError();
     }
 
+    return this.createSessionForVerifiedUser(user, context);
+  }
+
+  public async createSessionForVerifiedUser(
+    user: AuthUserRecord,
+    context: ClientContext
+  ): Promise<MagicLinkLoginResult> {
+    if (user.status !== "ACTIVE") {
+      throw unauthenticatedError();
+    }
+
+    const now = this.now();
     const sessionToken = randomBytes(32).toString("base64url");
     const session = await this.options.repository.createSession({
       userId: user.id,

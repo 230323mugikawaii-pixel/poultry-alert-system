@@ -19,6 +19,7 @@ export function createSystemRoutes(
     app.get(
       "/healthz",
       {
+        config: { rateLimit: false },
         schema: {
           response: { 200: StatusResponse }
         }
@@ -29,6 +30,7 @@ export function createSystemRoutes(
     app.get(
       "/readyz",
       {
+        config: { rateLimit: false },
         schema: {
           response: { 200: StatusResponse, 503: UnavailableResponse }
         }
