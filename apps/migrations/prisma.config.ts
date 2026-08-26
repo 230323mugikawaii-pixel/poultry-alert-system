@@ -1,5 +1,11 @@
-import "dotenv/config";
+import { config as loadDotenv } from "dotenv";
 import { defineConfig, env } from "prisma/config";
+
+loadDotenv({
+  path: new URL("../../.env", import.meta.url),
+  override: false,
+  quiet: true
+});
 
 export default defineConfig({
   schema: "../api/prisma/schema.prisma",
