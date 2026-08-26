@@ -68,6 +68,34 @@ export function createTeamRoutes(
     };
 
     app.post(
+      "/api/v1/teams/bootstrap",
+      {
+        config: { rateLimit: { max: 20, timeWindow: "15 minutes" } },
+        schema: {
+          body: Type.Object({
+            keywords: Type.Optional(
+              Type.Array(Type.String({ minLength: 1, maxLength: 100 }), {
+                maxItems: 100
+              })
+            )
+          }),
+          response: {
+            200: Type.Object({ team: TeamResponse })
+          }
+        }
+      },
+      async (request) => {
+        requireSameOrigin(request);
+        const userId = await authenticateUserId(request);
+        const team = await teamService.ensureInitialTeamForUser({
+          userId,
+          ...(request.body.keywords ? { keywords: request.body.keywords } : {})
+        });
+        return { team: serializeTeam(team) };
+      }
+    );
+
+    app.post(
       "/api/v1/teams",
       {
         schema: {

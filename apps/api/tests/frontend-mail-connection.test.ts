@@ -20,6 +20,19 @@ describe("frontend mail connection boundary", () => {
     expect(frontend).toContain("Microsoft 365 / Outlook");
   });
 
+  it("uses one Google login CTA and bootstraps both provider choices", () => {
+    expect(frontend).not.toContain("ログインしてホームへ");
+    expect(html).toContain('id="finishGoogleLinkButton"');
+    expect(html).toContain("full-width hidden");
+    expect(script).toContain('mode !== "manage"');
+    expect(script).toContain("/api/v1/teams/bootstrap");
+    expect(frontend).toContain(
+      "メール監視アカウントの変更は管理者のみ行えます。"
+    );
+    expect(frontend).not.toContain("チーム登録完了後");
+    expect(frontend).not.toContain("チームの代表者");
+  });
+
   it("uses common server APIs without storing provider credentials", () => {
     expect(script).toContain('beginMailOAuth("oauth/start", provider)');
     expect(script).toContain('"reauthorize",\n    mailConnection.provider');

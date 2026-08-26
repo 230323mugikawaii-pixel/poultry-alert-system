@@ -136,6 +136,86 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     });
   });
 
+  it("bootstraps one initial team under concurrency and preserves member roles", async () => {
+    const newUser = await createUser("bootstrap-owner@example.com");
+    const clock = { value: new Date("2026-08-26T00:00:00.000Z") };
+    const bootstrapServices = ["482741", "482742", "482743"].map(
+      (teamCode) => createServices(clock, teamCode).teamService
+    );
+
+    const concurrent = await Promise.all(
+      bootstrapServices.map((service) =>
+        service.ensureInitialTeamForUser({
+          userId: newUser.id,
+          keywords: ["停電", "Call Now"]
+        })
+      )
+    );
+    const initialTeamId = concurrent[0]?.teamId;
+    expect(initialTeamId).toBeDefined();
+    expect(new Set(concurrent.map(({ teamId }) => teamId))).toEqual(
+      new Set([initialTeamId])
+    );
+    expect(concurrent.every(({ role }) => role === "OWNER")).toBe(true);
+    await expect(
+      database.teamMembership.count({ where: { userId: newUser.id } })
+    ).resolves.toBe(1);
+    await expect(
+      database.team.count({
+        where: { memberships: { some: { userId: newUser.id } } }
+      })
+    ).resolves.toBe(1);
+
+    const repeated = await Promise.all(
+      bootstrapServices.map((service) =>
+        service.ensureInitialTeamForUser({ userId: newUser.id })
+      )
+    );
+    expect(repeated.every(({ teamId }) => teamId === initialTeamId)).toBe(true);
+    await expect(
+      database.teamMembership.count({ where: { userId: newUser.id } })
+    ).resolves.toBe(1);
+
+    const existingOwner = await createUser(
+      "bootstrap-existing-owner@example.com"
+    );
+    const existingMember = await createUser(
+      "bootstrap-existing-member@example.com"
+    );
+    const existing = await createServices(
+      clock,
+      "482744"
+    ).teamService.createTeam({
+      ownerUserId: existingOwner.id,
+      seatLimit: 0
+    });
+    await database.teamMembership.create({
+      data: {
+        teamId: existing.team.teamId,
+        userId: existingMember.id,
+        role: "MEMBER",
+        status: "ACTIVE"
+      }
+    });
+
+    const preserved = await createServices(
+      clock,
+      "482745"
+    ).teamService.ensureInitialTeamForUser({ userId: existingMember.id });
+    expect(preserved).toMatchObject({
+      teamId: existing.team.teamId,
+      role: "MEMBER"
+    });
+    await expect(
+      database.teamMembership.count({
+        where: { userId: existingMember.id, role: "OWNER" }
+      })
+    ).resolves.toBe(0);
+    await expect(
+      database.teamMembership.count({ where: { userId: existingMember.id } })
+    ).resolves.toBe(1);
+  });
+
   it("stores a Gmail monitoring grant encrypted and revokes it on disconnect", async () => {
     const owner = await createUser("gmail-owner@example.com");
     const services = createServices(

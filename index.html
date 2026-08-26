@@ -755,7 +755,7 @@
         </div>
 
         <p class="google-account-role-description">
-          ログインとは別に、重要メールを監視するGmailまたはMicrosoftアカウントを1件接続します。
+          ログインとは別に、重要メールを監視するGmailまたはMicrosoftアカウントを1件接続できます。
         </p>
 
         <div id="mailMonitoringAccountStatus"></div>
@@ -767,6 +767,7 @@
           <button
             type="button"
             class="btn outline mail-provider-button"
+            aria-describedby="mailMonitoringAccountStatus"
             onclick="startMailConnection('GOOGLE')"
           >
             Gmail / Google Workspace
@@ -775,6 +776,7 @@
           <button
             type="button"
             class="btn outline mail-provider-button"
+            aria-describedby="mailMonitoringAccountStatus"
             onclick="startMailConnection('MICROSOFT')"
           >
             Microsoft 365 / Outlook
@@ -857,7 +859,7 @@
       <button
         id="finishGoogleLinkButton"
         type="button"
-        class="btn primary full-width"
+        class="btn primary full-width hidden"
         onclick="finishGoogleAccountLinking()"
       >
         設定を完了してホームへ
