@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { afterEach, describe, expect, it } from "vitest";
 
-const migration =
+const baseMigration =
   readFileSync(
     new URL(
       "../prisma/migrations/20260824000100_phase1_foundation/migration.sql",
@@ -38,6 +38,14 @@ const migration =
     ),
     "utf8"
   );
+const gmailMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260826000100_gmail_monitoring_connection/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const migration = baseMigration + gmailMigration;
 
 const databases: PGlite[] = [];
 
@@ -112,6 +120,27 @@ describe("PostgreSQL migrations", () => {
     `);
     expect(identityProviders.rows).toEqual([{ enumlabel: "GOOGLE" }]);
 
+    const challengeKinds = await database.query<{ enumlabel: string }>(`
+      SELECT enumlabel
+      FROM pg_enum
+      JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+      WHERE pg_type.typname = 'ChallengeKind'
+      ORDER BY enumsortorder;
+    `);
+    expect(challengeKinds.rows).toContainEqual({ enumlabel: "GMAIL_OAUTH" });
+
+    const gmailTables = await database.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN ('gmail_authorizations', 'gmail_connections')
+      ORDER BY table_name;
+    `);
+    expect(gmailTables.rows).toEqual([
+      { table_name: "gmail_authorizations" },
+      { table_name: "gmail_connections" }
+    ]);
+
     await database.exec(`
       INSERT INTO external_identities (
         id, "userId", provider, "providerSubject", email, "updatedAt"
@@ -132,5 +161,100 @@ describe("PostgreSQL migrations", () => {
         );
       `)
     ).rejects.toThrow();
+
+    await database.exec(`
+      INSERT INTO gmail_authorizations (
+        id, "userId", provider, "providerSubject", email,
+        "grantedScopes", status, "updatedAt"
+      ) VALUES (
+        '40000000-0000-0000-0000-000000000001',
+        '00000000-0000-0000-0000-000000000001',
+        'GOOGLE', 'gmail-monitoring-subject-1', 'monitoring@example.com',
+        ARRAY['https://www.googleapis.com/auth/gmail.readonly'],
+        'ACTIVE', now()
+      );
+      INSERT INTO gmail_connections (
+        id, "teamId", "gmailAuthorizationId", status, "updatedAt"
+      ) VALUES (
+        '50000000-0000-0000-0000-000000000001',
+        '10000000-0000-0000-0000-000000000001',
+        '40000000-0000-0000-0000-000000000001',
+        'ACTIVE', now()
+      );
+    `);
+    const separatedIdentities = await database.query<{
+      login_subject: string;
+      monitoring_subject: string;
+    }>(`
+      SELECT
+        login_identity."providerSubject" AS login_subject,
+        gmail_authorization."providerSubject" AS monitoring_subject
+      FROM external_identities AS login_identity
+      JOIN gmail_authorizations AS gmail_authorization
+        ON gmail_authorization."userId" = login_identity."userId";
+    `);
+    expect(separatedIdentities.rows).toEqual([
+      {
+        login_subject: "google-subject-1",
+        monitoring_subject: "gmail-monitoring-subject-1"
+      }
+    ]);
+  });
+
+  it("preserves provisional Gmail data but requires fresh authorization", async () => {
+    const database = new PGlite();
+    databases.push(database);
+    await database.exec(baseMigration);
+    await database.exec(`
+      INSERT INTO users (id, email, "updatedAt") VALUES
+        ('00000000-0000-0000-0000-000000000011', 'legacy-owner@example.com', now());
+      INSERT INTO teams (id, "publicCode", "updatedAt") VALUES
+        ('10000000-0000-0000-0000-000000000011', '482739', now());
+      INSERT INTO team_memberships (
+        id, "teamId", "userId", role, status
+      ) VALUES (
+        '20000000-0000-0000-0000-000000000011',
+        '10000000-0000-0000-0000-000000000011',
+        '00000000-0000-0000-0000-000000000011',
+        'OWNER', 'ACTIVE'
+      );
+      INSERT INTO gmail_connections (
+        id, "teamId", "googleSubject", email,
+        "encryptedRefreshToken", scopes, status, "updatedAt"
+      ) VALUES (
+        '50000000-0000-0000-0000-000000000011',
+        '10000000-0000-0000-0000-000000000011',
+        'legacy-google-subject', 'legacy-monitoring@example.com',
+        'legacy-encrypted-payload',
+        ARRAY['https://www.googleapis.com/auth/gmail.readonly'],
+        'ACTIVE', now()
+      );
+    `);
+
+    await database.exec(gmailMigration);
+
+    const migrated = await database.query<{
+      authorization_status: string;
+      connection_status: string;
+      email: string;
+      encryption_provider: string;
+    }>(`
+      SELECT
+        gmail_authorization.status AS authorization_status,
+        gmail_connection.status AS connection_status,
+        gmail_authorization.email,
+        gmail_authorization."encryptionProvider" AS encryption_provider
+      FROM gmail_connections AS gmail_connection
+      JOIN gmail_authorizations AS gmail_authorization
+        ON gmail_authorization.id = gmail_connection."gmailAuthorizationId";
+    `);
+    expect(migrated.rows).toEqual([
+      {
+        authorization_status: "REAUTH_REQUIRED",
+        connection_status: "REAUTH_REQUIRED",
+        email: "legacy-monitoring@example.com",
+        encryption_provider: "LEGACY_UNKNOWN"
+      }
+    ]);
   });
 });

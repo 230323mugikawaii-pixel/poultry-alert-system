@@ -26,10 +26,29 @@ describe("database foundation", () => {
       "Invitation",
       "InvitationRedemption",
       "AuditEvent",
-      "SecurityThrottle"
+      "SecurityThrottle",
+      "GmailAuthorization",
+      "GmailConnection"
     ]) {
       expect(schema).toContain(`model ${model} {`);
     }
+  });
+
+  it("separates Call Now login identity from Gmail monitoring authorization", () => {
+    const gmailAuthorization = schema.match(
+      /model GmailAuthorization \{([^}]*)\}/
+    )?.[1];
+    const gmailConnection = schema.match(
+      /model GmailConnection \{([^}]*)\}/
+    )?.[1];
+
+    expect(gmailAuthorization).toContain("userId");
+    expect(gmailAuthorization).toContain("encryptedRefreshToken");
+    expect(gmailAuthorization).toMatch(/userId\s+String\s+@unique/);
+    expect(gmailConnection).toContain("teamId");
+    expect(gmailConnection).toContain("gmailAuthorizationId");
+    expect(gmailConnection).not.toContain("encryptedRefreshToken");
+    expect(schema).toContain("GMAIL_OAUTH");
   });
 
   it("binds Google identities by provider subject instead of email alone", () => {
