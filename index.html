@@ -751,11 +751,11 @@
         class="google-account-card linked-accounts-card hidden"
       >
         <div class="linked-accounts-heading">
-          <strong>Gmail監視アカウント</strong>
+          <strong>メール監視アカウント</strong>
         </div>
 
         <p class="google-account-role-description">
-          ログインとは別に、重要メールの監視を許可するGoogleアカウントを1件接続します。
+          ログインとは別に、重要メールを監視するGoogleアカウントを1件接続できます。
         </p>
 
         <div id="gmailMonitoringAccountStatus"></div>
@@ -765,9 +765,10 @@
             id="gmailConnectButton"
             type="button"
             class="btn outline"
+            aria-describedby="gmailMonitoringAccountStatus"
             onclick="startGmailConnection()"
           >
-            Gmail監視アカウントを接続
+            Gmail / Google Workspace
           </button>
 
           <button
@@ -836,7 +837,7 @@
       <button
         id="finishGoogleLinkButton"
         type="button"
-        class="btn primary full-width"
+        class="btn primary full-width hidden"
         onclick="finishGoogleAccountLinking()"
       >
         設定を完了してホームへ

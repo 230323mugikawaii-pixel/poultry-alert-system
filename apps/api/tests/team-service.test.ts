@@ -31,6 +31,59 @@ async function createFixture(seatLimit = 5) {
 }
 
 describe("TeamService", () => {
+  it("bootstraps one owner workspace and reuses it across repeated initialization", async () => {
+    const repository = new MemoryTeamRepository();
+    const service = new TeamService({
+      repository,
+      now: () => new Date("2026-08-26T00:00:00.000Z"),
+      teamCodeGenerator: () => "482731"
+    });
+
+    const first = await service.ensureInitialTeamForUser({
+      userId: ownerUserId,
+      keywords: ["停電", "Call Now"]
+    });
+    const reload = await service.ensureInitialTeamForUser({
+      userId: ownerUserId
+    });
+    const relogin = await service.ensureInitialTeamForUser({
+      userId: ownerUserId
+    });
+
+    expect(reload.teamId).toBe(first.teamId);
+    expect(relogin.teamId).toBe(first.teamId);
+    expect(repository.teamCreationCount).toBe(1);
+    expect(first).toMatchObject({
+      role: "OWNER",
+      currentTermAmountYen: 6000,
+      seatSummary: {
+        seatLimit: 0,
+        activeMemberCount: 0,
+        availableSeats: 0,
+        totalUserLimit: 1,
+        currentUserCount: 1
+      }
+    });
+  });
+
+  it("preserves an existing member role instead of creating an owner workspace", async () => {
+    const repository = new MemoryTeamRepository();
+    const service = new TeamService({
+      repository,
+      teamCodeGenerator: () => "482731"
+    });
+    await service.ensureInitialTeamForUser({ userId: ownerUserId });
+    const memberUserId = randomUUID();
+    repository.addMember(memberUserId);
+
+    const existing = await service.ensureInitialTeamForUser({
+      userId: memberUserId
+    });
+
+    expect(existing.role).toBe("MEMBER");
+    expect(repository.teamCreationCount).toBe(1);
+  });
+
   it("rejects creating paid member capacity without an atomic initial invitation", async () => {
     const service = new TeamService({
       repository: new MemoryTeamRepository(),

@@ -26,83 +26,71 @@ export class PrismaTeamRepository implements TeamRepository {
     }
     try {
       return await this.database.$transaction(
-        async (transaction) => {
-          const team = await transaction.team.create({
-            data: {
-              publicCode: input.publicCode,
-              name: input.name,
-              memberships: {
-                create: {
-                  userId: input.ownerUserId,
-                  role: "OWNER",
-                  status: "ACTIVE"
-                }
-              },
-              subscription: {
-                create: {
-                  seatLimit: input.seatLimit,
-                  currentTermAmountYen: input.currentTermAmountYen,
-                  currentTermStartedAt: input.currentTermStartedAt,
-                  currentTermEndsAt: input.currentTermEndsAt
-                }
-              },
-              keywords: {
-                create: input.keywords.map((keyword) => ({
-                  keyword,
-                  normalized: keyword.normalize("NFKC").toLowerCase()
-                }))
-              }
-            },
-            include: {
-              memberships: {
-                where: { userId: input.ownerUserId, status: "ACTIVE" }
-              },
-              subscription: true
-            }
-          });
-
-          await transaction.auditEvent.create({
-            data: {
-              teamId: team.id,
-              actorUserId: input.ownerUserId,
-              action: "TEAM_CREATED",
-              targetType: "Team",
-              targetId: team.id,
-              metadata: {
-                seatLimit: input.seatLimit,
-                keywordCount: input.keywords.length
-              }
-            }
-          });
-
-          const membership = team.memberships[0];
-          if (!membership || !team.subscription) {
-            throw new Error("team_creation_invariant_failed");
-          }
-
-          const invitation =
-            input.initialInvitation && input.seatLimit > 0
-              ? await createInvitation(transaction, {
-                  teamId: team.id,
-                  actorUserId: input.ownerUserId,
-                  maxUses: input.seatLimit,
-                  draft: input.initialInvitation,
-                  now: input.currentTermStartedAt,
-                  auditAction: "INITIAL_INVITATION_ISSUED"
-                })
-              : null;
-
-          return {
-            team: mapTeamContext({
-              team,
-              membership,
-              subscription: team.subscription,
-              activeMemberCount: 0
-            }),
-            invitation
-          };
-        },
+        (transaction) => createTeamInTransaction(transaction, input),
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+      );
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new AppError("TEAM_CODE_CONFLICT", "Team code collision.", 409);
+      }
+      throw error;
+    }
+  }
+
+  public async ensureInitialTeam(
+    input: CreateTeamInput
+  ): Promise<TeamContextRecord> {
+    if (input.seatLimit !== 0 || input.initialInvitation) {
+      throw new Error("initial_team_must_not_include_member_capacity");
+    }
+    try {
+      return await retrySerializableTransaction(
+        () =>
+          this.database.$transaction(
+            async (transaction) => {
+              const lockedUsers = await transaction.$queryRaw<
+                Array<{ id: string }>
+              >(
+                Prisma.sql`SELECT id FROM users WHERE id = ${input.ownerUserId}::uuid FOR UPDATE`
+              );
+              if (lockedUsers.length !== 1) {
+                throw new AppError(
+                  "USER_NOT_FOUND",
+                  "利用者情報が見つかりません。",
+                  404
+                );
+              }
+
+              const existing = await findCurrentTeam(
+                transaction,
+                input.ownerUserId
+              );
+              if (existing) {
+                return existing;
+              }
+
+              const previousMemberships =
+                await transaction.teamMembership.count({
+                  where: { userId: input.ownerUserId }
+                });
+              if (previousMemberships > 0) {
+                throw new AppError(
+                  "INITIAL_TEAM_NOT_AVAILABLE",
+                  "現在利用できる契約がありません。管理者へお問い合わせください。",
+                  409
+                );
+              }
+
+              return (await createTeamInTransaction(transaction, input)).team;
+            },
+            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+          ),
+        () =>
+          new AppError(
+            "INITIAL_TEAM_BOOTSTRAP_CONFLICT",
+            "初期設定が競合しました。もう一度お試しください。",
+            409
+          )
       );
     } catch (error) {
       if (isUniqueConstraintError(error)) {
@@ -115,35 +103,7 @@ export class PrismaTeamRepository implements TeamRepository {
   public async findCurrentTeam(
     userId: string
   ): Promise<TeamContextRecord | null> {
-    const membership = await this.database.teamMembership.findFirst({
-      where: {
-        userId,
-        status: "ACTIVE",
-        team: { status: "ACTIVE" }
-      },
-      include: {
-        team: { include: { subscription: true } }
-      },
-      orderBy: { joinedAt: "asc" }
-    });
-    if (!membership?.team.subscription) {
-      return null;
-    }
-
-    const activeMemberCount = await this.database.teamMembership.count({
-      where: {
-        teamId: membership.teamId,
-        role: "MEMBER",
-        status: "ACTIVE"
-      }
-    });
-
-    return mapTeamContext({
-      team: membership.team,
-      membership,
-      subscription: membership.team.subscription,
-      activeMemberCount
-    });
+    return findCurrentTeam(this.database, userId);
   }
 
   public async findTeamForUser(
@@ -540,6 +500,123 @@ export class PrismaTeamRepository implements TeamRepository {
       throw error;
     }
   }
+}
+
+type TeamDatabase = DatabaseClient | Prisma.TransactionClient;
+
+async function findCurrentTeam(
+  database: TeamDatabase,
+  userId: string
+): Promise<TeamContextRecord | null> {
+  const membership = await database.teamMembership.findFirst({
+    where: {
+      userId,
+      status: "ACTIVE",
+      team: { status: "ACTIVE" }
+    },
+    include: {
+      team: { include: { subscription: true } }
+    },
+    orderBy: { joinedAt: "asc" }
+  });
+  if (!membership?.team.subscription) {
+    return null;
+  }
+
+  const activeMemberCount = await database.teamMembership.count({
+    where: {
+      teamId: membership.teamId,
+      role: "MEMBER",
+      status: "ACTIVE"
+    }
+  });
+
+  return mapTeamContext({
+    team: membership.team,
+    membership,
+    subscription: membership.team.subscription,
+    activeMemberCount
+  });
+}
+
+async function createTeamInTransaction(
+  transaction: Prisma.TransactionClient,
+  input: CreateTeamInput
+): Promise<TeamCreationResult> {
+  const team = await transaction.team.create({
+    data: {
+      publicCode: input.publicCode,
+      name: input.name,
+      memberships: {
+        create: {
+          userId: input.ownerUserId,
+          role: "OWNER",
+          status: "ACTIVE"
+        }
+      },
+      subscription: {
+        create: {
+          seatLimit: input.seatLimit,
+          currentTermAmountYen: input.currentTermAmountYen,
+          currentTermStartedAt: input.currentTermStartedAt,
+          currentTermEndsAt: input.currentTermEndsAt
+        }
+      },
+      keywords: {
+        create: input.keywords.map((keyword) => ({
+          keyword,
+          normalized: keyword.normalize("NFKC").toLowerCase()
+        }))
+      }
+    },
+    include: {
+      memberships: {
+        where: { userId: input.ownerUserId, status: "ACTIVE" }
+      },
+      subscription: true
+    }
+  });
+
+  await transaction.auditEvent.create({
+    data: {
+      teamId: team.id,
+      actorUserId: input.ownerUserId,
+      action: "TEAM_CREATED",
+      targetType: "Team",
+      targetId: team.id,
+      metadata: {
+        seatLimit: input.seatLimit,
+        keywordCount: input.keywords.length
+      }
+    }
+  });
+
+  const membership = team.memberships[0];
+  if (!membership || !team.subscription) {
+    throw new Error("team_creation_invariant_failed");
+  }
+
+  const invitation =
+    input.initialInvitation && input.seatLimit > 0
+      ? await createInvitation(transaction, {
+          teamId: team.id,
+          actorUserId: input.ownerUserId,
+          maxUses: input.seatLimit,
+          draft: input.initialInvitation,
+          now: input.currentTermStartedAt,
+          auditAction: "INITIAL_INVITATION_ISSUED"
+        })
+      : null;
+
+  return {
+    team: mapTeamContext({
+      team,
+      membership,
+      subscription: team.subscription,
+      activeMemberCount: 0
+    }),
+    invitation
+  };
 }
 
 function mapTeamContext(input: {

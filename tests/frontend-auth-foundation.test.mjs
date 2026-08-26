@@ -16,6 +16,9 @@ test("frontend authentication uses the server session API", () => {
   assert.match(appSource, /\/api\/v1\/auth\/google\/start/);
   assert.match(appSource, /\/api\/v1\/auth\/logout/);
   assert.match(appSource, /credentials:\s*"include"/);
+  assert.match(appSource, /\/api\/v1\/teams\/bootstrap/);
+  assert.doesNotMatch(appSource, /ログインしてホームへ/);
+  assert.doesNotMatch(htmlSource, /ログインしてホームへ/);
 });
 
 test("frontend no longer treats browser storage or a Google access token as login", () => {

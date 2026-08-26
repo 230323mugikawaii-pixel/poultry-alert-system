@@ -66,6 +66,7 @@ export interface SeatLimitChangeResult {
 
 export interface TeamRepository {
   createTeam(input: CreateTeamInput): Promise<TeamCreationResult>;
+  ensureInitialTeam(input: CreateTeamInput): Promise<TeamContextRecord>;
   findCurrentTeam(userId: string): Promise<TeamContextRecord | null>;
   findTeamForUser(
     userId: string,

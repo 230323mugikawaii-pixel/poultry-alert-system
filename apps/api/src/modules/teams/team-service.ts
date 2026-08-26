@@ -81,6 +81,42 @@ export class TeamService {
     );
   }
 
+  public async ensureInitialTeamForUser(input: {
+    readonly userId: string;
+    readonly keywords?: readonly string[];
+  }): Promise<TeamContextRecord> {
+    const keywords = normalizeTeamKeywords(input.keywords ?? []);
+    const now = this.now();
+    const termEnd = new Date(now);
+    termEnd.setUTCFullYear(termEnd.getUTCFullYear() + 1);
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        return await this.options.repository.ensureInitialTeam({
+          ownerUserId: input.userId,
+          publicCode: this.teamCodeGenerator(),
+          name: null,
+          seatLimit: 0,
+          keywords,
+          currentTermStartedAt: now,
+          currentTermEndsAt: termEnd,
+          currentTermAmountYen: calculateAnnualPriceYen(0, keywords.length),
+          initialInvitation: null
+        });
+      } catch (error) {
+        if (!isTeamCodeConflict(error)) {
+          throw error;
+        }
+      }
+    }
+
+    throw new AppError(
+      "TEAM_CODE_GENERATION_FAILED",
+      "初期設定を完了できませんでした。もう一度お試しください。",
+      503
+    );
+  }
+
   public async getCurrentTeam(userId: string): Promise<TeamContextRecord> {
     const context = await this.options.repository.findCurrentTeam(userId);
     if (!context) {

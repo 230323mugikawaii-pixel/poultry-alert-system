@@ -30,6 +30,7 @@ export class MemoryTeamRepository implements TeamRepository {
   public changes: StoredChange[] = [];
   public invitations: IssuedInvitationRecord[] = [];
   public failNextTeamCode = false;
+  public teamCreationCount = 0;
 
   public async createTeam(input: CreateTeamInput): Promise<TeamCreationResult> {
     if (input.seatLimit > 0 && !input.initialInvitation) {
@@ -44,6 +45,7 @@ export class MemoryTeamRepository implements TeamRepository {
     }
     const teamId = randomUUID();
     const membershipId = randomUUID();
+    this.teamCreationCount += 1;
     this.context = {
       teamId,
       teamCode: input.publicCode,
@@ -71,6 +73,23 @@ export class MemoryTeamRepository implements TeamRepository {
         ? this.createInvitation(input.seatLimit, input.initialInvitation)
         : null;
     return { team: this.context, invitation };
+  }
+
+  public async ensureInitialTeam(
+    input: CreateTeamInput
+  ): Promise<TeamContextRecord> {
+    const existing = await this.findCurrentTeam(input.ownerUserId);
+    if (existing) {
+      return existing;
+    }
+    if (this.members.some(({ userId }) => userId === input.ownerUserId)) {
+      throw new AppError(
+        "INITIAL_TEAM_NOT_AVAILABLE",
+        "membership is not active",
+        409
+      );
+    }
+    return (await this.createTeam(input)).team;
   }
 
   public async findCurrentTeam(

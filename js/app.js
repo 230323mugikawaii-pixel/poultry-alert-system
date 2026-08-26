@@ -258,6 +258,14 @@ async function initializeApplication() {
   if (authenticatedUser) {
     currentTeam =
       await fetchCurrentTeamContext();
+    if (
+      !currentTeam &&
+      contractStartDate &&
+      contractEndDate
+    ) {
+      currentTeam =
+        await bootstrapInitialTeamContext();
+    }
     gmailConnection =
       await fetchGmailConnection();
   }
@@ -439,20 +447,13 @@ async function fetchCurrentTeamContext() {
       );
     }
 
-    const team = (await response.json())?.team;
-    if (
-      !team ||
-      typeof team.id !== "string" ||
-      (team.role !== "OWNER" &&
-        team.role !== "MEMBER")
-    ) {
+    const team = parseTeamContext(
+      (await response.json())?.team
+    );
+    if (!team) {
       throw new Error("team_current_invalid");
     }
-
-    return {
-      id: team.id,
-      role: team.role
-    };
+    return team;
   } catch (error) {
     console.warn(
       "チーム情報を確認できませんでした。",
@@ -460,6 +461,65 @@ async function fetchCurrentTeamContext() {
     );
     return null;
   }
+}
+
+
+async function bootstrapInitialTeamContext() {
+  try {
+    const response = await fetch(
+      apiUrl("/api/v1/teams/bootstrap"),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          keywords: [...keywords]
+        })
+      }
+    );
+
+    if (response.status === 401) {
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error(
+        `team_bootstrap_${response.status}`
+      );
+    }
+
+    const team = parseTeamContext(
+      (await response.json())?.team
+    );
+    if (!team) {
+      throw new Error("team_bootstrap_invalid");
+    }
+    return team;
+  } catch (error) {
+    console.warn(
+      "初期設定を完了できませんでした。",
+      error
+    );
+    return null;
+  }
+}
+
+
+function parseTeamContext(team) {
+  if (
+    !team ||
+    typeof team.id !== "string" ||
+    (team.role !== "OWNER" &&
+      team.role !== "MEMBER")
+  ) {
+    return null;
+  }
+  return {
+    id: team.id,
+    role: team.role
+  };
 }
 
 
@@ -1301,7 +1361,17 @@ ${formatYen(totalPrice)}
     totalPrice;
 
   saveData();
-  openGoogleScreen("link");
+  if (authenticatedUser) {
+    currentTeam =
+      currentTeam ||
+      (await fetchCurrentTeamContext()) ||
+      (await bootstrapInitialTeamContext());
+    gmailConnection =
+      await fetchGmailConnection();
+    openApp();
+  } else {
+    openGoogleScreen("link");
+  }
 }
 
 
@@ -1313,8 +1383,8 @@ function openGoogleScreen(
   mode = "link"
 ) {
   googleScreenMode = mode;
-  const isLoginMode =
-    mode === "login";
+  const isAuthenticationMode =
+    mode !== "manage";
 
   setText(
     "googleBackButton",
@@ -1325,44 +1395,44 @@ function openGoogleScreen(
 
   setText(
     "googleScreenTitle",
-    isLoginMode
+    isAuthenticationMode
       ? "Googleでログイン"
-      : mode === "manage"
-        ? "Googleアカウント設定"
-        : "監視用Googleアカウントを設定"
+      : "Googleアカウント設定"
   );
 
   setText(
     "googleScreenDescription",
-    isLoginMode
+    isAuthenticationMode
       ? "Call Nowへのログイン用Googleアカウントで本人確認します。"
-      : mode === "manage"
-        ? "ログイン用アカウントとGmail監視アカウントを別々に管理できます。"
-        : "Call Nowへのログインに使うGoogleアカウントで本人確認します。"
+      : "ログイン用アカウントとメール監視用アカウントを別々に管理できます。"
   );
 
   setText(
     "googleAuthButton",
-    isLoginMode
+    isAuthenticationMode
       ? "Googleでログイン"
       : "Googleアカウントを設定"
   );
 
   setText(
     "googleCardTitle",
-    isLoginMode
+    isAuthenticationMode
       ? "Googleでログイン"
       : "Googleアカウントを設定"
   );
 
-  setText(
-    "finishGoogleLinkButton",
-    mode === "manage"
-      ? "設定を完了してホームへ"
-      : isLoginMode
-        ? "ログインしてホームへ"
-        : "設定を完了してホームへ"
-  );
+  const finishButton =
+    document.getElementById(
+      "finishGoogleLinkButton"
+    );
+  if (finishButton) {
+    finishButton.classList.toggle(
+      "hidden",
+      mode !== "manage"
+    );
+    finishButton.textContent =
+      "設定を完了してホームへ";
+  }
 
   showOnlyScreen(
     "googleScreen"
@@ -1494,11 +1564,11 @@ function updateGoogleAuthActionText() {
     authCard.classList.toggle(
       "hidden",
       Boolean(googleEmail) &&
-        googleScreenMode !== "login"
+        googleScreenMode === "manage"
     );
   }
 
-  if (googleScreenMode === "login") {
+  if (googleScreenMode !== "manage") {
     setText(
       "googleCardTitle",
       "Googleでログイン"
@@ -1617,7 +1687,7 @@ function renderGmailMonitoringAccount() {
   if (!currentTeam) {
     status.innerHTML = `
       <p class="connected-account-empty">
-        チーム登録完了後に、代表者がGmail監視アカウントを接続できます。
+        メール監視アカウントの準備を完了できませんでした。ページを再読み込みしてください。
       </p>
     `;
     connectButton.classList.remove("hidden");
@@ -1628,9 +1698,11 @@ function renderGmailMonitoringAccount() {
   if (currentTeam.role !== "OWNER") {
     status.innerHTML = `
       <p class="connected-account-empty">
-        Gmail監視アカウントはチームの代表者が管理します。
+        メール監視アカウントの変更は管理者のみ行えます。
       </p>
     `;
+    connectButton.classList.remove("hidden");
+    connectButton.disabled = true;
     return;
   }
 
@@ -1692,8 +1764,8 @@ async function beginGmailOAuth(action) {
   if (currentTeam?.role !== "OWNER") {
     await showAppAlert(
       currentTeam
-        ? "Gmail監視アカウントはチームの代表者だけが管理できます。"
-        : "チーム登録完了後にGmail監視アカウントを接続できます。"
+        ? "メール監視アカウントの変更は管理者のみ行えます。"
+        : "メール監視アカウントの準備を完了できませんでした。ページを再読み込みしてください。"
     );
     return;
   }
@@ -2356,10 +2428,10 @@ function renderConnectedGoogleAccounts() {
       : currentTeam?.role === "OWNER"
         ? "重要メールの監視用アカウントを接続できます"
         : currentTeam
-          ? "代表者が管理します"
-          : "チーム登録完了後に接続できます";
+          ? "メール監視アカウントの変更は管理者のみ行えます"
+          : "メール監視アカウントの準備中です";
   monitoringAccount.innerHTML = `
-    <strong>Gmail監視</strong>
+    <strong>メール監視アカウント</strong>
     <span class="connected-account-summary">
       ${monitoringStatus}
     </span>

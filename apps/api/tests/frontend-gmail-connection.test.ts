@@ -14,9 +14,24 @@ const frontend = `${html}\n${script}`;
 describe("frontend Gmail connection boundary", () => {
   it("shows login identity and Gmail monitoring as separate account roles", () => {
     expect(frontend).toContain("ログイン中のGoogleアカウント");
-    expect(frontend).toContain("Gmail監視アカウント");
+    expect(frontend).toContain("メール監視アカウント");
     expect(frontend).toContain("Call Nowログイン");
     expect(frontend).toContain("Gmail監視");
+  });
+
+  it("uses one Google login CTA and bootstraps monitoring access without exposing internal roles", () => {
+    expect(frontend).not.toContain("ログインしてホームへ");
+    expect(html).toContain('id="finishGoogleLinkButton"');
+    expect(html).toContain("full-width hidden");
+    expect(script).toContain('mode !== "manage"');
+    expect(script).toContain("/api/v1/teams/bootstrap");
+    expect(frontend).toContain("Gmail / Google Workspace");
+    expect(frontend).toContain(
+      "メール監視アカウントの変更は管理者のみ行えます。"
+    );
+    expect(frontend).not.toContain(
+      "チーム登録完了後に、代表者がGmail監視アカウントを接続できます。"
+    );
   });
 
   it("uses the server connection APIs without storing Gmail credentials", () => {

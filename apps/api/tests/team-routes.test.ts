@@ -52,11 +52,103 @@ const environment: AppEnvironment = {
 
 const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
 
+interface TeamBootstrapResponse {
+  readonly team: {
+    readonly id: string;
+    readonly role: "OWNER" | "MEMBER";
+    readonly seats: {
+      readonly seatLimit: number;
+      readonly activeMemberCount: number;
+    };
+  };
+}
+
 afterEach(async () => {
   await Promise.all(apps.splice(0).map(async (app) => app.close()));
 });
 
 describe("team routes", () => {
+  it("bootstraps one initial team and preserves an existing member role", async () => {
+    const authRepository = new MemoryAuthRepository();
+    const emailSender = new MemoryMagicLinkEmailSender();
+    const authService = new AuthService({
+      repository: authRepository,
+      emailSender,
+      publicOrigin: environment.PUBLIC_ORIGIN,
+      tokenPepper: environment.AUTH_TOKEN_PEPPER,
+      magicLinkTtlMinutes: environment.MAGIC_LINK_TTL_MINUTES,
+      sessionIdleDays: environment.SESSION_IDLE_DAYS,
+      sessionAbsoluteDays: environment.SESSION_ABSOLUTE_DAYS,
+      maxActiveSessions: environment.MAX_ACTIVE_SESSIONS
+    });
+    const owner = await login(authService, emailSender, "owner@example.com");
+    const member = await login(authService, emailSender, "member@example.com");
+    const teamRepository = new MemoryTeamRepository();
+    const teamService = new TeamService({
+      repository: teamRepository,
+      now: () => new Date("2026-08-26T00:00:00.000Z"),
+      teamCodeGenerator: () => "482731"
+    });
+    const app = await buildApp({
+      environment,
+      authService,
+      teamService,
+      securityThrottleService: new SecurityThrottleService(
+        new MemorySecurityThrottleRepository(),
+        environment.AUTH_TOKEN_PEPPER
+      ),
+      logger: false
+    });
+    apps.push(app);
+
+    const bootstrap = () =>
+      app.inject({
+        method: "POST",
+        url: "/api/v1/teams/bootstrap",
+        headers: {
+          cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`,
+          origin: environment.PUBLIC_ORIGIN
+        },
+        payload: { keywords: ["停電", "Call Now"] }
+      });
+    const first = await bootstrap();
+    const reload = await bootstrap();
+    const relogin = await bootstrap();
+
+    expect(first.statusCode).toBe(200);
+    expect(reload.statusCode).toBe(200);
+    expect(relogin.statusCode).toBe(200);
+    const firstPayload = first.json<TeamBootstrapResponse>();
+    expect(reload.json<TeamBootstrapResponse>().team.id).toBe(
+      firstPayload.team.id
+    );
+    expect(relogin.json<TeamBootstrapResponse>().team.id).toBe(
+      firstPayload.team.id
+    );
+    expect(firstPayload.team).toMatchObject({
+      role: "OWNER",
+      seats: { seatLimit: 0, activeMemberCount: 0 }
+    });
+    expect(teamRepository.teamCreationCount).toBe(1);
+
+    teamRepository.addMember(member.userId);
+    const memberResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/teams/bootstrap",
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${member.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      },
+      payload: {}
+    });
+    expect(memberResponse.statusCode).toBe(200);
+    expect(memberResponse.json<TeamBootstrapResponse>().team).toMatchObject({
+      id: firstPayload.team.id,
+      role: "MEMBER"
+    });
+    expect(teamRepository.teamCreationCount).toBe(1);
+  });
+
   it("returns member details to the owner but rejects a member with 403", async () => {
     const authRepository = new MemoryAuthRepository();
     const emailSender = new MemoryMagicLinkEmailSender();

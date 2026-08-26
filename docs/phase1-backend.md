@@ -20,6 +20,8 @@ Implemented areas:
 - Future Passkey credential and challenge storage
 - No Call Now password credential type, hash storage, or password login route
 - Team, OWNER/MEMBER membership, subscription, and additional-member seat limits
+- Idempotent initial Team bootstrap after first paid setup; existing OWNER/MEMBER
+  roles are preserved and concurrent initialization cannot create duplicate Teams
 - Hashed capacity invitations and one-use LINE invitation links
 - Transactional join and member-removal operations
 - Server-side OWNER authorization and audit events
