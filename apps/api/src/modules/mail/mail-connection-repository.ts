@@ -1,48 +1,57 @@
 import type { StoredEncryptedToken } from "./token-encryption.js";
+import type { MailProviderId } from "./mail-provider.js";
 
-export type GmailOAuthIntent = "CONNECT" | "REAUTHORIZE";
-export type GmailAuthorizationState =
+export type MailOAuthIntent = "CONNECT" | "REAUTHORIZE";
+export type MailAuthorizationState =
   "ACTIVE" | "REAUTH_REQUIRED" | "REVOKED" | "ERROR";
-export type GmailConnectionState = GmailAuthorizationState;
+export type MailConnectionState = MailAuthorizationState;
 
-export interface GmailOAuthChallengeRecord {
+export interface MailOAuthChallengeRecord {
   readonly userId: string;
   readonly teamId: string;
   readonly codeVerifier: string;
   readonly nonce: string;
-  readonly intent: GmailOAuthIntent;
+  readonly intent: MailOAuthIntent;
+  readonly provider: MailProviderId;
 }
 
-export interface GmailConnectionRecord {
+export interface MailConnectionRecord {
   readonly id: string;
   readonly teamId: string;
   readonly authorizationId: string;
+  readonly provider: MailProviderId;
   readonly email: string;
-  readonly authorizationStatus: GmailAuthorizationState;
-  readonly connectionStatus: GmailConnectionState;
+  readonly authorizationStatus: MailAuthorizationState;
+  readonly connectionStatus: MailConnectionState;
   readonly grantedScopes: readonly string[];
   readonly lastVerifiedAt: Date | null;
   readonly lastSyncAt: Date | null;
   readonly lastErrorCode: string | null;
 }
 
-export interface GmailGrantPersistenceResult {
-  readonly connection: GmailConnectionRecord;
-  readonly obsoleteTokens: readonly StoredEncryptedToken[];
+export interface MailGrantPersistenceResult {
+  readonly connection: MailConnectionRecord;
+  readonly obsoleteTokens: readonly ProviderToken[];
 }
 
-export interface GmailDisconnectResult {
-  readonly tokenToRevoke: StoredEncryptedToken | null;
+export interface MailDisconnectResult {
+  readonly tokenToRevoke: ProviderToken | null;
 }
 
-export interface GmailConnectionRepository {
+export interface ProviderToken {
+  readonly provider: MailProviderId;
+  readonly token: StoredEncryptedToken;
+}
+
+export interface MailConnectionRepository {
   createOAuthChallenge(input: {
     readonly userId: string;
     readonly teamId: string;
     readonly secretHash: string;
     readonly codeVerifier: string;
     readonly nonce: string;
-    readonly intent: GmailOAuthIntent;
+    readonly intent: MailOAuthIntent;
+    readonly provider: MailProviderId;
     readonly expiresAt: Date;
     readonly now: Date;
   }): Promise<void>;
@@ -50,30 +59,32 @@ export interface GmailConnectionRepository {
     secretHash: string,
     expectedUserId: string,
     now: Date
-  ): Promise<GmailOAuthChallengeRecord | null>;
+  ): Promise<MailOAuthChallengeRecord | null>;
   findConnection(
     teamId: string,
     ownerUserId: string
-  ): Promise<GmailConnectionRecord | null>;
+  ): Promise<MailConnectionRecord | null>;
   saveGrant(input: {
     readonly teamId: string;
     readonly ownerUserId: string;
+    readonly provider: MailProviderId;
     readonly providerSubject: string;
     readonly email: string;
     readonly encryptedToken: StoredEncryptedToken;
     readonly grantedScopes: readonly string[];
-    readonly intent: GmailOAuthIntent;
+    readonly intent: MailOAuthIntent;
     readonly requestId: string | null;
     readonly now: Date;
-  }): Promise<GmailGrantPersistenceResult>;
+  }): Promise<MailGrantPersistenceResult>;
   disconnect(input: {
     readonly teamId: string;
     readonly ownerUserId: string;
     readonly requestId: string | null;
     readonly now: Date;
-  }): Promise<GmailDisconnectResult>;
-  markAuthorizationRequiresReauth(input: {
+  }): Promise<MailDisconnectResult>;
+  markAuthorizationFailure(input: {
     readonly authorizationId: string;
+    readonly status: "REAUTH_REQUIRED" | "ERROR";
     readonly errorCode: string;
     readonly now: Date;
   }): Promise<void>;

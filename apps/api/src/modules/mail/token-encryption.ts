@@ -28,7 +28,7 @@ export class LocalAesGcmTokenEncryptionProvider implements TokenEncryptionProvid
   ) {
     this.key = Buffer.from(keyBase64, "base64");
     if (this.key.length !== 32 || !keyVersion.trim()) {
-      throw new Error("invalid_local_gmail_encryption_configuration");
+      throw new Error("invalid_local_mail_encryption_configuration");
     }
   }
 
@@ -54,7 +54,7 @@ export class LocalAesGcmTokenEncryptionProvider implements TokenEncryptionProvid
       token.provider !== LOCAL_PROVIDER ||
       token.keyVersion !== this.keyVersion
     ) {
-      throw new Error("gmail_encryption_key_unavailable");
+      throw new Error("mail_encryption_key_unavailable");
     }
     try {
       const payload = Buffer.from(token.ciphertext, "base64url");
@@ -74,11 +74,13 @@ export class LocalAesGcmTokenEncryptionProvider implements TokenEncryptionProvid
       assertToken(plaintext);
       return plaintext;
     } catch {
-      throw new Error("gmail_token_decryption_failed");
+      throw new Error("mail_token_decryption_failed");
     }
   }
 
   private additionalAuthenticatedData(): Buffer {
+    // Keep the Gmail-era AAD so credentials encrypted before provider
+    // generalization remain decryptable without copying plaintext tokens.
     return Buffer.from(`call-now:gmail-refresh-token:${this.keyVersion}`);
   }
 }
@@ -103,7 +105,7 @@ export class GoogleCloudKmsTokenEncryptionProvider implements TokenEncryptionPro
         cryptoKeyName
       )
     ) {
-      throw new Error("invalid_gmail_kms_key_name");
+      throw new Error("invalid_mail_kms_key_name");
     }
   }
 
@@ -116,7 +118,7 @@ export class GoogleCloudKmsTokenEncryptionProvider implements TokenEncryptionPro
       data: { plaintext: Buffer.from(plaintext, "utf8").toString("base64") }
     });
     if (!response.data.ciphertext) {
-      throw new Error("gmail_token_encryption_failed");
+      throw new Error("mail_token_encryption_failed");
     }
     return {
       ciphertext: response.data.ciphertext,
@@ -127,7 +129,7 @@ export class GoogleCloudKmsTokenEncryptionProvider implements TokenEncryptionPro
 
   public async decrypt(token: StoredEncryptedToken): Promise<string> {
     if (token.provider !== KMS_PROVIDER) {
-      throw new Error("gmail_encryption_provider_mismatch");
+      throw new Error("mail_encryption_provider_mismatch");
     }
     const client = await this.auth.getClient();
     const response = await client.request<KmsDecryptResponse>({
@@ -136,7 +138,7 @@ export class GoogleCloudKmsTokenEncryptionProvider implements TokenEncryptionPro
       data: { ciphertext: token.ciphertext }
     });
     if (!response.data.plaintext) {
-      throw new Error("gmail_token_decryption_failed");
+      throw new Error("mail_token_decryption_failed");
     }
     const plaintext = Buffer.from(response.data.plaintext, "base64").toString(
       "utf8"
@@ -162,6 +164,6 @@ export function createTokenEncryptionProvider(input: {
 
 function assertToken(value: string): void {
   if (!value || value.length > 16_384 || /[\r\n\0]/u.test(value)) {
-    throw new Error("invalid_gmail_refresh_token");
+    throw new Error("invalid_mail_refresh_token");
   }
 }

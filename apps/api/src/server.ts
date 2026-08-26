@@ -7,10 +7,11 @@ import { SmtpMagicLinkEmailSender } from "./modules/auth/email-sender.js";
 import { GoogleAuthService } from "./modules/auth/google-auth-service.js";
 import { GoogleOAuthClient } from "./modules/auth/google-oauth-client.js";
 import { PrismaAuthRepository } from "./modules/auth/prisma-auth-repository.js";
-import { GmailConnectionService } from "./modules/gmail/gmail-connection-service.js";
-import { GoogleGmailOAuthClient } from "./modules/gmail/gmail-oauth-client.js";
-import { PrismaGmailConnectionRepository } from "./modules/gmail/prisma-gmail-connection-repository.js";
-import { createTokenEncryptionProvider } from "./modules/gmail/token-encryption.js";
+import { MailConnectionService } from "./modules/mail/mail-connection-service.js";
+import { PrismaMailConnectionRepository } from "./modules/mail/prisma-mail-connection-repository.js";
+import { GoogleMailProvider } from "./modules/mail/providers/google-mail-provider.js";
+import { MicrosoftMailProvider } from "./modules/mail/providers/microsoft-mail-provider.js";
+import { createTokenEncryptionProvider } from "./modules/mail/token-encryption.js";
 import { InvitationService } from "./modules/invitations/invitation-service.js";
 import { PrismaInvitationRepository } from "./modules/invitations/prisma-invitation-repository.js";
 import { PrismaTeamRepository } from "./modules/teams/prisma-team-repository.js";
@@ -63,21 +64,32 @@ const googleAuthService = new GoogleAuthService({
 const teamService = new TeamService({
   repository: new PrismaTeamRepository(database)
 });
-const gmailConnectionService = new GmailConnectionService({
-  repository: new PrismaGmailConnectionRepository(database),
-  oauthProvider: new GoogleGmailOAuthClient({
-    clientId: environment.GMAIL_OAUTH_CLIENT_ID,
-    clientSecret: environment.GMAIL_OAUTH_CLIENT_SECRET,
-    redirectUri: environment.GMAIL_OAUTH_REDIRECT_URI
-  }),
+const mailConnectionService = new MailConnectionService({
+  repository: new PrismaMailConnectionRepository(database),
+  providerAdapters: [
+    new GoogleMailProvider({
+      clientId: environment.GMAIL_OAUTH_CLIENT_ID,
+      clientSecret: environment.GMAIL_OAUTH_CLIENT_SECRET,
+      redirectUri: environment.GMAIL_OAUTH_REDIRECT_URI
+    }),
+    new MicrosoftMailProvider({
+      clientId: environment.MICROSOFT_OAUTH_CLIENT_ID,
+      clientSecret: environment.MICROSOFT_OAUTH_CLIENT_SECRET,
+      redirectUri: environment.MICROSOFT_OAUTH_REDIRECT_URI,
+      tenant: environment.MICROSOFT_OAUTH_TENANT
+    })
+  ],
   tokenEncryption: createTokenEncryptionProvider({
-    provider: environment.GMAIL_TOKEN_ENCRYPTION_PROVIDER,
-    localKey: environment.GMAIL_TOKEN_ENCRYPTION_KEY,
-    localKeyVersion: environment.GMAIL_TOKEN_ENCRYPTION_KEY_VERSION,
-    kmsKeyName: environment.GMAIL_KMS_KEY_NAME
+    provider: environment.MAIL_TOKEN_ENCRYPTION_PROVIDER,
+    localKey: environment.MAIL_TOKEN_ENCRYPTION_KEY,
+    localKeyVersion: environment.MAIL_TOKEN_ENCRYPTION_KEY_VERSION,
+    kmsKeyName: environment.MAIL_KMS_KEY_NAME
   }),
   tokenPepper: environment.AUTH_TOKEN_PEPPER,
-  stateTtlMinutes: environment.GMAIL_OAUTH_STATE_TTL_MINUTES
+  stateTtlMinutes: {
+    GOOGLE: environment.GMAIL_OAUTH_STATE_TTL_MINUTES,
+    MICROSOFT: environment.MICROSOFT_OAUTH_STATE_TTL_MINUTES
+  }
 });
 const invitationService = new InvitationService({
   repository: new PrismaInvitationRepository(database),
@@ -93,7 +105,7 @@ const app = await buildApp({
   environment,
   authService,
   googleAuthService,
-  gmailConnectionService,
+  mailConnectionService,
   teamService,
   invitationService,
   securityThrottleService,

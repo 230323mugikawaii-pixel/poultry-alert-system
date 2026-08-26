@@ -11,8 +11,8 @@ import type { AuthService } from "./modules/auth/auth-service.js";
 import { createAuthRoutes } from "./modules/auth/auth-routes.js";
 import type { GoogleAuthService } from "./modules/auth/google-auth-service.js";
 import { createGoogleAuthRoutes } from "./modules/auth/google-auth-routes.js";
-import type { GmailConnectionService } from "./modules/gmail/gmail-connection-service.js";
-import { createGmailConnectionRoutes } from "./modules/gmail/gmail-connection-routes.js";
+import type { MailConnectionService } from "./modules/mail/mail-connection-service.js";
+import { createMailConnectionRoutes } from "./modules/mail/mail-connection-routes.js";
 import type { InvitationService } from "./modules/invitations/invitation-service.js";
 import type { SecurityThrottleService } from "./modules/security/security-throttle-service.js";
 import { createInvitationRoutes } from "./modules/invitations/invitation-routes.js";
@@ -25,7 +25,7 @@ export interface BuildAppOptions {
   readonly logger?: boolean;
   readonly authService?: AuthService;
   readonly googleAuthService?: GoogleAuthService;
-  readonly gmailConnectionService?: GmailConnectionService;
+  readonly mailConnectionService?: MailConnectionService;
   readonly teamService?: TeamService;
   readonly invitationService?: InvitationService;
   readonly securityThrottleService?: SecurityThrottleService;
@@ -182,16 +182,16 @@ export async function buildApp(
   if (
     options.authService &&
     options.teamService &&
-    options.gmailConnectionService
+    options.mailConnectionService
   ) {
     if (!options.securityThrottleService) {
-      throw new Error("securityThrottleService is required for Gmail OAuth");
+      throw new Error("securityThrottleService is required for mail OAuth");
     }
     await app.register(
-      createGmailConnectionRoutes(
+      createMailConnectionRoutes(
         options.authService,
         options.teamService,
-        options.gmailConnectionService,
+        options.mailConnectionService,
         options.securityThrottleService,
         options.environment
       )

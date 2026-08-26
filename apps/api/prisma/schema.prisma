@@ -21,10 +21,16 @@ enum IdentityProvider {
   GOOGLE
 }
 
+enum MailProvider {
+  GOOGLE
+  MICROSOFT
+}
+
 enum ChallengeKind {
   MAGIC_LINK
   GOOGLE_OAUTH
   GMAIL_OAUTH
+  MICROSOFT_MAIL_OAUTH
   PASSKEY_REGISTRATION
   PASSKEY_AUTHENTICATION
   JOIN_GRANT
@@ -90,14 +96,14 @@ enum NotificationTargetStatus {
   DISABLED
 }
 
-enum GmailConnectionStatus {
+enum MailConnectionStatus {
   ACTIVE
   REAUTH_REQUIRED
   REVOKED
   ERROR
 }
 
-enum GmailAuthorizationStatus {
+enum MailAuthorizationStatus {
   ACTIVE
   REAUTH_REQUIRED
   REVOKED
@@ -133,7 +139,7 @@ model User {
   redemptions             InvitationRedemption[]
   initiatedOwnerTransfers OwnerTransfer[]
   auditEvents             AuditEvent[]
-  gmailAuthorization      GmailAuthorization?
+  mailAuthorization       MailAuthorization?
 
   @@map("users")
 }
@@ -243,7 +249,7 @@ model Team {
   subscription    Subscription?
   keywords        TeamKeyword[]
   invitations     Invitation[]
-  gmailConnection GmailConnection?
+  mailConnection  MailConnection?
   ownerTransfers  OwnerTransfer[]
   auditEvents     AuditEvent[]
 
@@ -405,45 +411,45 @@ model NotificationTarget {
   @@map("notification_targets")
 }
 
-model GmailAuthorization {
+model MailAuthorization {
   id                    String                   @id @default(uuid()) @db.Uuid
   userId                String                   @unique @db.Uuid
-  provider              IdentityProvider         @default(GOOGLE)
+  provider              MailProvider             @default(GOOGLE)
   providerSubject       String                   @db.VarChar(255)
   email                 String                   @db.VarChar(320)
   encryptedRefreshToken String?                  @db.Text
   encryptionProvider    String?                  @db.VarChar(40)
   encryptionKeyVersion  String?                  @db.VarChar(255)
   grantedScopes         String[]                 @default([])
-  status                GmailAuthorizationStatus @default(ACTIVE)
+  status                MailAuthorizationStatus  @default(ACTIVE)
   lastVerifiedAt        DateTime?                @db.Timestamptz(3)
   revokedAt             DateTime?                @db.Timestamptz(3)
   createdAt             DateTime                 @default(now()) @db.Timestamptz(3)
   updatedAt             DateTime                 @updatedAt @db.Timestamptz(3)
   user                  User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
-  connections           GmailConnection[]
+  connections           MailConnection[]
 
   @@unique([provider, providerSubject])
   @@index([status, revokedAt])
-  @@map("gmail_authorizations")
+  @@map("mail_authorizations")
 }
 
-model GmailConnection {
+model MailConnection {
   id                   String                @id @default(uuid()) @db.Uuid
   teamId               String                @unique @db.Uuid
-  gmailAuthorizationId String                @db.Uuid
-  status               GmailConnectionStatus @default(ACTIVE)
-  historyId            String?               @db.VarChar(255)
+  mailAuthorizationId  String                @db.Uuid
+  status               MailConnectionStatus  @default(ACTIVE)
+  providerCursor       String?               @db.VarChar(2048)
   lastSyncAt           DateTime?             @db.Timestamptz(3)
   lastErrorCode        String?               @db.VarChar(100)
   createdAt            DateTime              @default(now()) @db.Timestamptz(3)
   updatedAt            DateTime              @updatedAt @db.Timestamptz(3)
   revokedAt            DateTime?             @db.Timestamptz(3)
   team                 Team                  @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  gmailAuthorization   GmailAuthorization    @relation(fields: [gmailAuthorizationId], references: [id], onDelete: Restrict)
+  mailAuthorization    MailAuthorization     @relation(fields: [mailAuthorizationId], references: [id], onDelete: Restrict)
 
-  @@index([gmailAuthorizationId, status])
-  @@map("gmail_connections")
+  @@index([mailAuthorizationId, status])
+  @@map("mail_connections")
 }
 
 model OwnerTransfer {

@@ -1,24 +1,31 @@
+import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair } from "jose";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import type { AppEnvironment } from "../src/config/env.js";
 import { AuthService } from "../src/modules/auth/auth-service.js";
-import { GmailConnectionService } from "../src/modules/gmail/gmail-connection-service.js";
+import { MailConnectionService } from "../src/modules/mail/mail-connection-service.js";
 import type {
-  GmailOAuthGrant,
-  GmailOAuthProvider
-} from "../src/modules/gmail/gmail-oauth-client.js";
+  MailOAuthGrant,
+  MailProviderAdapter
+} from "../src/modules/mail/mail-provider.js";
 import {
   GMAIL_READONLY_SCOPE,
-  GoogleGmailOAuthClient
-} from "../src/modules/gmail/gmail-oauth-client.js";
-import { LocalAesGcmTokenEncryptionProvider } from "../src/modules/gmail/token-encryption.js";
+  GoogleMailProvider
+} from "../src/modules/mail/providers/google-mail-provider.js";
+import {
+  MICROSOFT_MAIL_READ_SCOPE,
+  MicrosoftMailProvider,
+  MicrosoftOidcIdTokenVerifier,
+  type MicrosoftIdTokenVerifier
+} from "../src/modules/mail/providers/microsoft-mail-provider.js";
+import { LocalAesGcmTokenEncryptionProvider } from "../src/modules/mail/token-encryption.js";
 import { SecurityThrottleService } from "../src/modules/security/security-throttle-service.js";
 import { TeamService } from "../src/modules/teams/team-service.js";
 import {
   MemoryAuthRepository,
   MemoryMagicLinkEmailSender
 } from "./helpers/memory-auth.js";
-import { MemoryGmailConnectionRepository } from "./helpers/memory-gmail.js";
+import { MemoryMailConnectionRepository } from "./helpers/memory-mail.js";
 import { MemorySecurityThrottleRepository } from "./helpers/memory-security-throttle.js";
 import { MemoryTeamRepository } from "./helpers/memory-team.js";
 
@@ -42,10 +49,16 @@ const environment: AppEnvironment = {
   GMAIL_OAUTH_REDIRECT_URI:
     "https://api.test.call-now.example/api/v1/auth/gmail/callback",
   GMAIL_OAUTH_STATE_TTL_MINUTES: 10,
-  GMAIL_TOKEN_ENCRYPTION_PROVIDER: "local",
-  GMAIL_TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-  GMAIL_TOKEN_ENCRYPTION_KEY_VERSION: "test-local-v1",
-  GMAIL_KMS_KEY_NAME: "",
+  MICROSOFT_OAUTH_CLIENT_ID: "test-microsoft-client-id",
+  MICROSOFT_OAUTH_CLIENT_SECRET: "test-microsoft-client-secret",
+  MICROSOFT_OAUTH_REDIRECT_URI:
+    "http://127.0.0.1:8080/api/v1/auth/mail/microsoft/callback",
+  MICROSOFT_OAUTH_TENANT: "common",
+  MICROSOFT_OAUTH_STATE_TTL_MINUTES: 10,
+  MAIL_TOKEN_ENCRYPTION_PROVIDER: "local",
+  MAIL_TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  MAIL_TOKEN_ENCRYPTION_KEY_VERSION: "test-local-v1",
+  MAIL_KMS_KEY_NAME: "",
   MAGIC_LINK_TTL_MINUTES: 15,
   SESSION_IDLE_DAYS: 30,
   SESSION_ABSOLUTE_DAYS: 90,
@@ -79,18 +92,18 @@ describe("Gmail token encryption", () => {
   it("rejects ciphertext under a different key version", async () => {
     const encrypted = await createEncryption().encrypt(syntheticRefreshToken);
     const otherVersion = new LocalAesGcmTokenEncryptionProvider(
-      environment.GMAIL_TOKEN_ENCRYPTION_KEY,
+      environment.MAIL_TOKEN_ENCRYPTION_KEY,
       "other-version"
     );
     await expect(otherVersion.decrypt(encrypted)).rejects.toThrow(
-      "gmail_encryption_key_unavailable"
+      "mail_encryption_key_unavailable"
     );
   });
 });
 
 describe("Google Gmail OAuth client", () => {
   it("requests offline Gmail read-only consent independently from login", () => {
-    const client = new GoogleGmailOAuthClient({
+    const client = new GoogleMailProvider({
       clientId: environment.GMAIL_OAUTH_CLIENT_ID,
       clientSecret: environment.GMAIL_OAUTH_CLIENT_SECRET,
       redirectUri: environment.GMAIL_OAUTH_REDIRECT_URI
@@ -115,19 +128,169 @@ describe("Google Gmail OAuth client", () => {
   });
 });
 
-describe("GmailConnectionService", () => {
+describe("Microsoft mail OAuth provider", () => {
+  it("uses common authority, PKCE, offline access, and delegated Mail.Read only", () => {
+    const provider = createMicrosoftProvider();
+    const url = new URL(
+      provider.createAuthorizationUrl({
+        state: "s".repeat(43),
+        codeChallenge: "c".repeat(43),
+        nonce: "n".repeat(43)
+      })
+    );
+    const scopes = (url.searchParams.get("scope") ?? "").split(" ");
+
+    expect(url.origin).toBe("https://login.microsoftonline.com");
+    expect(url.pathname).toContain("/common/oauth2/v2.0/authorize");
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(scopes).toEqual(
+      expect.arrayContaining([
+        "openid",
+        "profile",
+        "email",
+        "offline_access",
+        MICROSOFT_MAIL_READ_SCOPE
+      ])
+    );
+    expect(scopes).not.toContain("Mail.ReadWrite");
+  });
+
+  it("exchanges a PKCE code and requires Mail.Read before returning a grant", async () => {
+    const requests: string[] = [];
+    const verifier: MicrosoftIdTokenVerifier = {
+      verify: async (_idToken, nonce) => {
+        expect(nonce).toBe("expected-nonce");
+        return {
+          subject: "microsoft-tenant:microsoft-subject",
+          email: "monitoring@outlook.example"
+        };
+      }
+    };
+    const provider = createMicrosoftProvider({
+      verifier,
+      fetcher: async (_url, init) => {
+        if (!(init?.body instanceof URLSearchParams)) {
+          throw new Error("expected_url_encoded_microsoft_token_request");
+        }
+        requests.push(init.body.toString());
+        return Response.json({
+          access_token: "synthetic-microsoft-access-token",
+          refresh_token: "synthetic-microsoft-refresh-token",
+          id_token: "synthetic-microsoft-id-token",
+          scope: `openid offline_access ${MICROSOFT_MAIL_READ_SCOPE}`,
+          expires_in: 3600
+        });
+      }
+    });
+
+    await expect(
+      provider.exchangeCode({
+        code: "synthetic-microsoft-code",
+        codeVerifier: "synthetic-code-verifier",
+        expectedNonce: "expected-nonce"
+      })
+    ).resolves.toMatchObject({
+      provider: "MICROSOFT",
+      subject: "microsoft-tenant:microsoft-subject",
+      email: "monitoring@outlook.example"
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toContain("code_verifier=synthetic-code-verifier");
+    expect(requests[0]).not.toContain("Mail.ReadWrite");
+
+    const insufficient = createMicrosoftProvider({
+      verifier,
+      fetcher: async () =>
+        Response.json({
+          access_token: "synthetic-microsoft-access-token",
+          refresh_token: "synthetic-microsoft-refresh-token",
+          id_token: "synthetic-microsoft-id-token",
+          scope: "openid offline_access"
+        })
+    });
+    await expect(
+      insufficient.exchangeCode({
+        code: "synthetic-microsoft-code",
+        codeVerifier: "synthetic-code-verifier",
+        expectedNonce: "expected-nonce"
+      })
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("maps Microsoft consent, reauthentication, throttling, and transient failures", () => {
+    const provider = createMicrosoftProvider();
+    expect(provider.classifyProviderError({ code: "invalid_grant" })).toBe(
+      "REAUTHORIZATION_REQUIRED"
+    );
+    expect(provider.classifyProviderError({ code: "consent_required" })).toBe(
+      "CONSENT_REQUIRED"
+    );
+    expect(provider.classifyProviderError({ status: 429 })).toBe(
+      "RATE_LIMITED"
+    );
+    expect(provider.classifyProviderError({ status: 503 })).toBe("TRANSIENT");
+  });
+
+  it("verifies Microsoft signature, audience, issuer, expiry, nonce, and tenant", async () => {
+    const clientId = "microsoft-oidc-test-client";
+    const tenantId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const { privateKey, publicKey } = await generateKeyPair("RS256");
+    const publicJwk = await exportJWK(publicKey);
+    const keySet = createLocalJWKSet({
+      keys: [{ ...publicJwk, kid: "test-key", alg: "RS256", use: "sig" }]
+    });
+    const now = Math.floor(Date.now() / 1000);
+    const token = await new SignJWT({
+      tid: tenantId,
+      ver: "2.0",
+      nonce: "expected-nonce",
+      preferred_username: "person@example.com"
+    })
+      .setProtectedHeader({ alg: "RS256", kid: "test-key" })
+      .setSubject("provider-subject")
+      .setIssuer(`https://login.microsoftonline.com/${tenantId}/v2.0`)
+      .setAudience(clientId)
+      .setIssuedAt(now)
+      .setExpirationTime(now + 300)
+      .sign(privateKey);
+    const verifier = new MicrosoftOidcIdTokenVerifier(
+      clientId,
+      "common",
+      keySet
+    );
+
+    await expect(verifier.verify(token, "expected-nonce")).resolves.toEqual({
+      subject: `${tenantId}:provider-subject`,
+      email: "person@example.com"
+    });
+    await expect(verifier.verify(token, "wrong-nonce")).rejects.toThrow(
+      "microsoft_mail_identity_claims_invalid"
+    );
+    await expect(
+      new MicrosoftOidcIdTokenVerifier(
+        "wrong-audience",
+        "common",
+        keySet
+      ).verify(token, "expected-nonce")
+    ).rejects.toThrow();
+  });
+});
+
+describe("MailConnectionService", () => {
   it("consumes state once and stores only encrypted refresh-token material", async () => {
     const fixture = createServiceFixture();
     const started = await fixture.service.createAuthorizationRequest(
       "owner-user-id",
       "team-id",
-      "CONNECT"
+      "CONNECT",
+      "GOOGLE"
     );
     expect(
       new URL(started.authorizationUrl).searchParams.get("access_type")
     ).toBe("offline");
 
     const connected = await fixture.service.completeAuthorization({
+      provider: "GOOGLE",
       state: started.state,
       code: "valid-gmail-code",
       authenticatedUserId: "owner-user-id"
@@ -142,12 +305,13 @@ describe("GmailConnectionService", () => {
     expect(stored?.token?.ciphertext).not.toContain(syntheticRefreshToken);
     await expect(
       fixture.service.completeAuthorization({
+        provider: "GOOGLE",
         state: started.state,
         code: "valid-gmail-code",
         authenticatedUserId: "owner-user-id"
       })
     ).rejects.toMatchObject({
-      code: "GMAIL_AUTHORIZATION_INVALID_OR_EXPIRED"
+      code: "MAIL_AUTHORIZATION_INVALID_OR_EXPIRED"
     });
   });
 
@@ -156,33 +320,68 @@ describe("GmailConnectionService", () => {
     const started = await expired.service.createAuthorizationRequest(
       "owner-user-id",
       "team-id",
-      "CONNECT"
+      "CONNECT",
+      "GOOGLE"
     );
     expired.clock.value = new Date("2026-08-26T00:11:00.000Z");
     await expect(
       expired.service.completeAuthorization({
+        provider: "GOOGLE",
         state: started.state,
         code: "valid-gmail-code",
         authenticatedUserId: "owner-user-id"
       })
     ).rejects.toMatchObject({
-      code: "GMAIL_AUTHORIZATION_INVALID_OR_EXPIRED"
+      code: "MAIL_AUTHORIZATION_INVALID_OR_EXPIRED"
     });
 
     const missing = createServiceFixture({ failExchange: true });
     const missingStarted = await missing.service.createAuthorizationRequest(
       "owner-user-id",
       "team-id",
-      "CONNECT"
+      "CONNECT",
+      "GOOGLE"
     );
     await expect(
       missing.service.completeAuthorization({
+        provider: "GOOGLE",
         state: missingStarted.state,
         code: "valid-gmail-code",
         authenticatedUserId: "owner-user-id"
       })
     ).rejects.toMatchObject({
-      code: "GMAIL_AUTHORIZATION_INVALID_OR_EXPIRED"
+      code: "MAIL_AUTHORIZATION_INVALID_OR_EXPIRED"
+    });
+  });
+
+  it("binds each one-time challenge to its selected provider", async () => {
+    const fixture = createServiceFixture();
+    const started = await fixture.service.createAuthorizationRequest(
+      "owner-user-id",
+      "team-id",
+      "CONNECT",
+      "GOOGLE"
+    );
+
+    await expect(
+      fixture.service.completeAuthorization({
+        provider: "MICROSOFT",
+        state: started.state,
+        code: "valid-microsoft-code",
+        authenticatedUserId: "owner-user-id"
+      })
+    ).rejects.toMatchObject({
+      code: "MAIL_AUTHORIZATION_INVALID_OR_EXPIRED"
+    });
+    await expect(
+      fixture.service.completeAuthorization({
+        provider: "GOOGLE",
+        state: started.state,
+        code: "valid-gmail-code",
+        authenticatedUserId: "owner-user-id"
+      })
+    ).rejects.toMatchObject({
+      code: "MAIL_AUTHORIZATION_INVALID_OR_EXPIRED"
     });
   });
 
@@ -191,9 +390,11 @@ describe("GmailConnectionService", () => {
     const first = await fixture.service.createAuthorizationRequest(
       "owner-user-id",
       "team-id",
-      "CONNECT"
+      "CONNECT",
+      "GOOGLE"
     );
     const connected = await fixture.service.completeAuthorization({
+      provider: "GOOGLE",
       state: first.state,
       code: "valid-gmail-code",
       authenticatedUserId: "owner-user-id"
@@ -202,23 +403,26 @@ describe("GmailConnectionService", () => {
     const reauth = await fixture.service.createAuthorizationRequest(
       "owner-user-id",
       "team-id",
-      "REAUTHORIZE"
+      "REAUTHORIZE",
+      "GOOGLE"
     );
     await fixture.service.completeAuthorization({
+      provider: "GOOGLE",
       state: reauth.state,
       code: "valid-gmail-code",
       authenticatedUserId: "owner-user-id"
     });
     expect(fixture.provider.revokedTokens).toContain(syntheticRefreshToken);
 
-    await fixture.service.markCredentialFailure(
-      connected.authorizationId,
-      "invalid_grant"
-    );
+    await fixture.service.markProviderFailure({
+      authorizationId: connected.authorizationId,
+      provider: "GOOGLE",
+      error: { code: "invalid_grant" }
+    });
     expect(fixture.repository.connections.get("team-id")).toMatchObject({
       authorizationStatus: "REAUTH_REQUIRED",
       connectionStatus: "REAUTH_REQUIRED",
-      lastErrorCode: "INVALID_GRANT"
+      lastErrorCode: "REAUTHORIZATION_REQUIRED"
     });
 
     await fixture.service.disconnect({
@@ -241,9 +445,11 @@ describe("GmailConnectionService", () => {
     const first = await fixture.service.createAuthorizationRequest(
       "owner-user-id",
       "team-id",
-      "CONNECT"
+      "CONNECT",
+      "GOOGLE"
     );
     await fixture.service.completeAuthorization({
+      provider: "GOOGLE",
       state: first.state,
       code: "valid-gmail-code",
       authenticatedUserId: "owner-user-id"
@@ -251,9 +457,11 @@ describe("GmailConnectionService", () => {
     const reauthorization = await fixture.service.createAuthorizationRequest(
       "owner-user-id",
       "team-id",
-      "REAUTHORIZE"
+      "REAUTHORIZE",
+      "GOOGLE"
     );
     await fixture.service.completeAuthorization({
+      provider: "GOOGLE",
       state: reauthorization.state,
       code: "valid-gmail-code",
       authenticatedUserId: "owner-user-id"
@@ -289,20 +497,24 @@ describe("Gmail connection routes", () => {
       seatLimit: 0
     });
     teamRepository.addMember(member.userId);
-    const gmailRepository = new MemoryGmailConnectionRepository();
-    const provider = new FakeGmailOAuthProvider();
-    const gmailConnectionService = new GmailConnectionService({
+    const gmailRepository = new MemoryMailConnectionRepository();
+    const provider = new FakeMailProviderAdapter();
+    const microsoftProvider = new FakeMailProviderAdapter(false, "MICROSOFT");
+    const mailConnectionService = new MailConnectionService({
       repository: gmailRepository,
-      oauthProvider: provider,
+      providerAdapters: [provider, microsoftProvider],
       tokenEncryption: createEncryption(),
       tokenPepper: environment.AUTH_TOKEN_PEPPER,
-      stateTtlMinutes: environment.GMAIL_OAUTH_STATE_TTL_MINUTES
+      stateTtlMinutes: {
+        GOOGLE: environment.GMAIL_OAUTH_STATE_TTL_MINUTES,
+        MICROSOFT: environment.MICROSOFT_OAUTH_STATE_TTL_MINUTES
+      }
     });
     const app = await buildApp({
       environment,
       authService,
       teamService,
-      gmailConnectionService,
+      mailConnectionService,
       securityThrottleService: new SecurityThrottleService(
         new MemorySecurityThrottleRepository(),
         environment.AUTH_TOKEN_PEPPER
@@ -332,8 +544,12 @@ describe("Gmail connection routes", () => {
     const state = authorizationUrl.searchParams.get("state") ?? "";
     const stateCookie = cookieNamed(
       started.headers["set-cookie"],
-      `${environment.COOKIE_NAME}_gmail_oauth_state`
+      `${environment.COOKIE_NAME}_mail_google_state`
     );
+    expect(stateCookie).toContain("HttpOnly");
+    expect(stateCookie).toContain("SameSite=Lax");
+    expect(stateCookie).toContain("Path=/api/v1/auth/gmail");
+    expect(stateCookie).not.toContain("Secure");
     const callback = await app.inject({
       method: "GET",
       url: `/api/v1/auth/gmail/callback?code=valid-gmail-code&state=${state}`,
@@ -343,7 +559,7 @@ describe("Gmail connection routes", () => {
     });
     expect(callback.statusCode).toBe(302);
     expect(callback.headers.location).toBe(
-      `${environment.PUBLIC_ORIGIN}/?gmailAuth=success`
+      `${environment.PUBLIC_ORIGIN}/?mailAuth=success`
     );
     const replayedCallback = await app.inject({
       method: "GET",
@@ -354,7 +570,7 @@ describe("Gmail connection routes", () => {
     });
     expect(replayedCallback.statusCode).toBe(302);
     expect(replayedCallback.headers.location).toBe(
-      `${environment.PUBLIC_ORIGIN}/?gmailAuth=error`
+      `${environment.PUBLIC_ORIGIN}/?mailAuth=error`
     );
 
     const ownerView = await app.inject({
@@ -365,14 +581,61 @@ describe("Gmail connection routes", () => {
     expect(ownerView.statusCode).toBe(200);
     expect(ownerView.json()).toMatchObject({
       connection: {
+        provider: "GOOGLE",
         email: "monitoring@example.com",
         connectionStatus: "ACTIVE"
       }
     });
 
+    const microsoftStart = await app.inject({
+      method: "POST",
+      url: `/api/v1/teams/${team.teamId}/mail-connection/oauth/start?provider=MICROSOFT`,
+      headers: {
+        origin: environment.PUBLIC_ORIGIN,
+        cookie: sessionCookie(owner.sessionToken)
+      }
+    });
+    expect(microsoftStart.statusCode, microsoftStart.body).toBe(303);
+    const microsoftAuthorizationUrl = new URL(
+      String(microsoftStart.headers.location)
+    );
+    const microsoftState =
+      microsoftAuthorizationUrl.searchParams.get("state") ?? "";
+    const microsoftStateCookie = cookieNamed(
+      microsoftStart.headers["set-cookie"],
+      `${environment.COOKIE_NAME}_mail_microsoft_state`
+    );
+    expect(microsoftStateCookie).toContain("HttpOnly");
+    expect(microsoftStateCookie).toContain("SameSite=Lax");
+    expect(microsoftStateCookie).toContain("Path=/api/v1/auth/mail/microsoft");
+    const microsoftCallback = await app.inject({
+      method: "GET",
+      url: `/api/v1/auth/mail/microsoft/callback?code=valid-microsoft-code&state=${microsoftState}`,
+      headers: {
+        cookie: `${sessionCookie(owner.sessionToken)}; ${microsoftStateCookie.split(";")[0]}`
+      }
+    });
+    expect(microsoftCallback.statusCode).toBe(302);
+    expect(microsoftCallback.headers.location).toBe(
+      `${environment.PUBLIC_ORIGIN}/?mailAuth=success`
+    );
+    const switchedView = await app.inject({
+      method: "GET",
+      url: `/api/v1/teams/${team.teamId}/mail-connection`,
+      headers: { cookie: sessionCookie(owner.sessionToken) }
+    });
+    expect(switchedView.json()).toMatchObject({
+      connection: {
+        provider: "MICROSOFT",
+        email: "monitoring@outlook.example",
+        connectionStatus: "ACTIVE"
+      }
+    });
+    expect(provider.revokedTokens).toContain(syntheticRefreshToken);
+
     const memberView = await app.inject({
       method: "GET",
-      url: `/api/v1/teams/${team.teamId}/gmail-connection`,
+      url: `/api/v1/teams/${team.teamId}/mail-connection`,
       headers: { cookie: sessionCookie(member.sessionToken) }
     });
     expect(memberView.statusCode).toBe(403);
@@ -380,39 +643,48 @@ describe("Gmail connection routes", () => {
 
     const disconnected = await app.inject({
       method: "DELETE",
-      url: `/api/v1/teams/${team.teamId}/gmail-connection`,
+      url: `/api/v1/teams/${team.teamId}/mail-connection`,
       headers: {
         origin: environment.PUBLIC_ORIGIN,
         cookie: sessionCookie(owner.sessionToken)
       }
     });
     expect(disconnected.statusCode).toBe(204);
-    expect(provider.revokedTokens).toContain(syntheticRefreshToken);
+    expect(microsoftProvider.revokedTokens).toContain(syntheticRefreshToken);
     await app.close();
   });
 });
 
 function createServiceFixture(options: { failExchange?: boolean } = {}) {
-  const repository = new MemoryGmailConnectionRepository();
-  const provider = new FakeGmailOAuthProvider(options.failExchange);
+  const repository = new MemoryMailConnectionRepository();
+  const provider = new FakeMailProviderAdapter(options.failExchange);
   const clock = { value: new Date("2026-08-26T00:00:00.000Z") };
-  const service = new GmailConnectionService({
+  const service = new MailConnectionService({
     repository,
-    oauthProvider: provider,
+    providerAdapters: [
+      provider,
+      new FakeMailProviderAdapter(false, "MICROSOFT")
+    ],
     tokenEncryption: createEncryption(),
     tokenPepper: environment.AUTH_TOKEN_PEPPER,
-    stateTtlMinutes: 10,
+    stateTtlMinutes: { GOOGLE: 10, MICROSOFT: 10 },
     now: () => clock.value
   });
   return { repository, provider, clock, service };
 }
 
-class FakeGmailOAuthProvider implements GmailOAuthProvider {
+class FakeMailProviderAdapter implements MailProviderAdapter {
+  public readonly provider;
   public refreshToken = syntheticRefreshToken;
   public readonly revokedTokens: string[] = [];
   private nonce: string | null = null;
 
-  public constructor(private readonly failExchange = false) {}
+  public constructor(
+    private readonly failExchange = false,
+    provider: "GOOGLE" | "MICROSOFT" = "GOOGLE"
+  ) {
+    this.provider = provider;
+  }
 
   public createAuthorizationUrl(input: {
     readonly state: string;
@@ -425,7 +697,12 @@ class FakeGmailOAuthProvider implements GmailOAuthProvider {
     url.searchParams.set("code_challenge", input.codeChallenge);
     url.searchParams.set("nonce", input.nonce);
     url.searchParams.set("access_type", "offline");
-    url.searchParams.set("scope", GMAIL_READONLY_SCOPE);
+    url.searchParams.set(
+      "scope",
+      this.provider === "GOOGLE"
+        ? GMAIL_READONLY_SCOPE
+        : MICROSOFT_MAIL_READ_SCOPE
+    );
     return url.toString();
   }
 
@@ -433,34 +710,93 @@ class FakeGmailOAuthProvider implements GmailOAuthProvider {
     readonly code: string;
     readonly codeVerifier: string;
     readonly expectedNonce: string;
-  }): Promise<GmailOAuthGrant> {
+  }): Promise<MailOAuthGrant> {
     if (
       this.failExchange ||
-      input.code !== "valid-gmail-code" ||
+      input.code !==
+        (this.provider === "GOOGLE"
+          ? "valid-gmail-code"
+          : "valid-microsoft-code") ||
       !input.codeVerifier ||
       input.expectedNonce !== this.nonce
     ) {
       throw new Error("invalid synthetic Gmail grant");
     }
     return {
-      subject: "gmail-monitoring-subject",
-      email: "monitoring@example.com",
+      provider: this.provider,
+      subject:
+        this.provider === "GOOGLE"
+          ? "gmail-monitoring-subject"
+          : "microsoft-tenant:microsoft-monitoring-subject",
+      email:
+        this.provider === "GOOGLE"
+          ? "monitoring@example.com"
+          : "monitoring@outlook.example",
       emailVerified: true,
       refreshToken: this.refreshToken,
-      grantedScopes: ["openid", "email", GMAIL_READONLY_SCOPE]
+      grantedScopes: [
+        "openid",
+        "email",
+        this.provider === "GOOGLE"
+          ? GMAIL_READONLY_SCOPE
+          : MICROSOFT_MAIL_READ_SCOPE
+      ]
     };
   }
 
-  public async revokeRefreshToken(refreshToken: string): Promise<void> {
+  public async refreshAccessToken() {
+    return {
+      accessToken: "synthetic-access-token-for-tests-only",
+      expiresAt: null,
+      rotatedRefreshToken: null
+    };
+  }
+
+  public async revokeAuthorization(refreshToken: string): Promise<void> {
     this.revokedTokens.push(refreshToken);
+  }
+
+  public classifyProviderError(error: unknown) {
+    const code =
+      error && typeof error === "object" && "code" in error
+        ? String(error.code)
+        : "";
+    return code === "invalid_grant"
+      ? ("REAUTHORIZATION_REQUIRED" as const)
+      : ("UNKNOWN" as const);
   }
 }
 
 function createEncryption(): LocalAesGcmTokenEncryptionProvider {
   return new LocalAesGcmTokenEncryptionProvider(
-    environment.GMAIL_TOKEN_ENCRYPTION_KEY,
-    environment.GMAIL_TOKEN_ENCRYPTION_KEY_VERSION
+    environment.MAIL_TOKEN_ENCRYPTION_KEY,
+    environment.MAIL_TOKEN_ENCRYPTION_KEY_VERSION
   );
+}
+
+function createMicrosoftProvider(
+  options: {
+    readonly fetcher?: typeof fetch;
+    readonly verifier?: MicrosoftIdTokenVerifier;
+  } = {}
+): MicrosoftMailProvider {
+  return new MicrosoftMailProvider({
+    clientId: environment.MICROSOFT_OAUTH_CLIENT_ID,
+    clientSecret: environment.MICROSOFT_OAUTH_CLIENT_SECRET,
+    redirectUri: environment.MICROSOFT_OAUTH_REDIRECT_URI,
+    tenant: environment.MICROSOFT_OAUTH_TENANT,
+    fetcher:
+      options.fetcher ??
+      (async () => {
+        throw new Error("unexpected_microsoft_network_request");
+      }),
+    idTokenVerifier: options.verifier ?? {
+      verify: async () => ({
+        subject: "microsoft-tenant:microsoft-subject",
+        email: "monitoring@outlook.example"
+      })
+    }
+  });
 }
 
 async function login(
