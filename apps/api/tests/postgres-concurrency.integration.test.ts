@@ -9,6 +9,14 @@ import type {
   GoogleOAuthProvider
 } from "../src/modules/auth/google-oauth-client.js";
 import { PrismaAuthRepository } from "../src/modules/auth/prisma-auth-repository.js";
+import { GmailConnectionService } from "../src/modules/gmail/gmail-connection-service.js";
+import {
+  GMAIL_READONLY_SCOPE,
+  type GmailOAuthGrant,
+  type GmailOAuthProvider
+} from "../src/modules/gmail/gmail-oauth-client.js";
+import { PrismaGmailConnectionRepository } from "../src/modules/gmail/prisma-gmail-connection-repository.js";
+import { LocalAesGcmTokenEncryptionProvider } from "../src/modules/gmail/token-encryption.js";
 import { InvitationService } from "../src/modules/invitations/invitation-service.js";
 import { prepareInvitationCredential } from "../src/modules/invitations/invitation-credential.js";
 import { PrismaInvitationRepository } from "../src/modules/invitations/prisma-invitation-repository.js";
@@ -49,6 +57,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
         subscriptions,
         team_memberships,
         gmail_connections,
+        gmail_authorizations,
         owner_transfers,
         auth_credentials,
         teams,
@@ -125,6 +134,229 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       code: "GOOGLE_LOGIN_INVALID_OR_EXPIRED",
       statusCode: 401
     });
+  });
+
+  it("stores a Gmail monitoring grant encrypted and revokes it on disconnect", async () => {
+    const owner = await createUser("gmail-owner@example.com");
+    const services = createServices(
+      { value: new Date("2026-08-26T00:00:00.000Z") },
+      "482738"
+    );
+    const created = await services.teamService.createTeam({
+      ownerUserId: owner.id,
+      seatLimit: 0
+    });
+    const provider = new PostgresGmailOAuthProvider();
+    const encryption = new LocalAesGcmTokenEncryptionProvider(
+      Buffer.alloc(32, 7).toString("base64"),
+      "postgres-test-v1"
+    );
+    const gmailService = new GmailConnectionService({
+      repository: new PrismaGmailConnectionRepository(database),
+      oauthProvider: provider,
+      tokenEncryption: encryption,
+      tokenPepper: testPepper,
+      stateTtlMinutes: 10,
+      now: () => new Date("2026-08-26T00:00:00.000Z")
+    });
+
+    const authorization = await gmailService.createAuthorizationRequest(
+      owner.id,
+      created.team.teamId,
+      "CONNECT"
+    );
+    const connected = await gmailService.completeAuthorization({
+      state: authorization.state,
+      code: "postgres-gmail-code",
+      authenticatedUserId: owner.id,
+      requestId: "postgres-gmail-connect"
+    });
+
+    expect(connected).toMatchObject({
+      teamId: created.team.teamId,
+      email: "monitoring-postgres@example.com",
+      authorizationStatus: "ACTIVE",
+      connectionStatus: "ACTIVE"
+    });
+    const stored = await database.gmailAuthorization.findUniqueOrThrow({
+      where: { userId: owner.id }
+    });
+    expect(stored.encryptedRefreshToken).not.toContain(
+      PostgresGmailOAuthProvider.refreshToken
+    );
+    expect(stored).toMatchObject({
+      provider: "GOOGLE",
+      providerSubject: "postgres-gmail-subject",
+      encryptionProvider: "LOCAL_AES_256_GCM",
+      encryptionKeyVersion: "postgres-test-v1",
+      status: "ACTIVE"
+    });
+    await expect(
+      encryption.decrypt({
+        ciphertext: stored.encryptedRefreshToken ?? "",
+        provider: stored.encryptionProvider ?? "",
+        keyVersion: stored.encryptionKeyVersion ?? ""
+      })
+    ).resolves.toBe(PostgresGmailOAuthProvider.refreshToken);
+    await expect(
+      gmailService.completeAuthorization({
+        state: authorization.state,
+        code: "postgres-gmail-code",
+        authenticatedUserId: owner.id
+      })
+    ).rejects.toMatchObject({
+      code: "GMAIL_AUTHORIZATION_INVALID_OR_EXPIRED",
+      statusCode: 401
+    });
+
+    await gmailService.disconnect({
+      teamId: created.team.teamId,
+      ownerUserId: owner.id,
+      requestId: "postgres-gmail-disconnect"
+    });
+    await expect(
+      database.gmailAuthorization.findUniqueOrThrow({
+        where: { userId: owner.id },
+        select: { status: true, encryptedRefreshToken: true }
+      })
+    ).resolves.toEqual({ status: "REVOKED", encryptedRefreshToken: null });
+    await expect(
+      database.gmailConnection.findUniqueOrThrow({
+        where: { teamId: created.team.teamId },
+        select: { status: true }
+      })
+    ).resolves.toEqual({ status: "REVOKED" });
+    expect(provider.revokedTokens).toContain(
+      PostgresGmailOAuthProvider.refreshToken
+    );
+    const auditActions = await database.auditEvent.findMany({
+      where: { teamId: created.team.teamId },
+      select: { action: true }
+    });
+    expect(auditActions).toHaveLength(3);
+    expect(auditActions).toEqual(
+      expect.arrayContaining([
+        { action: "TEAM_CREATED" },
+        { action: "GMAIL_CONNECTED" },
+        { action: "GMAIL_CONNECTION_DISCONNECTED" }
+      ])
+    );
+  });
+
+  it("shares one Gmail authorization across owned teams and revokes only after the last disconnect", async () => {
+    const owner = await createUser("gmail-multi-team-owner@example.com");
+    const clock = { value: new Date("2026-08-26T00:30:00.000Z") };
+    const first = await createServices(clock, "482739").teamService.createTeam({
+      ownerUserId: owner.id,
+      seatLimit: 0
+    });
+    const second = await createServices(clock, "482740").teamService.createTeam(
+      {
+        ownerUserId: owner.id,
+        seatLimit: 0
+      }
+    );
+    const provider = new PostgresGmailOAuthProvider();
+    const gmailService = new GmailConnectionService({
+      repository: new PrismaGmailConnectionRepository(database),
+      oauthProvider: provider,
+      tokenEncryption: new LocalAesGcmTokenEncryptionProvider(
+        Buffer.alloc(32, 8).toString("base64"),
+        "postgres-multi-team-v1"
+      ),
+      tokenPepper: testPepper,
+      stateTtlMinutes: 10,
+      now: () => clock.value
+    });
+
+    for (const teamId of [first.team.teamId, second.team.teamId]) {
+      const authorization = await gmailService.createAuthorizationRequest(
+        owner.id,
+        teamId,
+        "CONNECT"
+      );
+      await gmailService.completeAuthorization({
+        state: authorization.state,
+        code: "postgres-gmail-code",
+        authenticatedUserId: owner.id
+      });
+    }
+
+    await expect(
+      database.gmailAuthorization.count({ where: { userId: owner.id } })
+    ).resolves.toBe(1);
+    await expect(
+      database.gmailConnection.count({
+        where: {
+          teamId: { in: [first.team.teamId, second.team.teamId] },
+          status: "ACTIVE"
+        }
+      })
+    ).resolves.toBe(2);
+
+    const sharedAuthorization =
+      await database.gmailAuthorization.findUniqueOrThrow({
+        where: { userId: owner.id },
+        select: { id: true }
+      });
+    await gmailService.markCredentialFailure(
+      sharedAuthorization.id,
+      "invalid_grant"
+    );
+    await expect(
+      database.gmailConnection.count({
+        where: {
+          teamId: { in: [first.team.teamId, second.team.teamId] },
+          status: "REAUTH_REQUIRED"
+        }
+      })
+    ).resolves.toBe(2);
+
+    const reauthorization = await gmailService.createAuthorizationRequest(
+      owner.id,
+      first.team.teamId,
+      "REAUTHORIZE"
+    );
+    await gmailService.completeAuthorization({
+      state: reauthorization.state,
+      code: "postgres-gmail-code",
+      authenticatedUserId: owner.id
+    });
+    await expect(
+      database.gmailConnection.count({
+        where: {
+          teamId: { in: [first.team.teamId, second.team.teamId] },
+          status: "ACTIVE"
+        }
+      })
+    ).resolves.toBe(2);
+
+    await gmailService.disconnect({
+      teamId: first.team.teamId,
+      ownerUserId: owner.id
+    });
+    const retainedAuthorization =
+      await database.gmailAuthorization.findUniqueOrThrow({
+        where: { userId: owner.id },
+        select: { status: true, encryptedRefreshToken: true }
+      });
+    expect(retainedAuthorization.status).toBe("ACTIVE");
+    expect(retainedAuthorization.encryptedRefreshToken).not.toBeNull();
+    expect(provider.revokedTokens).toHaveLength(0);
+
+    await gmailService.disconnect({
+      teamId: second.team.teamId,
+      ownerUserId: owner.id
+    });
+    await expect(
+      database.gmailAuthorization.findUniqueOrThrow({
+        where: { userId: owner.id },
+        select: { status: true, encryptedRefreshToken: true }
+      })
+    ).resolves.toEqual({ status: "REVOKED", encryptedRefreshToken: null });
+    expect(provider.revokedTokens).toEqual([
+      PostgresGmailOAuthProvider.refreshToken
+    ]);
   });
 
   it("admits only five members to five seats and returns 409 for the loser", async () => {
@@ -709,6 +941,51 @@ class PostgresGoogleOAuthProvider implements GoogleOAuthProvider {
       emailVerified: true,
       displayName: "PostgreSQL Google User"
     };
+  }
+}
+
+class PostgresGmailOAuthProvider implements GmailOAuthProvider {
+  public static readonly refreshToken =
+    "synthetic-postgres-refresh-token-for-tests-only";
+  public readonly revokedTokens: string[] = [];
+  private nonce: string | null = null;
+
+  public createAuthorizationUrl(input: {
+    readonly state: string;
+    readonly codeChallenge: string;
+    readonly nonce: string;
+  }): string {
+    const url = new URL("https://accounts.example/gmail-authorize");
+    url.searchParams.set("state", input.state);
+    url.searchParams.set("code_challenge", input.codeChallenge);
+    url.searchParams.set("nonce", input.nonce);
+    this.nonce = input.nonce;
+    return url.toString();
+  }
+
+  public async exchangeCode(input: {
+    readonly code: string;
+    readonly codeVerifier: string;
+    readonly expectedNonce: string;
+  }): Promise<GmailOAuthGrant> {
+    if (
+      input.code !== "postgres-gmail-code" ||
+      !input.codeVerifier ||
+      input.expectedNonce !== this.nonce
+    ) {
+      throw new Error("Invalid PostgreSQL Gmail auth fixture");
+    }
+    return {
+      subject: "postgres-gmail-subject",
+      email: "monitoring-postgres@example.com",
+      emailVerified: true,
+      refreshToken: PostgresGmailOAuthProvider.refreshToken,
+      grantedScopes: [GMAIL_READONLY_SCOPE]
+    };
+  }
+
+  public async revokeRefreshToken(refreshToken: string): Promise<void> {
+    this.revokedTokens.push(refreshToken);
   }
 }
 

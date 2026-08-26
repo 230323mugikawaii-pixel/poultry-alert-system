@@ -89,6 +89,16 @@ export class MemoryTeamRepository implements TeamRepository {
     };
   }
 
+  public async findTeamForUser(
+    userId: string,
+    teamId: string
+  ): Promise<TeamContextRecord | null> {
+    if (this.context?.teamId !== teamId) {
+      return null;
+    }
+    return this.findCurrentTeam(userId);
+  }
+
   public async listActiveMembers(): Promise<readonly TeamMemberRecord[]> {
     return this.members;
   }

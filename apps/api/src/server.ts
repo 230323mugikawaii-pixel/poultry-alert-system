@@ -7,6 +7,10 @@ import { SmtpMagicLinkEmailSender } from "./modules/auth/email-sender.js";
 import { GoogleAuthService } from "./modules/auth/google-auth-service.js";
 import { GoogleOAuthClient } from "./modules/auth/google-oauth-client.js";
 import { PrismaAuthRepository } from "./modules/auth/prisma-auth-repository.js";
+import { GmailConnectionService } from "./modules/gmail/gmail-connection-service.js";
+import { GoogleGmailOAuthClient } from "./modules/gmail/gmail-oauth-client.js";
+import { PrismaGmailConnectionRepository } from "./modules/gmail/prisma-gmail-connection-repository.js";
+import { createTokenEncryptionProvider } from "./modules/gmail/token-encryption.js";
 import { InvitationService } from "./modules/invitations/invitation-service.js";
 import { PrismaInvitationRepository } from "./modules/invitations/prisma-invitation-repository.js";
 import { PrismaTeamRepository } from "./modules/teams/prisma-team-repository.js";
@@ -59,6 +63,22 @@ const googleAuthService = new GoogleAuthService({
 const teamService = new TeamService({
   repository: new PrismaTeamRepository(database)
 });
+const gmailConnectionService = new GmailConnectionService({
+  repository: new PrismaGmailConnectionRepository(database),
+  oauthProvider: new GoogleGmailOAuthClient({
+    clientId: environment.GMAIL_OAUTH_CLIENT_ID,
+    clientSecret: environment.GMAIL_OAUTH_CLIENT_SECRET,
+    redirectUri: environment.GMAIL_OAUTH_REDIRECT_URI
+  }),
+  tokenEncryption: createTokenEncryptionProvider({
+    provider: environment.GMAIL_TOKEN_ENCRYPTION_PROVIDER,
+    localKey: environment.GMAIL_TOKEN_ENCRYPTION_KEY,
+    localKeyVersion: environment.GMAIL_TOKEN_ENCRYPTION_KEY_VERSION,
+    kmsKeyName: environment.GMAIL_KMS_KEY_NAME
+  }),
+  tokenPepper: environment.AUTH_TOKEN_PEPPER,
+  stateTtlMinutes: environment.GMAIL_OAUTH_STATE_TTL_MINUTES
+});
 const invitationService = new InvitationService({
   repository: new PrismaInvitationRepository(database),
   teamService,
@@ -73,6 +93,7 @@ const app = await buildApp({
   environment,
   authService,
   googleAuthService,
+  gmailConnectionService,
   teamService,
   invitationService,
   securityThrottleService,

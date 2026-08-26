@@ -146,6 +146,36 @@ export class PrismaTeamRepository implements TeamRepository {
     });
   }
 
+  public async findTeamForUser(
+    userId: string,
+    teamId: string
+  ): Promise<TeamContextRecord | null> {
+    const membership = await this.database.teamMembership.findFirst({
+      where: {
+        userId,
+        teamId,
+        status: "ACTIVE",
+        team: { status: "ACTIVE" }
+      },
+      include: {
+        team: { include: { subscription: true } }
+      }
+    });
+    if (!membership?.team.subscription) {
+      return null;
+    }
+
+    const activeMemberCount = await this.database.teamMembership.count({
+      where: { teamId, role: "MEMBER", status: "ACTIVE" }
+    });
+    return mapTeamContext({
+      team: membership.team,
+      membership,
+      subscription: membership.team.subscription,
+      activeMemberCount
+    });
+  }
+
   public async listActiveMembers(
     teamId: string
   ): Promise<readonly TeamMemberRecord[]> {

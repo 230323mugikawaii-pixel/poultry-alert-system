@@ -123,6 +123,27 @@ export class TeamService {
     }
     return context;
   }
+
+  public async requireOwnerForTeam(
+    userId: string,
+    teamId: string
+  ): Promise<TeamContextRecord> {
+    const context = await this.options.repository.findTeamForUser(
+      userId,
+      teamId
+    );
+    if (!context) {
+      throw new AppError("TEAM_NOT_FOUND", "所属チームが見つかりません。", 404);
+    }
+    if (context.role !== "OWNER") {
+      throw new AppError(
+        "OWNER_REQUIRED",
+        "この操作はチームの代表者だけが実行できます。",
+        403
+      );
+    }
+    return context;
+  }
 }
 
 export function generateTeamCode(): string {
