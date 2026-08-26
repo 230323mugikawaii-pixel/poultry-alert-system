@@ -37,6 +37,15 @@ describe("frontend mail connection boundary", () => {
     expect(script).toContain('beginMailOAuth("oauth/start", provider)');
     expect(script).toContain('"reauthorize",\n    mailConnection.provider');
     expect(script).toContain("/mail-connection/${action}?provider=");
+    expect(script).toContain("/mail-connection/providers");
+    expect(html).toContain('id="googleMailProviderButton"');
+    expect(html).toContain('id="microsoftMailProviderButton"');
+    expect(script).toContain(
+      'mailProviderAvailability[provider] !==\n    "AVAILABLE"'
+    );
+    expect(frontend).toContain(
+      "接続を開始できませんでした。現在サービス設定を確認しています。"
+    );
     expect(script).toContain('method: "DELETE"');
     expect(script).not.toMatch(/refresh[_-]?token/iu);
     expect(script).not.toMatch(/access[_-]?token/iu);

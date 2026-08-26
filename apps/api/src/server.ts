@@ -8,6 +8,7 @@ import { GoogleAuthService } from "./modules/auth/google-auth-service.js";
 import { GoogleOAuthClient } from "./modules/auth/google-oauth-client.js";
 import { PrismaAuthRepository } from "./modules/auth/prisma-auth-repository.js";
 import { MailConnectionService } from "./modules/mail/mail-connection-service.js";
+import { getMailProviderStatuses } from "./modules/mail/mail-provider-configuration.js";
 import { PrismaMailConnectionRepository } from "./modules/mail/prisma-mail-connection-repository.js";
 import { GoogleMailProvider } from "./modules/mail/providers/google-mail-provider.js";
 import { MicrosoftMailProvider } from "./modules/mail/providers/microsoft-mail-provider.js";
@@ -113,6 +114,10 @@ const app = await buildApp({
     await database.$queryRaw`SELECT 1`;
   }
 });
+app.log.info(
+  { mailProviders: getMailProviderStatuses(environment) },
+  "Mail OAuth provider configuration status"
+);
 app.addHook("onClose", async () => database.$disconnect());
 
 const shutdown = async (signal: string): Promise<void> => {

@@ -178,7 +178,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-26.2";
+  "2026-08-26.3";
 
 /*
   正式なURLが決まった場合だけ設定する公開リンク。
@@ -207,6 +207,10 @@ let googleEmail = "";
 let authenticatedUser = null;
 let currentTeam = null;
 let mailConnection = null;
+let mailProviderAvailability = {
+  GOOGLE: "UNKNOWN",
+  MICROSOFT: "UNKNOWN"
+};
 let legacyGoogleAccountsFallbackBackup =
   [];
 let contractStorageMigrationPending =
@@ -266,6 +270,8 @@ async function initializeApplication() {
       currentTeam =
         await bootstrapInitialTeamContext();
     }
+    mailProviderAvailability =
+      await fetchMailProviderAvailability();
     mailConnection =
       await fetchMailConnection();
   }
@@ -285,9 +291,12 @@ async function initializeApplication() {
     readGoogleAuthResult();
   const mailAuthResult =
     readMailAuthResult();
+  const mailAuthProvider =
+    readMailAuthProvider();
 
   if (mailAuthResult) {
     clearAuthResultFromUrl("mailAuth");
+    clearAuthResultFromUrl("mailProvider");
   }
 
   if (googleAuthResult) {
@@ -323,7 +332,9 @@ async function initializeApplication() {
       await showAppAlert(
         mailAuthResult === "success"
           ? "メール監視アカウントを接続しました。"
-          : "メール監視アカウントを接続できませんでした。もう一度お試しください。",
+          : mailAuthResult === "unavailable"
+            ? `${mailProviderLabel(mailAuthProvider)}接続を開始できませんでした。現在サービス設定を確認しています。`
+            : "メール監視アカウントを接続できませんでした。もう一度お試しください。",
         {
           title:
             mailAuthResult === "success"
@@ -571,6 +582,61 @@ async function fetchMailConnection() {
 }
 
 
+async function fetchMailProviderAvailability() {
+  const unknown = {
+    GOOGLE: "UNKNOWN",
+    MICROSOFT: "UNKNOWN"
+  };
+  if (currentTeam?.role !== "OWNER") {
+    return unknown;
+  }
+
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/mail-connection/providers`
+      ),
+      {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Accept: "application/json"
+        },
+        cache: "no-store"
+      }
+    );
+    if (!response.ok) {
+      throw new Error(
+        `mail_provider_status_${response.status}`
+      );
+    }
+    const providers =
+      (await response.json())?.providers;
+    if (!Array.isArray(providers)) {
+      return unknown;
+    }
+    const result = { ...unknown };
+    providers.forEach((entry) => {
+      if (
+        (entry?.provider === "GOOGLE" ||
+          entry?.provider === "MICROSOFT") &&
+        (entry.status === "AVAILABLE" ||
+          entry.status === "NOT_CONFIGURED")
+      ) {
+        result[entry.provider] = entry.status;
+      }
+    });
+    return result;
+  } catch (error) {
+    console.warn(
+      "メール接続の準備状況を確認できませんでした。",
+      error
+    );
+    return unknown;
+  }
+}
+
+
 function readGoogleAuthResult() {
   const result =
     new URL(window.location.href)
@@ -584,6 +650,17 @@ function readGoogleAuthResult() {
 }
 
 
+function readMailAuthProvider() {
+  const provider =
+    new URL(window.location.href)
+      .searchParams
+      .get("mailProvider");
+  return provider === "MICROSOFT"
+    ? "MICROSOFT"
+    : "GOOGLE";
+}
+
+
 function readMailAuthResult() {
   const result =
     new URL(window.location.href)
@@ -591,7 +668,8 @@ function readMailAuthResult() {
       .get("mailAuth");
 
   return result === "success" ||
-    result === "error"
+    result === "error" ||
+    result === "unavailable"
     ? result
     : null;
 }
@@ -1368,6 +1446,8 @@ ${formatYen(totalPrice)}
       currentTeam ||
       (await fetchCurrentTeamContext()) ||
       (await bootstrapInitialTeamContext());
+    mailProviderAvailability =
+      await fetchMailProviderAvailability();
     mailConnection =
       await fetchMailConnection();
     openApp();
@@ -1663,6 +1743,14 @@ function renderMailMonitoringAccount() {
     document.getElementById(
       "mailProviderChoices"
     );
+  const googleProviderButton =
+    document.getElementById(
+      "googleMailProviderButton"
+    );
+  const microsoftProviderButton =
+    document.getElementById(
+      "microsoftMailProviderButton"
+    );
   const changeProviderButton =
     document.getElementById(
       "mailChangeProviderButton"
@@ -1679,6 +1767,8 @@ function renderMailMonitoringAccount() {
   if (
     !status ||
     !providerChoices ||
+    !googleProviderButton ||
+    !microsoftProviderButton ||
     !changeProviderButton ||
     !reauthorizeButton ||
     !disconnectButton
@@ -1690,6 +1780,7 @@ function renderMailMonitoringAccount() {
   changeProviderButton.classList.add("hidden");
   reauthorizeButton.classList.add("hidden");
   disconnectButton.classList.add("hidden");
+  reauthorizeButton.disabled = false;
   providerChoices
     .querySelectorAll("button")
     .forEach((button) => {
@@ -1726,6 +1817,13 @@ function renderMailMonitoringAccount() {
     return;
   }
 
+  googleProviderButton.disabled =
+    mailProviderAvailability.GOOGLE !==
+      "AVAILABLE";
+  microsoftProviderButton.disabled =
+    mailProviderAvailability.MICROSOFT !==
+      "AVAILABLE";
+
   if (
     !mailConnection ||
     mailConnection.connectionStatus === "REVOKED"
@@ -1734,6 +1832,7 @@ function renderMailMonitoringAccount() {
       <p class="connected-account-empty">
         メール監視アカウントは接続されていません。
       </p>
+      ${mailProviderAvailabilityNotice()}
     `;
     providerChoices.classList.remove("hidden");
     return;
@@ -1757,13 +1856,47 @@ function renderMailMonitoringAccount() {
     <p class="connected-account-email">
       ${escapeHtml(mailConnection.email)}
     </p>
+    ${mailProviderAvailabilityNotice()}
   `;
-  changeProviderButton.classList.remove("hidden");
+  if (
+    mailProviderAvailability.GOOGLE ===
+      "AVAILABLE" ||
+    mailProviderAvailability.MICROSOFT ===
+      "AVAILABLE"
+  ) {
+    changeProviderButton.classList.remove("hidden");
+  }
   disconnectButton.classList.remove("hidden");
 
   if (requiresReauthorization) {
     reauthorizeButton.classList.remove("hidden");
+    reauthorizeButton.disabled =
+      mailProviderAvailability[
+        mailConnection.provider
+      ] !== "AVAILABLE";
   }
+}
+
+
+function mailProviderAvailabilityNotice() {
+  const unavailable = [
+    ["GOOGLE", "Gmail"],
+    ["MICROSOFT", "Microsoft 365"]
+  ]
+    .filter(
+      ([provider]) =>
+        mailProviderAvailability[provider] !==
+        "AVAILABLE"
+    )
+    .map(([, label]) => label);
+  if (unavailable.length === 0) {
+    return "";
+  }
+  return `
+    <p class="connected-account-empty">
+      ${unavailable.join("・")}接続は現在準備中です。しばらくしてからもう一度お試しください。
+    </p>
+  `;
 }
 
 
@@ -1828,6 +1961,16 @@ async function beginMailOAuth(action, provider) {
       currentTeam
         ? "メール監視アカウントの変更は管理者のみ行えます。"
         : "メール監視アカウントの準備を完了できませんでした。ページを再読み込みしてください。"
+    );
+    return;
+  }
+
+  if (
+    mailProviderAvailability[provider] !==
+    "AVAILABLE"
+  ) {
+    await showAppAlert(
+      `${mailProviderLabel(provider)}接続を開始できませんでした。現在サービス設定を確認しています。`
     );
     return;
   }
@@ -2664,6 +2807,10 @@ async function performLogout() {
   googleEmail = "";
   currentTeam = null;
   mailConnection = null;
+  mailProviderAvailability = {
+    GOOGLE: "UNKNOWN",
+    MICROSOFT: "UNKNOWN"
+  };
 
   setupMode =
     "login";

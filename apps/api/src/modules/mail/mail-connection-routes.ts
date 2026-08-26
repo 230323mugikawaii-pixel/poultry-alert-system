@@ -10,6 +10,10 @@ import type { TeamService } from "../teams/team-service.js";
 import type { MailConnectionRecord } from "./mail-connection-repository.js";
 import type { MailConnectionService } from "./mail-connection-service.js";
 import type { MailProviderId } from "./mail-provider.js";
+import {
+  getMailProviderAvailability,
+  getMailProviderStatuses
+} from "./mail-provider-configuration.js";
 
 const TeamParams = Type.Object({
   teamId: Type.String({
@@ -124,6 +128,55 @@ export function createMailConnectionRoutes(
       getConnection
     );
 
+    app.get(
+      "/api/v1/teams/:teamId/mail-connection/providers",
+      {
+        schema: {
+          params: TeamParams,
+          response: {
+            200: Type.Object({
+              providers: Type.Array(
+                Type.Object({
+                  provider: Type.Union([
+                    Type.Literal("GOOGLE"),
+                    Type.Literal("MICROSOFT")
+                  ]),
+                  status: Type.Union([
+                    Type.Literal("AVAILABLE"),
+                    Type.Literal("NOT_CONFIGURED")
+                  ])
+                })
+              )
+            })
+          }
+        }
+      },
+      async (request) => {
+        const userId = await authenticateUserId(request);
+        await teamService.requireOwnerForTeam(userId, request.params.teamId);
+        const statuses = getMailProviderStatuses(environment);
+        return {
+          providers: [
+            { provider: "GOOGLE" as const, status: statuses.GOOGLE },
+            { provider: "MICROSOFT" as const, status: statuses.MICROSOFT }
+          ]
+        };
+      }
+    );
+
+    app.get(
+      "/api/v1/teams/:teamId/gmail-connection/provider-status",
+      { schema: { params: TeamParams } },
+      async (request) => {
+        const userId = await authenticateUserId(request);
+        await teamService.requireOwnerForTeam(userId, request.params.teamId);
+        return {
+          provider: "GOOGLE" as const,
+          status: getMailProviderAvailability(environment, "GOOGLE")
+        };
+      }
+    );
+
     const startOAuth = async (
       request: StartRequest,
       reply: StartReply,
@@ -131,37 +184,62 @@ export function createMailConnectionRoutes(
       provider: MailProviderId
     ): Promise<void> => {
       requireSameOrigin(request);
-      const userId = await authenticateUserId(request);
-      await teamService.requireOwnerForTeam(userId, request.params.teamId);
-      const throttlePrefix = `mail_${provider.toLowerCase()}_start`;
-      await securityThrottle.consume([
-        throttleRule(`${throttlePrefix}_global`, ["all"], 1_000, 1, 5),
-        throttleRule(`${throttlePrefix}_source`, [request.ip], 20, 15, 15),
-        throttleRule(`${throttlePrefix}_user`, [userId], 10, 15, 15),
-        throttleRule(
-          `${throttlePrefix}_team_user`,
-          [request.params.teamId, userId],
-          10,
-          15,
-          15
-        )
-      ]);
-      const authorization =
-        await mailConnectionService.createAuthorizationRequest(
-          userId,
-          request.params.teamId,
-          intent,
-          provider
+      try {
+        const userId = await authenticateUserId(request);
+        await teamService.requireOwnerForTeam(userId, request.params.teamId);
+        if (
+          getMailProviderAvailability(environment, provider) !== "AVAILABLE"
+        ) {
+          request.log.warn(
+            { code: "MAIL_PROVIDER_NOT_CONFIGURED", provider },
+            "Mail OAuth start unavailable"
+          );
+          await reply
+            .status(303)
+            .redirect(frontendResultUrl(environment, "unavailable", provider));
+          return;
+        }
+        const throttlePrefix = `mail_${provider.toLowerCase()}_start`;
+        await securityThrottle.consume([
+          throttleRule(`${throttlePrefix}_global`, ["all"], 1_000, 1, 5),
+          throttleRule(`${throttlePrefix}_source`, [request.ip], 20, 15, 15),
+          throttleRule(`${throttlePrefix}_user`, [userId], 10, 15, 15),
+          throttleRule(
+            `${throttlePrefix}_team_user`,
+            [request.params.teamId, userId],
+            10,
+            15,
+            15
+          )
+        ]);
+        const authorization =
+          await mailConnectionService.createAuthorizationRequest(
+            userId,
+            request.params.teamId,
+            intent,
+            provider
+          );
+        const stateCookie = stateCookieConfiguration(environment, provider);
+        reply.setCookie(stateCookie.name, authorization.state, {
+          httpOnly: true,
+          secure: usesSecureCookies(environment),
+          sameSite: "lax",
+          path: stateCookie.path,
+          maxAge: stateCookie.ttlMinutes * 60
+        });
+        await reply.status(303).redirect(authorization.authorizationUrl);
+      } catch (error) {
+        if (error instanceof AppError && error.statusCode < 500) {
+          throw error;
+        }
+        request.log.error(
+          { err: error, code: "MAIL_OAUTH_START_FAILED", provider },
+          "Mail OAuth start failed"
         );
-      const stateCookie = stateCookieConfiguration(environment, provider);
-      reply.setCookie(stateCookie.name, authorization.state, {
-        httpOnly: true,
-        secure: usesSecureCookies(environment),
-        sameSite: "lax",
-        path: stateCookie.path,
-        maxAge: stateCookie.ttlMinutes * 60
-      });
-      await reply.status(303).redirect(authorization.authorizationUrl);
+        await reply
+          .status(303)
+          .redirect(frontendResultUrl(environment, "error", provider));
+      }
     };
 
     app.post(
@@ -218,7 +296,7 @@ export function createMailConnectionRoutes(
         !state ||
         !safeEqual(state, cookieState)
       ) {
-        await reply.redirect(frontendResultUrl(environment, "error"));
+        await reply.redirect(frontendResultUrl(environment, "error", provider));
         return;
       }
       try {
@@ -237,7 +315,9 @@ export function createMailConnectionRoutes(
           authenticatedUserId: userId,
           requestId: request.id
         });
-        await reply.redirect(frontendResultUrl(environment, "success"));
+        await reply.redirect(
+          frontendResultUrl(environment, "success", provider)
+        );
       } catch (error) {
         const code =
           error instanceof AppError ? error.code : "MAIL_AUTH_FAILED";
@@ -245,7 +325,7 @@ export function createMailConnectionRoutes(
           { code, provider },
           "Mail authorization callback failed"
         );
-        await reply.redirect(frontendResultUrl(environment, "error"));
+        await reply.redirect(frontendResultUrl(environment, "error", provider));
       }
     };
 
@@ -302,6 +382,10 @@ interface BaseRequest {
   readonly params: { readonly teamId: string };
   readonly cookies: Readonly<Record<string, string | undefined>>;
   readonly headers: Readonly<Record<string, string | string[] | undefined>>;
+  readonly log: {
+    error(data: object, message: string): unknown;
+    warn(data: object, message: string): unknown;
+  };
 }
 
 type StartRequest = BaseRequest;
@@ -371,10 +455,12 @@ function stateCookieConfiguration(
 
 function frontendResultUrl(
   environment: AppEnvironment,
-  result: "success" | "error"
+  result: "success" | "error" | "unavailable",
+  provider: MailProviderId
 ): string {
   const url = new URL("/", environment.PUBLIC_ORIGIN);
   url.searchParams.set("mailAuth", result);
+  url.searchParams.set("mailProvider", provider);
   return url.toString();
 }
 

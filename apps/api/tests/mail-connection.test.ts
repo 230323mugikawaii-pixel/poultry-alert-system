@@ -9,6 +9,10 @@ import type {
   MailProviderAdapter
 } from "../src/modules/mail/mail-provider.js";
 import {
+  getMailProviderAvailability,
+  getMailProviderStatuses
+} from "../src/modules/mail/mail-provider-configuration.js";
+import {
   GMAIL_READONLY_SCOPE,
   GoogleMailProvider
 } from "../src/modules/mail/providers/google-mail-provider.js";
@@ -56,7 +60,7 @@ const environment: AppEnvironment = {
   MICROSOFT_OAUTH_TENANT: "common",
   MICROSOFT_OAUTH_STATE_TTL_MINUTES: 10,
   MAIL_TOKEN_ENCRYPTION_PROVIDER: "local",
-  MAIL_TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  MAIL_TOKEN_ENCRYPTION_KEY: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
   MAIL_TOKEN_ENCRYPTION_KEY_VERSION: "test-local-v1",
   MAIL_KMS_KEY_NAME: "",
   MAGIC_LINK_TTL_MINUTES: 15,
@@ -76,6 +80,43 @@ const environment: AppEnvironment = {
 
 const syntheticRefreshToken =
   "synthetic-refresh-token-for-tests-only-not-a-real-credential";
+
+describe("mail provider configuration", () => {
+  it("reports availability separately for Gmail and Microsoft", () => {
+    expect(getMailProviderStatuses(environment)).toEqual({
+      GOOGLE: "AVAILABLE",
+      MICROSOFT: "AVAILABLE"
+    });
+    expect(
+      getMailProviderAvailability(
+        {
+          ...environment,
+          GMAIL_OAUTH_CLIENT_ID: "development-gmail-client-id"
+        },
+        "GOOGLE"
+      )
+    ).toBe("NOT_CONFIGURED");
+    expect(
+      getMailProviderAvailability(
+        {
+          ...environment,
+          MICROSOFT_OAUTH_CLIENT_SECRET: "development-microsoft-client-secret"
+        },
+        "MICROSOFT"
+      )
+    ).toBe("NOT_CONFIGURED");
+    expect(
+      getMailProviderAvailability(
+        {
+          ...environment,
+          MAIL_TOKEN_ENCRYPTION_KEY:
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        },
+        "GOOGLE"
+      )
+    ).toBe("NOT_CONFIGURED");
+  });
+});
 
 describe("Gmail token encryption", () => {
   it("round-trips with AES-256-GCM without retaining plaintext", async () => {
@@ -521,6 +562,18 @@ describe("Gmail connection routes", () => {
       ),
       logger: false
     });
+    const providerStatuses = await app.inject({
+      method: "GET",
+      url: `/api/v1/teams/${team.teamId}/mail-connection/providers`,
+      headers: { cookie: sessionCookie(owner.sessionToken) }
+    });
+    expect(providerStatuses.statusCode).toBe(200);
+    expect(providerStatuses.json()).toEqual({
+      providers: [
+        { provider: "GOOGLE", status: "AVAILABLE" },
+        { provider: "MICROSOFT", status: "AVAILABLE" }
+      ]
+    });
     const memberStart = await app.inject({
       method: "POST",
       url: `/api/v1/teams/${team.teamId}/gmail-connection/oauth/start`,
@@ -559,7 +612,7 @@ describe("Gmail connection routes", () => {
     });
     expect(callback.statusCode).toBe(302);
     expect(callback.headers.location).toBe(
-      `${environment.PUBLIC_ORIGIN}/?mailAuth=success`
+      `${environment.PUBLIC_ORIGIN}/?mailAuth=success&mailProvider=GOOGLE`
     );
     const replayedCallback = await app.inject({
       method: "GET",
@@ -570,7 +623,7 @@ describe("Gmail connection routes", () => {
     });
     expect(replayedCallback.statusCode).toBe(302);
     expect(replayedCallback.headers.location).toBe(
-      `${environment.PUBLIC_ORIGIN}/?mailAuth=error`
+      `${environment.PUBLIC_ORIGIN}/?mailAuth=error&mailProvider=GOOGLE`
     );
 
     const ownerView = await app.inject({
@@ -617,7 +670,7 @@ describe("Gmail connection routes", () => {
     });
     expect(microsoftCallback.statusCode).toBe(302);
     expect(microsoftCallback.headers.location).toBe(
-      `${environment.PUBLIC_ORIGIN}/?mailAuth=success`
+      `${environment.PUBLIC_ORIGIN}/?mailAuth=success&mailProvider=MICROSOFT`
     );
     const switchedView = await app.inject({
       method: "GET",
@@ -652,6 +705,120 @@ describe("Gmail connection routes", () => {
     expect(disconnected.statusCode).toBe(204);
     expect(microsoftProvider.revokedTokens).toContain(syntheticRefreshToken);
     await app.close();
+  });
+
+  it("reports each provider separately and returns safely when OAuth cannot start", async () => {
+    const unavailableEnvironment: AppEnvironment = {
+      ...environment,
+      MICROSOFT_OAUTH_CLIENT_SECRET: "development-microsoft-client-secret"
+    };
+    const authRepository = new MemoryAuthRepository();
+    const emailSender = new MemoryMagicLinkEmailSender();
+    const authService = new AuthService({
+      repository: authRepository,
+      emailSender,
+      publicOrigin: environment.PUBLIC_ORIGIN,
+      tokenPepper: environment.AUTH_TOKEN_PEPPER,
+      magicLinkTtlMinutes: environment.MAGIC_LINK_TTL_MINUTES,
+      sessionIdleDays: environment.SESSION_IDLE_DAYS,
+      sessionAbsoluteDays: environment.SESSION_ABSOLUTE_DAYS,
+      maxActiveSessions: environment.MAX_ACTIVE_SESSIONS
+    });
+    const owner = await login(authService, emailSender, "owner@example.com");
+    const teamService = new TeamService({
+      repository: new MemoryTeamRepository(),
+      teamCodeGenerator: () => "482731"
+    });
+    const { team } = await teamService.createTeam({
+      ownerUserId: owner.userId,
+      seatLimit: 0
+    });
+    const mailConnectionService = new MailConnectionService({
+      repository: new MemoryMailConnectionRepository(),
+      providerAdapters: [
+        new FakeMailProviderAdapter(),
+        new FakeMailProviderAdapter(false, "MICROSOFT")
+      ],
+      tokenEncryption: createEncryption(),
+      tokenPepper: environment.AUTH_TOKEN_PEPPER,
+      stateTtlMinutes: { GOOGLE: 10, MICROSOFT: 10 }
+    });
+    const app = await buildApp({
+      environment: unavailableEnvironment,
+      authService,
+      teamService,
+      mailConnectionService,
+      securityThrottleService: new SecurityThrottleService(
+        new MemorySecurityThrottleRepository(),
+        environment.AUTH_TOKEN_PEPPER
+      ),
+      logger: false
+    });
+
+    const statuses = await app.inject({
+      method: "GET",
+      url: `/api/v1/teams/${team.teamId}/mail-connection/providers`,
+      headers: { cookie: sessionCookie(owner.sessionToken) }
+    });
+    expect(statuses.json()).toEqual({
+      providers: [
+        { provider: "GOOGLE", status: "AVAILABLE" },
+        { provider: "MICROSOFT", status: "NOT_CONFIGURED" }
+      ]
+    });
+    const unavailableStart = await app.inject({
+      method: "POST",
+      url: `/api/v1/teams/${team.teamId}/mail-connection/oauth/start?provider=MICROSOFT`,
+      headers: {
+        origin: environment.PUBLIC_ORIGIN,
+        cookie: sessionCookie(owner.sessionToken)
+      }
+    });
+    expect(unavailableStart.statusCode).toBe(303);
+    expect(unavailableStart.headers.location).toBe(
+      `${environment.PUBLIC_ORIGIN}/?mailAuth=unavailable&mailProvider=MICROSOFT`
+    );
+    expect(unavailableStart.headers["set-cookie"]).toBeUndefined();
+    await app.close();
+
+    const failingRepository = new MemoryMailConnectionRepository();
+    failingRepository.createOAuthChallenge = async () => {
+      throw new Error("synthetic database failure");
+    };
+    const failingApp = await buildApp({
+      environment,
+      authService,
+      teamService,
+      mailConnectionService: new MailConnectionService({
+        repository: failingRepository,
+        providerAdapters: [
+          new FakeMailProviderAdapter(),
+          new FakeMailProviderAdapter(false, "MICROSOFT")
+        ],
+        tokenEncryption: createEncryption(),
+        tokenPepper: environment.AUTH_TOKEN_PEPPER,
+        stateTtlMinutes: { GOOGLE: 10, MICROSOFT: 10 }
+      }),
+      securityThrottleService: new SecurityThrottleService(
+        new MemorySecurityThrottleRepository(),
+        environment.AUTH_TOKEN_PEPPER
+      ),
+      logger: false
+    });
+    const failedStart = await failingApp.inject({
+      method: "POST",
+      url: `/api/v1/teams/${team.teamId}/mail-connection/oauth/start?provider=GOOGLE`,
+      headers: {
+        origin: environment.PUBLIC_ORIGIN,
+        cookie: sessionCookie(owner.sessionToken)
+      }
+    });
+    expect(failedStart.statusCode).toBe(303);
+    expect(failedStart.headers.location).toBe(
+      `${environment.PUBLIC_ORIGIN}/?mailAuth=error&mailProvider=GOOGLE`
+    );
+    expect(failedStart.body).not.toContain("INTERNAL_ERROR");
+    await failingApp.close();
   });
 });
 

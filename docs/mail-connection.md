@@ -14,6 +14,11 @@ exchange, access-token refresh, revocation behavior, and error classification.
 database transactions, encrypted credential storage, OWNER authorization, and UI
 status handling remain provider-neutral.
 
+The provider-status endpoint reports only `AVAILABLE` or
+`NOT_CONFIGURED` for each provider. It never returns OAuth credentials or
+encryption keys. OAuth navigation returns to Call Now with a safe error result
+if provider setup is incomplete or the start operation fails.
+
 ### Google / Gmail
 
 - Use a separate Google Web application OAuth client from Call Now login.
