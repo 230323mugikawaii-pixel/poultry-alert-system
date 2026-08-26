@@ -807,7 +807,7 @@ footer {
   line-height: 1.7;
 }
 
-.gmail-account-actions {
+.mail-account-actions {
   display: flex;
 
   flex-wrap: wrap;
@@ -815,8 +815,21 @@ footer {
   gap: 10px;
 }
 
-.gmail-account-actions .btn,
-.gmail-account-actions .account-remove-button {
+.mail-provider-choices {
+  display: grid;
+
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+
+  gap: 10px;
+}
+
+.mail-provider-button {
+  min-width: 0;
+}
+
+.mail-account-actions .btn,
+.mail-account-actions .account-remove-button {
   flex: 1 1 210px;
 }
 
@@ -865,6 +878,14 @@ footer {
 
 .connected-account-email {
   overflow-wrap: anywhere;
+}
+
+.connected-account-provider {
+  margin: 0;
+
+  color: var(--text);
+
+  font-weight: 800;
 }
 
 .connected-account-empty {
@@ -1993,6 +2014,10 @@ body.app-dialog-open {
 
   .google-account-role .connected-account-summary {
     text-align: left;
+  }
+
+  .mail-provider-choices {
+    grid-template-columns: 1fr;
   }
 
   .account-select-button {
