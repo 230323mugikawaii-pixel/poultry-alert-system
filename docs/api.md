@@ -42,6 +42,19 @@ An increase returns `AWAITING_PAYMENT`; a trusted billing adapter applies it lat
 A safe decrease returns `APPLIED`. An over-capacity decrease returns
 `PENDING_CAPACITY` and suspends invitations.
 
+## Gmail monitoring connection
+
+- `GET /api/v1/teams/:teamId/gmail-connection` (OWNER only)
+- `POST /api/v1/teams/:teamId/gmail-connection/oauth/start` (OWNER only)
+- `POST /api/v1/teams/:teamId/gmail-connection/reauthorize` (OWNER only)
+- `GET /api/v1/auth/gmail/callback`
+- `DELETE /api/v1/teams/:teamId/gmail-connection` (OWNER only)
+
+Gmail authorization is independent from the Google identity used to log in. It
+requests offline `gmail.readonly` consent. Refresh tokens never enter JSON responses
+or browser storage; they are encrypted before PostgreSQL persistence. Disconnect
+disables the local credential transactionally before best-effort Google revocation.
+
 ## Invitations and membership
 
 - `GET /api/v1/teams/current/invitations`

@@ -14,5 +14,6 @@
   Phase 1 Sessionだけを正とします。
 - ログインでは `openid`、`email`、`profile` だけを要求します。
 - GoogleのパスワードはCall Nowでは取得・保存しません。
-- Gmail監視用の権限・トークンを保存する`GmailConnection`本実装は後続です。
+- Gmail監視権限はログインとは別のOAuthで取得し、`gmail.readonly`だけを要求します。
+- Gmailのrefresh tokenはブラウザへ返さず、サーバー側で暗号化して保存します。
 - 旧形式のlocalStorageメールアドレスは本人確認に使用しません。
