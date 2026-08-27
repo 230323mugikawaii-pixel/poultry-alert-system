@@ -60,6 +60,9 @@ interface TeamBootstrapResponse {
       readonly seatLimit: number;
       readonly activeMemberCount: number;
     };
+    readonly subscription: {
+      readonly status: "ACTIVE" | "PAST_DUE" | "CANCELED";
+    };
   };
 }
 
@@ -127,7 +130,8 @@ describe("team routes", () => {
     );
     expect(firstPayload.team).toMatchObject({
       role: "OWNER",
-      seats: { seatLimit: 0, activeMemberCount: 0 }
+      seats: { seatLimit: 0, activeMemberCount: 0 },
+      subscription: { status: "ACTIVE" }
     });
     expect(teamRepository.teamCreationCount).toBe(1);
 

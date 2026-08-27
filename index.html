@@ -50,7 +50,8 @@
 
           <p>
             大切なメール通知を、見逃しにくい音へ変換します。<br>
-            停止ボタンを押すまで、繰り返し通知します。
+            停止ボタンを押すまで、繰り返し通知します。<br>
+            アカウント登録後、通知したいキーワードを設定できます。
           </p>
 
 
@@ -59,9 +60,9 @@
             <button
               type="button"
               class="btn primary"
-              onclick="startSignup()"
+              onclick="startAccountRegistration()"
             >
-              今すぐ始める
+              アカウント登録 / ログイン
             </button>
 
 
@@ -539,7 +540,7 @@
         <div class="payment-detail">
 
           <span>
-            監視用Googleアカウント
+            メール監視アカウント
           </span>
 
           <strong>
@@ -1387,7 +1388,7 @@
   <!-- 動作用JavaScript -->
 
     <script src="js/keyword-policy.js?v=2"></script>
-    <script src="js/app.js?v=20"></script>
+    <script src="js/app.js?v=21"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";

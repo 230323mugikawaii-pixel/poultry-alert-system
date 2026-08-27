@@ -630,6 +630,7 @@ function mapTeamContext(input: {
     readonly role: "OWNER" | "MEMBER";
   };
   readonly subscription: {
+    readonly status: "ACTIVE" | "PAST_DUE" | "CANCELED";
     readonly seatLimit: number;
     readonly pendingSeatLimit: number | null;
     readonly currentTermAmountYen: number;
@@ -649,6 +650,7 @@ function mapTeamContext(input: {
       input.activeMemberCount
     ),
     pendingSeatLimit: input.subscription.pendingSeatLimit,
+    subscriptionStatus: input.subscription.status,
     currentTermAmountYen: input.subscription.currentTermAmountYen,
     currentTermStartedAt: input.subscription.currentTermStartedAt,
     currentTermEndsAt: input.subscription.currentTermEndsAt
