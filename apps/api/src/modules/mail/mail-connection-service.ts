@@ -7,10 +7,12 @@ import type {
   MailOAuthIntent,
   ProviderToken
 } from "./mail-connection-repository.js";
-import type {
-  MailProviderAdapter,
-  MailProviderErrorKind,
-  MailProviderId
+import {
+  readMailOAuthFailureReason,
+  type MailOAuthFailureReason,
+  type MailProviderAdapter,
+  type MailProviderErrorKind,
+  type MailProviderId
 } from "./mail-provider.js";
 import type { TokenEncryptionProvider } from "./token-encryption.js";
 
@@ -109,8 +111,8 @@ export class MailConnectionService {
         codeVerifier: challenge.codeVerifier,
         expectedNonce: challenge.nonce
       });
-    } catch {
-      throw invalidMailAuthorizationError();
+    } catch (error) {
+      throw invalidMailAuthorizationError(readMailOAuthFailureReason(error));
     }
     const email = grant.email.trim().toLowerCase();
     if (
@@ -244,10 +246,13 @@ function isPlausibleCode(value: string): boolean {
   return value.length >= 10 && value.length <= 4096 && !/[\r\n\0]/u.test(value);
 }
 
-function invalidMailAuthorizationError(): AppError {
+function invalidMailAuthorizationError(
+  reasonCode?: MailOAuthFailureReason
+): AppError {
   return new AppError(
     "MAIL_AUTHORIZATION_INVALID_OR_EXPIRED",
     "メール連携が無効または期限切れです。もう一度お試しください。",
-    401
+    401,
+    reasonCode ? { reasonCode } : undefined
   );
 }

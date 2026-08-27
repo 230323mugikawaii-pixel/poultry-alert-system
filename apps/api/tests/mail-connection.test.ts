@@ -391,7 +391,8 @@ describe("MailConnectionService", () => {
         authenticatedUserId: "owner-user-id"
       })
     ).rejects.toMatchObject({
-      code: "MAIL_AUTHORIZATION_INVALID_OR_EXPIRED"
+      code: "MAIL_AUTHORIZATION_INVALID_OR_EXPIRED",
+      details: { reasonCode: "PROVIDER_RESPONSE_INVALID" }
     });
   });
 
