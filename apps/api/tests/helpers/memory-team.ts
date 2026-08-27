@@ -54,6 +54,7 @@ export class MemoryTeamRepository implements TeamRepository {
       role: "OWNER",
       seatSummary: calculateSeatSummary(input.seatLimit, 0),
       pendingSeatLimit: null,
+      subscriptionStatus: "ACTIVE",
       currentTermAmountYen: input.currentTermAmountYen,
       currentTermStartedAt: input.currentTermStartedAt,
       currentTermEndsAt: input.currentTermEndsAt

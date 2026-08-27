@@ -24,6 +24,11 @@ const TeamResponse = Type.Object({
   seats: SeatSummaryResponse,
   pendingSeatLimit: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
   subscription: Type.Object({
+    status: Type.Union([
+      Type.Literal("ACTIVE"),
+      Type.Literal("PAST_DUE"),
+      Type.Literal("CANCELED")
+    ]),
     currentTermAmountYen: Type.Integer({ minimum: 6000 }),
     currentTermStartedAt: Type.String(),
     currentTermEndsAt: Type.String()
@@ -280,6 +285,7 @@ function serializeTeam(team: TeamContextRecord) {
     seats: team.seatSummary,
     pendingSeatLimit: team.pendingSeatLimit,
     subscription: {
+      status: team.subscriptionStatus,
       currentTermAmountYen: team.currentTermAmountYen,
       currentTermStartedAt: team.currentTermStartedAt.toISOString(),
       currentTermEndsAt: team.currentTermEndsAt.toISOString()

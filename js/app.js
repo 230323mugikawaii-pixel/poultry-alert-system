@@ -178,7 +178,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-26.3";
+  "2026-08-27.2";
 
 /*
   正式なURLが決まった場合だけ設定する公開リンク。
@@ -262,18 +262,14 @@ async function initializeApplication() {
   if (authenticatedUser) {
     currentTeam =
       await fetchCurrentTeamContext();
-    if (
-      !currentTeam &&
-      contractStartDate &&
-      contractEndDate
-    ) {
-      currentTeam =
-        await bootstrapInitialTeamContext();
+    synchronizeContractFromCurrentTeam();
+
+    if (hasActiveSubscription()) {
+      mailProviderAvailability =
+        await fetchMailProviderAvailability();
+      mailConnection =
+        await fetchMailConnection();
     }
-    mailProviderAvailability =
-      await fetchMailProviderAvailability();
-    mailConnection =
-      await fetchMailConnection();
   }
 
   if (contractStorageMigrationPending) {
@@ -284,8 +280,7 @@ async function initializeApplication() {
 
   const canOpenApp =
     Boolean(authenticatedUser) &&
-    contractStartDate &&
-    contractEndDate;
+    hasActiveSubscription();
 
   const googleAuthResult =
     readGoogleAuthResult();
@@ -306,19 +301,15 @@ async function initializeApplication() {
       googleAuthResult === "success" &&
       authenticatedUser
     ) {
-      if (contractStartDate && contractEndDate) {
+      if (hasActiveSubscription()) {
         openApp();
       } else {
-        showOnlyScreen("landingScreen");
+        openSetupForAuthenticatedUser();
       }
       return;
     }
 
-    openGoogleScreen(
-      contractStartDate && contractEndDate
-        ? "login"
-        : "link"
-    );
+    openGoogleScreen("login");
     setText(
       "googleError",
       "Googleログインに失敗しました。もう一度お試しください。"
@@ -519,18 +510,84 @@ async function bootstrapInitialTeamContext() {
 
 
 function parseTeamContext(team) {
+  const subscription =
+    team?.subscription;
+  const termStartedAt =
+    new Date(
+      subscription?.currentTermStartedAt ??
+        ""
+    );
+  const termEndsAt =
+    new Date(
+      subscription?.currentTermEndsAt ??
+        ""
+    );
+
   if (
     !team ||
     typeof team.id !== "string" ||
     (team.role !== "OWNER" &&
-      team.role !== "MEMBER")
+      team.role !== "MEMBER") ||
+    !subscription ||
+    ![
+      "ACTIVE",
+      "PAST_DUE",
+      "CANCELED"
+    ].includes(subscription.status) ||
+    typeof subscription.currentTermAmountYen !==
+      "number" ||
+    Number.isNaN(termStartedAt.getTime()) ||
+    Number.isNaN(termEndsAt.getTime())
   ) {
     return null;
   }
   return {
     id: team.id,
-    role: team.role
+    role: team.role,
+    subscription: {
+      status: subscription.status,
+      currentTermAmountYen:
+        subscription.currentTermAmountYen,
+      currentTermStartedAt:
+        termStartedAt,
+      currentTermEndsAt:
+        termEndsAt
+    }
   };
+}
+
+
+function hasActiveSubscription() {
+  const subscription =
+    currentTeam?.subscription;
+
+  return Boolean(
+    subscription &&
+      subscription.status === "ACTIVE" &&
+      subscription.currentTermEndsAt >
+        new Date()
+  );
+}
+
+
+function synchronizeContractFromCurrentTeam() {
+  if (!currentTeam?.subscription) {
+    return;
+  }
+
+  contractStartDate =
+    new Date(
+      currentTeam.subscription.currentTermStartedAt
+    );
+  contractEndDate =
+    new Date(
+      currentTeam.subscription.currentTermEndsAt
+    );
+  paidAnnualPrice =
+    currentTeam.subscription.currentTermAmountYen;
+  totalPrice =
+    currentTeam.subscription.currentTermAmountYen;
+  saveData();
 }
 
 
@@ -702,11 +759,28 @@ function scrollToService() {
 }
 
 
-function startSignup() {
-  setupMode =
-    contractStartDate && contractEndDate
-      ? "login"
-      : "signup";
+function startAccountRegistration() {
+  if (!authenticatedUser) {
+    openGoogleScreen("login");
+    return;
+  }
+
+  if (hasActiveSubscription()) {
+    openApp();
+    return;
+  }
+
+  openSetupForAuthenticatedUser();
+}
+
+
+function openSetupForAuthenticatedUser() {
+  if (!authenticatedUser) {
+    openGoogleScreen("login");
+    return;
+  }
+
+  setupMode = "signup";
 
   showOnlyScreen("setupScreen");
   renderKeywordInputs();
@@ -734,6 +808,11 @@ function handleSetupBack() {
 
 
 function backToSetup() {
+  if (!authenticatedUser) {
+    openGoogleScreen("login");
+    return;
+  }
+
   showOnlyScreen("setupScreen");
   renderKeywordInputs();
   updateSetupScreenText();
@@ -1142,28 +1221,6 @@ function updateSetupScreenText() {
     return;
   }
 
-  if (setupMode === "login") {
-    setText(
-      "setupStepLabel",
-      "再ログイン"
-    );
-
-    setText(
-      "setupTitle",
-      "通知キーワードを確認"
-    );
-
-    setText(
-      "setupDescription",
-      "前回保存したキーワードが表示されています。確認後、決済内容を確認してください。"
-    );
-
-    continueButton.textContent =
-      "決済内容を確認";
-
-    return;
-  }
-
   if (setupMode === "edit") {
     setText(
       "setupStepLabel",
@@ -1207,6 +1264,11 @@ function updateSetupScreenText() {
 
 
 async function continueFromSetup() {
+  if (!authenticatedUser) {
+    openGoogleScreen("login");
+    return;
+  }
+
   if (!validateKeywords()) {
     return;
   }
@@ -1215,26 +1277,6 @@ async function continueFromSetup() {
     getValidKeywords();
 
   updatePrice();
-
-  /*
-    ログアウト後の再ログイン
-  */
-
-    if (setupMode === "login") {
-  // ログアウト後に料金が上がった場合
-  if (totalPrice > paidAnnualPrice) {
-    paymentMode = "upgrade";
-
-    openPayment();
-    return;
-  }
-
-  // 料金が変わっていない場合
-  saveData();
-  openGoogleScreen("login");
-
-  return;
-}
 
   /*
     契約内容を編集している場合
@@ -1256,11 +1298,6 @@ if (setupMode === "edit") {
     同額・値下げの場合は追加決済なし
   */
   saveData();
-
-  if (!googleEmail) {
-    openGoogleScreen("link");
-    return;
-  }
 
   openApp();
 
@@ -1291,6 +1328,11 @@ ${formatYen(totalPrice)}
 ======================================== */
 
 function openPayment() {
+  if (!authenticatedUser) {
+    openGoogleScreen("login");
+    return;
+  }
+
   const renewalMode =
     paymentMode === "renewal";
 
@@ -1370,6 +1412,11 @@ function openPayment() {
 }
 
 async function completeDemoPayment() {
+  if (!authenticatedUser) {
+    openGoogleScreen("login");
+    return;
+  }
+
   if (paymentMode === "renewal") {
     extendContractByOneYear();
 
@@ -1408,11 +1455,7 @@ async function completeDemoPayment() {
 
     saveData();
 
-    if (!googleEmail) {
-      openGoogleScreen("link");
-    } else {
-      openApp();
-    }
+    openApp();
 
     await showAppAlert(
       `契約内容を変更しました。
@@ -1441,19 +1484,27 @@ ${formatYen(totalPrice)}
     totalPrice;
 
   saveData();
-  if (authenticatedUser) {
-    currentTeam =
-      currentTeam ||
-      (await fetchCurrentTeamContext()) ||
-      (await bootstrapInitialTeamContext());
-    mailProviderAvailability =
-      await fetchMailProviderAvailability();
-    mailConnection =
-      await fetchMailConnection();
-    openApp();
-  } else {
-    openGoogleScreen("link");
+  currentTeam =
+    (await fetchCurrentTeamContext()) ||
+    (await bootstrapInitialTeamContext());
+
+  if (!currentTeam ||
+      !hasActiveSubscription()) {
+    await showAppAlert(
+      "契約情報を保存できませんでした。通信状態を確認して、もう一度お試しください。",
+      {
+        title: "契約処理のエラー"
+      }
+    );
+    return;
   }
+
+  synchronizeContractFromCurrentTeam();
+  mailProviderAvailability =
+    await fetchMailProviderAvailability();
+  mailConnection =
+    await fetchMailConnection();
+  openGoogleScreen("manage");
 }
 
 
@@ -1464,6 +1515,19 @@ ${formatYen(totalPrice)}
 function openGoogleScreen(
   mode = "link"
 ) {
+  if (
+    mode === "manage" &&
+    (!authenticatedUser ||
+      !hasActiveSubscription())
+  ) {
+    if (authenticatedUser) {
+      openSetupForAuthenticatedUser();
+    } else {
+      openGoogleScreen("login");
+    }
+    return;
+  }
+
   googleScreenMode = mode;
   const isAuthenticationMode =
     mode !== "manage";
@@ -1472,34 +1536,34 @@ function openGoogleScreen(
     "googleBackButton",
     mode === "manage"
       ? "← ホームへ戻る"
-      : "← キーワード設定へ戻る"
+      : "← トップへ戻る"
   );
 
   setText(
     "googleScreenTitle",
     isAuthenticationMode
-      ? "Googleでログイン"
-      : "Googleアカウント設定"
+      ? "Googleで登録・ログイン"
+      : "アカウント設定"
   );
 
   setText(
     "googleScreenDescription",
     isAuthenticationMode
       ? "Call Nowへのログイン用Googleアカウントで本人確認します。"
-      : "ログイン用アカウントとメール監視用アカウントを別々に管理できます。"
+      : "重要メールを監視するアカウントを1件接続してください。ログイン用アカウントとは別に管理されます。"
   );
 
   setText(
     "googleAuthButton",
     isAuthenticationMode
-      ? "Googleでログイン"
+      ? "Googleで登録・ログイン"
       : "Googleアカウントを設定"
   );
 
   setText(
     "googleCardTitle",
     isAuthenticationMode
-      ? "Googleでログイン"
+      ? "Googleで登録・ログイン"
       : "Googleアカウントを設定"
   );
 
@@ -1653,7 +1717,7 @@ function updateGoogleAuthActionText() {
   if (googleScreenMode !== "manage") {
     setText(
       "googleCardTitle",
-      "Googleでログイン"
+      "Googleで登録・ログイン"
     );
 
     setText(
@@ -1663,7 +1727,7 @@ function updateGoogleAuthActionText() {
 
     setText(
       "googleAuthButton",
-      "Googleでログイン"
+      "Googleで登録・ログイン"
     );
 
     return;
@@ -2051,10 +2115,13 @@ function mailProviderLabel(provider) {
 
 
 function finishGoogleAccountLinking() {
-  if (!authenticatedUser) {
+  if (!authenticatedUser ||
+      !hasActiveSubscription()) {
     setText(
       "googleError",
-      "Googleでログインしてください。"
+      authenticatedUser
+        ? "契約情報を確認できませんでした。"
+        : "Googleで登録・ログインしてください。"
     );
 
     return;
@@ -2071,13 +2138,7 @@ function backFromGoogle() {
     return;
   }
 
-  showOnlyScreen(
-    "setupScreen"
-  );
-
-  renderKeywordInputs();
-
-  updateSetupScreenText();
+  showOnlyScreen("landingScreen");
 
   window.scrollTo({
     top: 0
@@ -2572,6 +2633,16 @@ function renderHelpExternalLinks() {
 ======================================== */
 
 function openApp() {
+  if (!authenticatedUser) {
+    openGoogleScreen("login");
+    return;
+  }
+
+  if (!hasActiveSubscription()) {
+    openSetupForAuthenticatedUser();
+    return;
+  }
+
   showOnlyScreen(
     "appScreen"
   );
@@ -2677,6 +2748,16 @@ function showAppPage(
   pageId,
   clickedButton = null
 ) {
+  if (!authenticatedUser) {
+    openGoogleScreen("login");
+    return;
+  }
+
+  if (!hasActiveSubscription()) {
+    openSetupForAuthenticatedUser();
+    return;
+  }
+
   document
     .querySelectorAll(
       ".app-page"
@@ -2813,7 +2894,7 @@ async function performLogout() {
   };
 
   setupMode =
-    "login";
+    "signup";
 
   showOnlyScreen(
     "landingScreen"
@@ -4136,6 +4217,42 @@ function clearLegacyContactInfo() {
 ======================================== */
 
 function showOnlyScreen(screenId) {
+  const authenticatedScreens = new Set([
+    "setupScreen",
+    "paymentScreen",
+    "renewalCompleteScreen",
+    "appScreen"
+  ]);
+
+  if (
+    screenId === "googleScreen" &&
+    googleScreenMode === "manage" &&
+    (!authenticatedUser ||
+      !hasActiveSubscription())
+  ) {
+    openGoogleScreen("login");
+    return;
+  }
+
+  if (
+    authenticatedScreens.has(screenId) &&
+    !authenticatedUser
+  ) {
+    openGoogleScreen("login");
+    return;
+  }
+
+  if (
+    [
+      "renewalCompleteScreen",
+      "appScreen"
+    ].includes(screenId) &&
+    !hasActiveSubscription()
+  ) {
+    openSetupForAuthenticatedUser();
+    return;
+  }
+
   const screenIds = [
     "landingScreen",
     "setupScreen",
