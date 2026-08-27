@@ -5,7 +5,10 @@ import type {
   GmailConnectionRepository,
   GmailOAuthIntent
 } from "./gmail-connection-repository.js";
-import type { GmailOAuthProvider } from "./gmail-oauth-client.js";
+import {
+  readGmailOAuthFailureReason,
+  type GmailOAuthProvider
+} from "./gmail-oauth-client.js";
 import type { TokenEncryptionProvider } from "./token-encryption.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -91,8 +94,8 @@ export class GmailConnectionService {
         codeVerifier: challenge.codeVerifier,
         expectedNonce: challenge.nonce
       });
-    } catch {
-      throw invalidGmailAuthorizationError();
+    } catch (error) {
+      throw invalidGmailAuthorizationError(readGmailOAuthFailureReason(error));
     }
     const email = grant.email.trim().toLowerCase();
     if (
@@ -201,10 +204,11 @@ function sanitizeErrorCode(value: string): string {
   return normalized.slice(0, 100) || "GMAIL_CREDENTIAL_INVALID";
 }
 
-function invalidGmailAuthorizationError(): AppError {
+function invalidGmailAuthorizationError(reasonCode?: string): AppError {
   return new AppError(
     "GMAIL_AUTHORIZATION_INVALID_OR_EXPIRED",
     "Gmail連携が無効または期限切れです。もう一度お試しください。",
-    401
+    401,
+    reasonCode ? { reasonCode } : undefined
   );
 }

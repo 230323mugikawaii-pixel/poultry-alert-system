@@ -202,7 +202,8 @@ describe("GmailConnectionService", () => {
         authenticatedUserId: "owner-user-id"
       })
     ).rejects.toMatchObject({
-      code: "GMAIL_AUTHORIZATION_INVALID_OR_EXPIRED"
+      code: "GMAIL_AUTHORIZATION_INVALID_OR_EXPIRED",
+      details: { reasonCode: "PROVIDER_RESPONSE_INVALID" }
     });
   });
 

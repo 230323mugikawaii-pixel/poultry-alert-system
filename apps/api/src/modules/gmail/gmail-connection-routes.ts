@@ -267,7 +267,15 @@ export function createGmailConnectionRoutes(
         } catch (error) {
           const code =
             error instanceof AppError ? error.code : "GMAIL_AUTH_FAILED";
-          request.log.warn({ code }, "Gmail authorization callback failed");
+          const reasonCode =
+            error instanceof AppError &&
+            typeof error.details?.reasonCode === "string"
+              ? error.details.reasonCode
+              : "UNCLASSIFIED";
+          request.log.warn(
+            { code, reasonCode },
+            "Gmail authorization callback failed"
+          );
           await reply.redirect(frontendResultUrl(environment, "error"));
         }
       }

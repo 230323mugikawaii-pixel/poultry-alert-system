@@ -16,6 +16,22 @@ export interface GmailOAuthGrant {
   readonly grantedScopes: readonly string[];
 }
 
+export type GmailOAuthFailureReason =
+  | "TOKEN_EXCHANGE_FAILED"
+  | "ID_TOKEN_MISSING"
+  | "REFRESH_TOKEN_MISSING"
+  | "ID_TOKEN_INVALID"
+  | "IDENTITY_CLAIMS_INVALID"
+  | "GMAIL_SCOPE_MISSING"
+  | "PROVIDER_RESPONSE_INVALID";
+
+export class GmailOAuthExchangeError extends Error {
+  public constructor(public readonly reasonCode: GmailOAuthFailureReason) {
+    super("gmail_oauth_exchange_failed");
+    this.name = "GmailOAuthExchangeError";
+  }
+}
+
 export interface GmailOAuthProvider {
   createAuthorizationUrl(input: {
     readonly state: string;
@@ -69,19 +85,32 @@ export class GoogleGmailOAuthClient implements GmailOAuthProvider {
     readonly codeVerifier: string;
     readonly expectedNonce: string;
   }): Promise<GmailOAuthGrant> {
-    const { tokens } = await this.client.getToken({
-      code: input.code,
-      codeVerifier: input.codeVerifier,
-      redirect_uri: this.options.redirectUri
-    });
-    if (!tokens.id_token || !tokens.refresh_token) {
-      throw new Error("gmail_oauth_tokens_missing");
+    let tokens;
+    try {
+      ({ tokens } = await this.client.getToken({
+        code: input.code,
+        codeVerifier: input.codeVerifier,
+        redirect_uri: this.options.redirectUri
+      }));
+    } catch {
+      throw new GmailOAuthExchangeError("TOKEN_EXCHANGE_FAILED");
+    }
+    if (!tokens.id_token) {
+      throw new GmailOAuthExchangeError("ID_TOKEN_MISSING");
+    }
+    if (!tokens.refresh_token) {
+      throw new GmailOAuthExchangeError("REFRESH_TOKEN_MISSING");
     }
 
-    const ticket = await this.client.verifyIdToken({
-      idToken: tokens.id_token,
-      audience: this.options.clientId
-    });
+    let ticket;
+    try {
+      ticket = await this.client.verifyIdToken({
+        idToken: tokens.id_token,
+        audience: this.options.clientId
+      });
+    } catch {
+      throw new GmailOAuthExchangeError("ID_TOKEN_INVALID");
+    }
     const payload = ticket.getPayload();
     const grantedScopes = (tokens.scope ?? "")
       .split(/\s+/u)
@@ -91,10 +120,12 @@ export class GoogleGmailOAuthClient implements GmailOAuthProvider {
       !payload?.sub ||
       !payload.email ||
       payload.email_verified !== true ||
-      payload.nonce !== input.expectedNonce ||
-      !grantedScopes.includes(GMAIL_READONLY_SCOPE)
+      payload.nonce !== input.expectedNonce
     ) {
-      throw new Error("gmail_oauth_claims_or_scope_invalid");
+      throw new GmailOAuthExchangeError("IDENTITY_CLAIMS_INVALID");
+    }
+    if (!grantedScopes.includes(GMAIL_READONLY_SCOPE)) {
+      throw new GmailOAuthExchangeError("GMAIL_SCOPE_MISSING");
     }
 
     return {
@@ -109,4 +140,12 @@ export class GoogleGmailOAuthClient implements GmailOAuthProvider {
   public async revokeRefreshToken(refreshToken: string): Promise<void> {
     await this.client.revokeToken(refreshToken);
   }
+}
+
+export function readGmailOAuthFailureReason(
+  error: unknown
+): GmailOAuthFailureReason {
+  return error instanceof GmailOAuthExchangeError
+    ? error.reasonCode
+    : "PROVIDER_RESPONSE_INVALID";
 }
