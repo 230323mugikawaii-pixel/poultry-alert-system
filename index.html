@@ -14,7 +14,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=16">
+    <link rel="stylesheet" href="css/style.css?v=17">
 </head>
 
 <body>
@@ -748,7 +748,7 @@
 
 
       <div
-        id="gmailMonitoringAccountCard"
+        id="mailMonitoringAccountCard"
         class="google-account-card linked-accounts-card hidden"
       >
         <div class="linked-accounts-heading">
@@ -756,38 +756,62 @@
         </div>
 
         <p class="google-account-role-description">
-          ログインとは別に、重要メールを監視するGoogleアカウントを1件接続できます。
+          ログインとは別に、重要メールを監視するGmailまたはMicrosoftアカウントを1件接続できます。
         </p>
 
-        <div id="gmailMonitoringAccountStatus"></div>
+        <div id="mailMonitoringAccountStatus"></div>
 
-        <div class="gmail-account-actions">
+        <div
+          id="mailProviderChoices"
+          class="mail-provider-choices hidden"
+        >
           <button
-            id="gmailConnectButton"
+            id="googleMailProviderButton"
             type="button"
-            class="btn outline"
-            aria-describedby="gmailMonitoringAccountStatus"
-            onclick="startGmailConnection()"
+            class="btn outline mail-provider-button"
+            aria-describedby="mailMonitoringAccountStatus"
+            onclick="startMailConnection('GOOGLE')"
           >
             Gmail / Google Workspace
           </button>
 
           <button
-            id="gmailReauthorizeButton"
+            id="microsoftMailProviderButton"
+            type="button"
+            class="btn outline mail-provider-button"
+            aria-describedby="mailMonitoringAccountStatus"
+            onclick="startMailConnection('MICROSOFT')"
+          >
+            Microsoft 365 / Outlook
+          </button>
+        </div>
+
+        <div class="mail-account-actions">
+          <button
+            id="mailChangeProviderButton"
             type="button"
             class="btn outline hidden"
-            onclick="reauthorizeGmailConnection()"
+            onclick="showMailProviderChoices()"
           >
-            Gmail監視を再認証
+            接続先を変更
           </button>
 
           <button
-            id="gmailDisconnectButton"
+            id="mailReauthorizeButton"
+            type="button"
+            class="btn outline hidden"
+            onclick="reauthorizeMailConnection()"
+          >
+            メール監視を再認証
+          </button>
+
+          <button
+            id="mailDisconnectButton"
             type="button"
             class="account-remove-button hidden"
-            onclick="disconnectGmailConnection()"
+            onclick="disconnectMailConnection()"
           >
-            Gmail監視を解除
+            メール監視を解除
           </button>
         </div>
       </div>

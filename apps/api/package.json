@@ -30,6 +30,7 @@
     "dotenv": "17.4.2",
     "fastify": "5.12.1",
     "google-auth-library": "11.0.2",
+    "jose": "6.2.10",
     "nodemailer": "9.0.5",
     "pg": "8.16.3"
   },

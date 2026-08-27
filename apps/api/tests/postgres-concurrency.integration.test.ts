@@ -9,14 +9,14 @@ import type {
   GoogleOAuthProvider
 } from "../src/modules/auth/google-oauth-client.js";
 import { PrismaAuthRepository } from "../src/modules/auth/prisma-auth-repository.js";
-import { GmailConnectionService } from "../src/modules/gmail/gmail-connection-service.js";
-import {
-  GMAIL_READONLY_SCOPE,
-  type GmailOAuthGrant,
-  type GmailOAuthProvider
-} from "../src/modules/gmail/gmail-oauth-client.js";
-import { PrismaGmailConnectionRepository } from "../src/modules/gmail/prisma-gmail-connection-repository.js";
-import { LocalAesGcmTokenEncryptionProvider } from "../src/modules/gmail/token-encryption.js";
+import { MailConnectionService } from "../src/modules/mail/mail-connection-service.js";
+import type {
+  MailOAuthGrant,
+  MailProviderAdapter
+} from "../src/modules/mail/mail-provider.js";
+import { GMAIL_READONLY_SCOPE } from "../src/modules/mail/providers/google-mail-provider.js";
+import { PrismaMailConnectionRepository } from "../src/modules/mail/prisma-mail-connection-repository.js";
+import { LocalAesGcmTokenEncryptionProvider } from "../src/modules/mail/token-encryption.js";
 import { InvitationService } from "../src/modules/invitations/invitation-service.js";
 import { prepareInvitationCredential } from "../src/modules/invitations/invitation-credential.js";
 import { PrismaInvitationRepository } from "../src/modules/invitations/prisma-invitation-repository.js";
@@ -56,8 +56,8 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
         team_keywords,
         subscriptions,
         team_memberships,
-        gmail_connections,
-        gmail_authorizations,
+        mail_connections,
+        mail_authorizations,
         owner_transfers,
         auth_credentials,
         teams,
@@ -226,26 +226,31 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       ownerUserId: owner.id,
       seatLimit: 0
     });
-    const provider = new PostgresGmailOAuthProvider();
+    const provider = new PostgresMailProviderAdapter();
     const encryption = new LocalAesGcmTokenEncryptionProvider(
       Buffer.alloc(32, 7).toString("base64"),
       "postgres-test-v1"
     );
-    const gmailService = new GmailConnectionService({
-      repository: new PrismaGmailConnectionRepository(database),
-      oauthProvider: provider,
+    const gmailService = new MailConnectionService({
+      repository: new PrismaMailConnectionRepository(database),
+      providerAdapters: [
+        provider,
+        new PostgresMailProviderAdapter("MICROSOFT")
+      ],
       tokenEncryption: encryption,
       tokenPepper: testPepper,
-      stateTtlMinutes: 10,
+      stateTtlMinutes: { GOOGLE: 10, MICROSOFT: 10 },
       now: () => new Date("2026-08-26T00:00:00.000Z")
     });
 
     const authorization = await gmailService.createAuthorizationRequest(
       owner.id,
       created.team.teamId,
-      "CONNECT"
+      "CONNECT",
+      "GOOGLE"
     );
     const connected = await gmailService.completeAuthorization({
+      provider: "GOOGLE",
       state: authorization.state,
       code: "postgres-gmail-code",
       authenticatedUserId: owner.id,
@@ -258,11 +263,11 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       authorizationStatus: "ACTIVE",
       connectionStatus: "ACTIVE"
     });
-    const stored = await database.gmailAuthorization.findUniqueOrThrow({
+    const stored = await database.mailAuthorization.findUniqueOrThrow({
       where: { userId: owner.id }
     });
     expect(stored.encryptedRefreshToken).not.toContain(
-      PostgresGmailOAuthProvider.refreshToken
+      PostgresMailProviderAdapter.refreshToken
     );
     expect(stored).toMatchObject({
       provider: "GOOGLE",
@@ -277,15 +282,16 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
         provider: stored.encryptionProvider ?? "",
         keyVersion: stored.encryptionKeyVersion ?? ""
       })
-    ).resolves.toBe(PostgresGmailOAuthProvider.refreshToken);
+    ).resolves.toBe(PostgresMailProviderAdapter.refreshToken);
     await expect(
       gmailService.completeAuthorization({
+        provider: "GOOGLE",
         state: authorization.state,
         code: "postgres-gmail-code",
         authenticatedUserId: owner.id
       })
     ).rejects.toMatchObject({
-      code: "GMAIL_AUTHORIZATION_INVALID_OR_EXPIRED",
+      code: "MAIL_AUTHORIZATION_INVALID_OR_EXPIRED",
       statusCode: 401
     });
 
@@ -295,30 +301,31 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       requestId: "postgres-gmail-disconnect"
     });
     await expect(
-      database.gmailAuthorization.findUniqueOrThrow({
+      database.mailAuthorization.findUniqueOrThrow({
         where: { userId: owner.id },
         select: { status: true, encryptedRefreshToken: true }
       })
     ).resolves.toEqual({ status: "REVOKED", encryptedRefreshToken: null });
     await expect(
-      database.gmailConnection.findUniqueOrThrow({
+      database.mailConnection.findUniqueOrThrow({
         where: { teamId: created.team.teamId },
         select: { status: true }
       })
     ).resolves.toEqual({ status: "REVOKED" });
     expect(provider.revokedTokens).toContain(
-      PostgresGmailOAuthProvider.refreshToken
+      PostgresMailProviderAdapter.refreshToken
     );
     const auditActions = await database.auditEvent.findMany({
       where: { teamId: created.team.teamId },
       select: { action: true }
     });
-    expect(auditActions).toHaveLength(3);
+    expect(auditActions).toHaveLength(4);
     expect(auditActions).toEqual(
       expect.arrayContaining([
         { action: "TEAM_CREATED" },
-        { action: "GMAIL_CONNECTED" },
-        { action: "GMAIL_CONNECTION_DISCONNECTED" }
+        { action: "MAIL_CONNECTED" },
+        { action: "MAIL_AUTHORIZATION_REVOKED" },
+        { action: "MAIL_CONNECTION_DISCONNECTED" }
       ])
     );
   });
@@ -336,16 +343,19 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
         seatLimit: 0
       }
     );
-    const provider = new PostgresGmailOAuthProvider();
-    const gmailService = new GmailConnectionService({
-      repository: new PrismaGmailConnectionRepository(database),
-      oauthProvider: provider,
+    const provider = new PostgresMailProviderAdapter();
+    const gmailService = new MailConnectionService({
+      repository: new PrismaMailConnectionRepository(database),
+      providerAdapters: [
+        provider,
+        new PostgresMailProviderAdapter("MICROSOFT")
+      ],
       tokenEncryption: new LocalAesGcmTokenEncryptionProvider(
         Buffer.alloc(32, 8).toString("base64"),
         "postgres-multi-team-v1"
       ),
       tokenPepper: testPepper,
-      stateTtlMinutes: 10,
+      stateTtlMinutes: { GOOGLE: 10, MICROSOFT: 10 },
       now: () => clock.value
     });
 
@@ -353,9 +363,11 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       const authorization = await gmailService.createAuthorizationRequest(
         owner.id,
         teamId,
-        "CONNECT"
+        "CONNECT",
+        "GOOGLE"
       );
       await gmailService.completeAuthorization({
+        provider: "GOOGLE",
         state: authorization.state,
         code: "postgres-gmail-code",
         authenticatedUserId: owner.id
@@ -363,10 +375,10 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     }
 
     await expect(
-      database.gmailAuthorization.count({ where: { userId: owner.id } })
+      database.mailAuthorization.count({ where: { userId: owner.id } })
     ).resolves.toBe(1);
     await expect(
-      database.gmailConnection.count({
+      database.mailConnection.count({
         where: {
           teamId: { in: [first.team.teamId, second.team.teamId] },
           status: "ACTIVE"
@@ -375,16 +387,17 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     ).resolves.toBe(2);
 
     const sharedAuthorization =
-      await database.gmailAuthorization.findUniqueOrThrow({
+      await database.mailAuthorization.findUniqueOrThrow({
         where: { userId: owner.id },
         select: { id: true }
       });
-    await gmailService.markCredentialFailure(
-      sharedAuthorization.id,
-      "invalid_grant"
-    );
+    await gmailService.markProviderFailure({
+      authorizationId: sharedAuthorization.id,
+      provider: "GOOGLE",
+      error: { code: "invalid_grant" }
+    });
     await expect(
-      database.gmailConnection.count({
+      database.mailConnection.count({
         where: {
           teamId: { in: [first.team.teamId, second.team.teamId] },
           status: "REAUTH_REQUIRED"
@@ -395,15 +408,17 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     const reauthorization = await gmailService.createAuthorizationRequest(
       owner.id,
       first.team.teamId,
-      "REAUTHORIZE"
+      "REAUTHORIZE",
+      "GOOGLE"
     );
     await gmailService.completeAuthorization({
+      provider: "GOOGLE",
       state: reauthorization.state,
       code: "postgres-gmail-code",
       authenticatedUserId: owner.id
     });
     await expect(
-      database.gmailConnection.count({
+      database.mailConnection.count({
         where: {
           teamId: { in: [first.team.teamId, second.team.teamId] },
           status: "ACTIVE"
@@ -416,7 +431,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       ownerUserId: owner.id
     });
     const retainedAuthorization =
-      await database.gmailAuthorization.findUniqueOrThrow({
+      await database.mailAuthorization.findUniqueOrThrow({
         where: { userId: owner.id },
         select: { status: true, encryptedRefreshToken: true }
       });
@@ -429,14 +444,100 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       ownerUserId: owner.id
     });
     await expect(
-      database.gmailAuthorization.findUniqueOrThrow({
+      database.mailAuthorization.findUniqueOrThrow({
         where: { userId: owner.id },
         select: { status: true, encryptedRefreshToken: true }
       })
     ).resolves.toEqual({ status: "REVOKED", encryptedRefreshToken: null });
     expect(provider.revokedTokens).toEqual([
-      PostgresGmailOAuthProvider.refreshToken
+      PostgresMailProviderAdapter.refreshToken
     ]);
+  });
+
+  it("switches one user from Google to Microsoft without two active authorizations", async () => {
+    const owner = await createUser("provider-switch-owner@example.com");
+    const clock = { value: new Date("2026-08-26T01:00:00.000Z") };
+    const created = await createServices(
+      clock,
+      "482741"
+    ).teamService.createTeam({
+      ownerUserId: owner.id,
+      seatLimit: 0
+    });
+    const google = new PostgresMailProviderAdapter("GOOGLE");
+    const microsoft = new PostgresMailProviderAdapter("MICROSOFT");
+    const encryption = new LocalAesGcmTokenEncryptionProvider(
+      Buffer.alloc(32, 9).toString("base64"),
+      "postgres-provider-switch-v1"
+    );
+    const mailService = new MailConnectionService({
+      repository: new PrismaMailConnectionRepository(database),
+      providerAdapters: [google, microsoft],
+      tokenEncryption: encryption,
+      tokenPepper: testPepper,
+      stateTtlMinutes: { GOOGLE: 10, MICROSOFT: 10 },
+      now: () => clock.value
+    });
+
+    const googleAuthorization = await mailService.createAuthorizationRequest(
+      owner.id,
+      created.team.teamId,
+      "CONNECT",
+      "GOOGLE"
+    );
+    await mailService.completeAuthorization({
+      provider: "GOOGLE",
+      state: googleAuthorization.state,
+      code: "postgres-gmail-code",
+      authenticatedUserId: owner.id
+    });
+    const microsoftAuthorization = await mailService.createAuthorizationRequest(
+      owner.id,
+      created.team.teamId,
+      "CONNECT",
+      "MICROSOFT"
+    );
+    await expect(
+      database.mailAuthorization.findUniqueOrThrow({
+        where: { userId: owner.id },
+        select: { provider: true, status: true }
+      })
+    ).resolves.toEqual({ provider: "GOOGLE", status: "ACTIVE" });
+    await mailService.completeAuthorization({
+      provider: "MICROSOFT",
+      state: microsoftAuthorization.state,
+      code: "postgres-microsoft-code",
+      authenticatedUserId: owner.id
+    });
+
+    await expect(
+      database.mailAuthorization.count({ where: { userId: owner.id } })
+    ).resolves.toBe(1);
+    const stored = await database.mailAuthorization.findUniqueOrThrow({
+      where: { userId: owner.id },
+      include: { connections: true }
+    });
+    expect(stored).toMatchObject({
+      provider: "MICROSOFT",
+      providerSubject: "tenant:postgres-microsoft-subject",
+      email: "monitoring-postgres@outlook.example",
+      status: "ACTIVE"
+    });
+    expect(stored.connections).toHaveLength(1);
+    expect(stored.connections[0]).toMatchObject({
+      teamId: created.team.teamId,
+      status: "ACTIVE",
+      providerCursor: null
+    });
+    expect(stored.encryptedRefreshToken).not.toContain(microsoft.refreshToken);
+    await expect(
+      encryption.decrypt({
+        ciphertext: stored.encryptedRefreshToken ?? "",
+        provider: stored.encryptionProvider ?? "",
+        keyVersion: stored.encryptionKeyVersion ?? ""
+      })
+    ).resolves.toBe(microsoft.refreshToken);
+    expect(google.revokedTokens).toEqual([google.refreshToken]);
   });
 
   it("admits only five members to five seats and returns 409 for the loser", async () => {
@@ -1024,11 +1125,21 @@ class PostgresGoogleOAuthProvider implements GoogleOAuthProvider {
   }
 }
 
-class PostgresGmailOAuthProvider implements GmailOAuthProvider {
+class PostgresMailProviderAdapter implements MailProviderAdapter {
+  public readonly provider;
   public static readonly refreshToken =
     "synthetic-postgres-refresh-token-for-tests-only";
+  public readonly refreshToken;
   public readonly revokedTokens: string[] = [];
   private nonce: string | null = null;
+
+  public constructor(provider: "GOOGLE" | "MICROSOFT" = "GOOGLE") {
+    this.provider = provider;
+    this.refreshToken =
+      provider === "GOOGLE"
+        ? PostgresMailProviderAdapter.refreshToken
+        : "synthetic-postgres-microsoft-refresh-token-for-tests-only";
+  }
 
   public createAuthorizationUrl(input: {
     readonly state: string;
@@ -1047,25 +1158,57 @@ class PostgresGmailOAuthProvider implements GmailOAuthProvider {
     readonly code: string;
     readonly codeVerifier: string;
     readonly expectedNonce: string;
-  }): Promise<GmailOAuthGrant> {
+  }): Promise<MailOAuthGrant> {
     if (
-      input.code !== "postgres-gmail-code" ||
+      input.code !==
+        (this.provider === "GOOGLE"
+          ? "postgres-gmail-code"
+          : "postgres-microsoft-code") ||
       !input.codeVerifier ||
       input.expectedNonce !== this.nonce
     ) {
       throw new Error("Invalid PostgreSQL Gmail auth fixture");
     }
     return {
-      subject: "postgres-gmail-subject",
-      email: "monitoring-postgres@example.com",
+      provider: this.provider,
+      subject:
+        this.provider === "GOOGLE"
+          ? "postgres-gmail-subject"
+          : "tenant:postgres-microsoft-subject",
+      email:
+        this.provider === "GOOGLE"
+          ? "monitoring-postgres@example.com"
+          : "monitoring-postgres@outlook.example",
       emailVerified: true,
-      refreshToken: PostgresGmailOAuthProvider.refreshToken,
-      grantedScopes: [GMAIL_READONLY_SCOPE]
+      refreshToken: this.refreshToken,
+      grantedScopes: [
+        this.provider === "GOOGLE"
+          ? GMAIL_READONLY_SCOPE
+          : "https://graph.microsoft.com/Mail.Read"
+      ]
     };
   }
 
-  public async revokeRefreshToken(refreshToken: string): Promise<void> {
+  public async refreshAccessToken() {
+    return {
+      accessToken: "synthetic-postgres-access-token-for-tests-only",
+      expiresAt: null,
+      rotatedRefreshToken: null
+    };
+  }
+
+  public async revokeAuthorization(refreshToken: string): Promise<void> {
     this.revokedTokens.push(refreshToken);
+  }
+
+  public classifyProviderError(error: unknown) {
+    const code =
+      error && typeof error === "object" && "code" in error
+        ? String(error.code)
+        : "";
+    return code === "invalid_grant"
+      ? ("REAUTHORIZATION_REQUIRED" as const)
+      : ("UNKNOWN" as const);
   }
 }
 

@@ -2,7 +2,7 @@
 
 ## Scope
 
-Phase 1 provides the server-side foundation. Google User/Session login and Gmail
+Phase 1 provides the server-side foundation. Google User/Session login and mail
 monitoring authorization are separate OAuth boundaries.
 
 Implemented areas:
@@ -14,8 +14,9 @@ Implemented areas:
   tokens (`openid`, `email`, and `profile` only)
 - Google external identities bound by the stable provider subject rather than by
   an untrusted browser email value
-- OWNER-managed Gmail monitoring authorization with `gmail.readonly`, offline
-  consent, encrypted refresh-token storage, reauthorization, and revocation
+- OWNER-managed Gmail and Microsoft mail authorization with provider adapters,
+  `gmail.readonly` or delegated `Mail.Read`, offline consent, encrypted refresh-token
+  storage, reauthorization, provider switching, and revocation
 - Individual, revocable, device-associated sessions
 - Future Passkey credential and challenge storage
 - No Call Now password credential type, hash storage, or password login route
@@ -33,10 +34,10 @@ Implemented areas:
 Deferred until later phases:
 
 - Production payment provider and billing webhook
-- Continuous Gmail polling and notification delivery
+- Continuous Gmail/Graph monitoring and notification delivery
 - Notification delivery transport
 - Passkey registration and authentication ceremonies
-- OWNER transfer completion, which also requires the new OWNER Gmail connection
+- OWNER transfer completion, which also requires the new OWNER mail connection
 - Explicit linking for an existing magic-link User that has the same email as a
   newly authenticated Google identity
 - Existing localStorage contract/team migration and production cutover
@@ -60,7 +61,7 @@ without weakening the cookie policy.
 Run `pnpm test:postgres` only against a dedicated database whose name contains
 `test` or `acceptance`. This suite truncates data in that database and verifies
 real PostgreSQL transaction behavior, including concurrent redemption of the last
-available seats. It also covers Gmail credential encryption/revocation,
+available seats. It also covers mail credential encryption/revocation,
 paid-increase idempotency, safe and pending
 reductions, parent/link invalidation and expiration, member access revocation,
 shared security throttles, and multi-team membership rules.
@@ -78,8 +79,8 @@ than printed to logs.
 - Session cookies are HttpOnly, SameSite=Lax, and Secure in staging/production.
 - OAuth state is one-use, short-lived, HMACed in PostgreSQL, and paired with a
   host-only HttpOnly state cookie, PKCE verifier, and verified OIDC nonce.
-- Google login tokens are not stored. Gmail access tokens are not persisted; Gmail
-  refresh tokens are encrypted server-side with AES-256-GCM for local/test and
+- Google login tokens are not stored. Mail access tokens are not persisted; Google and
+  Microsoft refresh tokens are encrypted server-side with AES-256-GCM for local/test and
   Google Cloud KMS for staging/production.
 - Sensitive request fields and authentication headers are redacted from logs.
 - Five failed invitation-password attempts lock the team/source pair for 15 minutes.

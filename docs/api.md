@@ -50,19 +50,22 @@ inactive former memberships are not promoted to OWNER. Concurrent calls serializ
 on the User row so reload, re-login, and OAuth callback cannot create duplicate
 Teams.
 
-## Gmail monitoring connection
+## Mail monitoring connection
 
-- `GET /api/v1/teams/:teamId/gmail-connection` (OWNER only)
-- `GET /api/v1/teams/:teamId/gmail-connection/provider-status` (OWNER only)
-- `POST /api/v1/teams/:teamId/gmail-connection/oauth/start` (OWNER only)
-- `POST /api/v1/teams/:teamId/gmail-connection/reauthorize` (OWNER only)
+- `GET /api/v1/teams/:teamId/mail-connection` (OWNER only)
+- `GET /api/v1/teams/:teamId/mail-connection/providers` (OWNER only)
+- `POST /api/v1/teams/:teamId/mail-connection/oauth/start?provider=GOOGLE|MICROSOFT` (OWNER only)
+- `POST /api/v1/teams/:teamId/mail-connection/reauthorize?provider=GOOGLE|MICROSOFT` (OWNER only)
 - `GET /api/v1/auth/gmail/callback`
-- `DELETE /api/v1/teams/:teamId/gmail-connection` (OWNER only)
+- `GET /api/v1/auth/mail/microsoft/callback`
+- `DELETE /api/v1/teams/:teamId/mail-connection` (OWNER only)
 
-Gmail authorization is independent from the Google identity used to log in. It
-requests offline `gmail.readonly` consent. Refresh tokens never enter JSON responses
-or browser storage; they are encrypted before PostgreSQL persistence. Disconnect
-disables the local credential transactionally before best-effort Google revocation.
+Mail authorization is independent from the Google identity used to log in. Google
+requests offline `gmail.readonly`; Microsoft requests delegated offline `Mail.Read`.
+Refresh tokens never enter JSON responses or browser storage and are encrypted before
+PostgreSQL persistence. Disconnect disables the local credential transactionally
+before provider-specific best-effort revocation. Gmail-only endpoint aliases remain
+temporarily available for clients from the preceding foundation release.
 
 ## Invitations and membership
 

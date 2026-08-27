@@ -1,43 +1,57 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { AppError } from "../../lib/app-error.js";
 import type {
-  GmailConnectionRecord,
-  GmailConnectionRepository,
-  GmailOAuthIntent
-} from "./gmail-connection-repository.js";
+  MailAuthorizationState,
+  MailConnectionRecord,
+  MailConnectionRepository,
+  MailOAuthIntent,
+  ProviderToken
+} from "./mail-connection-repository.js";
 import {
-  readGmailOAuthFailureReason,
-  type GmailOAuthProvider
-} from "./gmail-oauth-client.js";
+  readMailOAuthFailureReason,
+  type MailOAuthFailureReason,
+  type MailProviderAdapter,
+  type MailProviderErrorKind,
+  type MailProviderId
+} from "./mail-provider.js";
 import type { TokenEncryptionProvider } from "./token-encryption.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export class GmailConnectionService {
+export class MailConnectionService {
   private readonly now: () => Date;
+  private readonly providers: ReadonlyMap<MailProviderId, MailProviderAdapter>;
 
   public constructor(
     private readonly options: {
-      readonly repository: GmailConnectionRepository;
-      readonly oauthProvider: GmailOAuthProvider;
+      readonly repository: MailConnectionRepository;
+      readonly providerAdapters: readonly MailProviderAdapter[];
       readonly tokenEncryption: TokenEncryptionProvider;
       readonly tokenPepper: string;
-      readonly stateTtlMinutes: number;
+      readonly stateTtlMinutes: Readonly<Record<MailProviderId, number>>;
       readonly now?: () => Date;
     }
   ) {
     this.now = options.now ?? (() => new Date());
+    this.providers = new Map(
+      options.providerAdapters.map((adapter) => [adapter.provider, adapter])
+    );
+    if (!this.providers.has("GOOGLE") || !this.providers.has("MICROSOFT")) {
+      throw new Error("mail_provider_adapters_incomplete");
+    }
   }
 
   public async createAuthorizationRequest(
     userId: string,
     teamId: string,
-    intent: GmailOAuthIntent
+    intent: MailOAuthIntent,
+    provider: MailProviderId
   ): Promise<{
     readonly state: string;
     readonly authorizationUrl: string;
     readonly expiresAt: Date;
   }> {
+    const adapter = this.requireProvider(provider);
     const state = randomBytes(32).toString("base64url");
     const nonce = randomBytes(32).toString("base64url");
     const codeVerifier = randomBytes(32).toString("base64url");
@@ -46,7 +60,7 @@ export class GmailConnectionService {
       .digest("base64url");
     const now = this.now();
     const expiresAt = new Date(
-      now.getTime() + this.options.stateTtlMinutes * 60_000
+      now.getTime() + this.options.stateTtlMinutes[provider] * 60_000
     );
     await this.options.repository.createOAuthChallenge({
       userId,
@@ -55,12 +69,13 @@ export class GmailConnectionService {
       codeVerifier,
       nonce,
       intent,
+      provider,
       expiresAt,
       now
     });
     return {
       state,
-      authorizationUrl: this.options.oauthProvider.createAuthorizationUrl({
+      authorizationUrl: adapter.createAuthorizationUrl({
         state,
         codeChallenge,
         nonce
@@ -70,42 +85,45 @@ export class GmailConnectionService {
   }
 
   public async completeAuthorization(input: {
+    readonly provider: MailProviderId;
     readonly state: string;
     readonly code: string;
     readonly authenticatedUserId: string;
     readonly requestId?: string;
-  }): Promise<GmailConnectionRecord> {
+  }): Promise<MailConnectionRecord> {
     if (!isPlausibleState(input.state) || !isPlausibleCode(input.code)) {
-      throw invalidGmailAuthorizationError();
+      throw invalidMailAuthorizationError();
     }
     const challenge = await this.options.repository.consumeOAuthChallenge(
       this.hashSecret(input.state),
       input.authenticatedUserId,
       this.now()
     );
-    if (!challenge) {
-      throw invalidGmailAuthorizationError();
+    if (!challenge || challenge.provider !== input.provider) {
+      throw invalidMailAuthorizationError();
     }
 
+    const adapter = this.requireProvider(challenge.provider);
     let grant;
     try {
-      grant = await this.options.oauthProvider.exchangeCode({
+      grant = await adapter.exchangeCode({
         code: input.code,
         codeVerifier: challenge.codeVerifier,
         expectedNonce: challenge.nonce
       });
     } catch (error) {
-      throw invalidGmailAuthorizationError(readGmailOAuthFailureReason(error));
+      throw invalidMailAuthorizationError(readMailOAuthFailureReason(error));
     }
     const email = grant.email.trim().toLowerCase();
     if (
+      grant.provider !== challenge.provider ||
       !grant.emailVerified ||
       !EMAIL_PATTERN.test(email) ||
       email.length > 320 ||
       !grant.subject ||
       grant.subject.length > 255
     ) {
-      throw invalidGmailAuthorizationError();
+      throw invalidMailAuthorizationError();
     }
 
     const encryptedToken = await this.options.tokenEncryption.encrypt(
@@ -114,6 +132,7 @@ export class GmailConnectionService {
     const persisted = await this.options.repository.saveGrant({
       teamId: challenge.teamId,
       ownerUserId: challenge.userId,
+      provider: challenge.provider,
       providerSubject: grant.subject,
       email,
       encryptedToken,
@@ -124,7 +143,7 @@ export class GmailConnectionService {
     });
     await Promise.all(
       persisted.obsoleteTokens.map((token) =>
-        this.revokeObsoleteToken(token, grant.refreshToken)
+        this.revokeObsoleteToken(token, challenge.provider, grant.refreshToken)
       )
     );
     return persisted.connection;
@@ -133,7 +152,7 @@ export class GmailConnectionService {
   public getConnection(
     teamId: string,
     ownerUserId: string
-  ): Promise<GmailConnectionRecord | null> {
+  ): Promise<MailConnectionRecord | null> {
     return this.options.repository.findConnection(teamId, ownerUserId);
   }
 
@@ -151,32 +170,63 @@ export class GmailConnectionService {
     await this.revokeObsoleteToken(result.tokenToRevoke);
   }
 
-  public markCredentialFailure(
-    authorizationId: string,
-    errorCode: string
-  ): Promise<void> {
-    return this.options.repository.markAuthorizationRequiresReauth({
-      authorizationId,
-      errorCode: sanitizeErrorCode(errorCode),
+  public async markProviderFailure(input: {
+    readonly authorizationId: string;
+    readonly provider: MailProviderId;
+    readonly error: unknown;
+  }): Promise<MailProviderErrorKind> {
+    const classification = this.requireProvider(
+      input.provider
+    ).classifyProviderError(input.error);
+    const status: MailAuthorizationState = [
+      "REAUTHORIZATION_REQUIRED",
+      "CONSENT_REQUIRED",
+      "FORBIDDEN"
+    ].includes(classification)
+      ? "REAUTH_REQUIRED"
+      : "ERROR";
+    await this.options.repository.markAuthorizationFailure({
+      authorizationId: input.authorizationId,
+      status,
+      errorCode: classification,
       now: this.now()
     });
+    return classification;
+  }
+
+  private requireProvider(provider: MailProviderId): MailProviderAdapter {
+    const adapter = this.providers.get(provider);
+    if (!adapter) {
+      throw new AppError(
+        "MAIL_PROVIDER_NOT_SUPPORTED",
+        "このメールサービスには対応していません。",
+        400
+      );
+    }
+    return adapter;
   }
 
   private async revokeObsoleteToken(
-    token: Parameters<TokenEncryptionProvider["decrypt"]>[0] | null,
+    providerToken: ProviderToken | null,
+    activeProvider?: MailProviderId,
     activeRefreshToken?: string
   ): Promise<void> {
-    if (!token) {
-      return;
-    }
+    if (!providerToken) return;
     try {
-      const plaintext = await this.options.tokenEncryption.decrypt(token);
-      if (plaintext === activeRefreshToken) {
+      const plaintext = await this.options.tokenEncryption.decrypt(
+        providerToken.token
+      );
+      if (
+        providerToken.provider === activeProvider &&
+        plaintext === activeRefreshToken
+      ) {
         return;
       }
-      await this.options.oauthProvider.revokeRefreshToken(plaintext);
+      await this.requireProvider(providerToken.provider).revokeAuthorization(
+        plaintext
+      );
     } catch {
-      // Call Now has already disabled the credential. Google revocation is
+      // The credential is already disabled in Call Now. Provider revocation is
       // deliberately best-effort and never re-enables local monitoring.
     }
   }
@@ -196,18 +246,12 @@ function isPlausibleCode(value: string): boolean {
   return value.length >= 10 && value.length <= 4096 && !/[\r\n\0]/u.test(value);
 }
 
-function sanitizeErrorCode(value: string): string {
-  const normalized = value
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9_:-]/gu, "_");
-  return normalized.slice(0, 100) || "GMAIL_CREDENTIAL_INVALID";
-}
-
-function invalidGmailAuthorizationError(reasonCode?: string): AppError {
+function invalidMailAuthorizationError(
+  reasonCode?: MailOAuthFailureReason
+): AppError {
   return new AppError(
-    "GMAIL_AUTHORIZATION_INVALID_OR_EXPIRED",
-    "Gmail連携が無効または期限切れです。もう一度お試しください。",
+    "MAIL_AUTHORIZATION_INVALID_OR_EXPIRED",
+    "メール連携が無効または期限切れです。もう一度お試しください。",
     401,
     reasonCode ? { reasonCode } : undefined
   );

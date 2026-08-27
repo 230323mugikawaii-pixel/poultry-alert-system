@@ -1,14 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { AppError } from "../../src/lib/app-error.js";
 import type {
-  GmailConnectionRecord,
-  GmailConnectionRepository,
-  GmailOAuthChallengeRecord,
-  GmailOAuthIntent
-} from "../../src/modules/gmail/gmail-connection-repository.js";
-import type { StoredEncryptedToken } from "../../src/modules/gmail/token-encryption.js";
+  MailConnectionRecord,
+  MailConnectionRepository,
+  MailOAuthChallengeRecord,
+  MailOAuthIntent,
+  ProviderToken
+} from "../../src/modules/mail/mail-connection-repository.js";
+import type { MailProviderId } from "../../src/modules/mail/mail-provider.js";
+import type { StoredEncryptedToken } from "../../src/modules/mail/token-encryption.js";
 
-interface StoredChallenge extends GmailOAuthChallengeRecord {
+interface StoredChallenge extends MailOAuthChallengeRecord {
   secretHash: string;
   expiresAt: Date;
   consumedAt: Date | null;
@@ -17,18 +19,19 @@ interface StoredChallenge extends GmailOAuthChallengeRecord {
 interface StoredAuthorization {
   id: string;
   userId: string;
+  provider: MailProviderId;
   subject: string;
   email: string;
   token: StoredEncryptedToken | null;
   scopes: readonly string[];
-  status: GmailConnectionRecord["authorizationStatus"];
+  status: MailConnectionRecord["authorizationStatus"];
   lastVerifiedAt: Date | null;
 }
 
-export class MemoryGmailConnectionRepository implements GmailConnectionRepository {
+export class MemoryMailConnectionRepository implements MailConnectionRepository {
   public readonly challenges: StoredChallenge[] = [];
   public readonly authorizations = new Map<string, StoredAuthorization>();
-  public readonly connections = new Map<string, GmailConnectionRecord>();
+  public readonly connections = new Map<string, MailConnectionRecord>();
   public readonly auditActions: string[] = [];
 
   public async createOAuthChallenge(input: {
@@ -37,7 +40,8 @@ export class MemoryGmailConnectionRepository implements GmailConnectionRepositor
     readonly secretHash: string;
     readonly codeVerifier: string;
     readonly nonce: string;
-    readonly intent: GmailOAuthIntent;
+    readonly intent: MailOAuthIntent;
+    readonly provider: MailProviderId;
     readonly expiresAt: Date;
     readonly now: Date;
   }): Promise<void> {
@@ -53,6 +57,7 @@ export class MemoryGmailConnectionRepository implements GmailConnectionRepositor
       codeVerifier: input.codeVerifier,
       nonce: input.nonce,
       intent: input.intent,
+      provider: input.provider,
       expiresAt: input.expiresAt,
       consumedAt: null
     });
@@ -62,7 +67,7 @@ export class MemoryGmailConnectionRepository implements GmailConnectionRepositor
     secretHash: string,
     expectedUserId: string,
     now: Date
-  ): Promise<GmailOAuthChallengeRecord | null> {
+  ): Promise<MailOAuthChallengeRecord | null> {
     const challenge = this.challenges.find(
       (candidate) => candidate.secretHash === secretHash
     );
@@ -81,7 +86,7 @@ export class MemoryGmailConnectionRepository implements GmailConnectionRepositor
   public async findConnection(
     teamId: string,
     ownerUserId: string
-  ): Promise<GmailConnectionRecord | null> {
+  ): Promise<MailConnectionRecord | null> {
     const authorization = this.authorizations.get(ownerUserId);
     const connection = this.connections.get(teamId);
     return authorization && connection?.authorizationId === authorization.id
@@ -92,27 +97,32 @@ export class MemoryGmailConnectionRepository implements GmailConnectionRepositor
   public async saveGrant(input: {
     readonly teamId: string;
     readonly ownerUserId: string;
+    readonly provider: MailProviderId;
     readonly providerSubject: string;
     readonly email: string;
     readonly encryptedToken: StoredEncryptedToken;
     readonly grantedScopes: readonly string[];
-    readonly intent: GmailOAuthIntent;
+    readonly intent: MailOAuthIntent;
     readonly requestId: string | null;
     readonly now: Date;
   }) {
     const duplicate = [...this.authorizations.values()].find(
       (authorization) =>
         authorization.userId !== input.ownerUserId &&
+        authorization.provider === input.provider &&
         authorization.subject === input.providerSubject
     );
     if (duplicate) {
-      throw new AppError("GMAIL_ACCOUNT_ALREADY_IN_USE", "duplicate", 409);
+      throw new AppError("MAIL_ACCOUNT_ALREADY_IN_USE", "duplicate", 409);
     }
     const existing = this.authorizations.get(input.ownerUserId);
-    const obsoleteTokens = existing?.token ? [existing.token] : [];
+    const obsoleteTokens: ProviderToken[] = existing?.token
+      ? [{ provider: existing.provider, token: existing.token }]
+      : [];
     const authorization: StoredAuthorization = {
       id: existing?.id ?? randomUUID(),
       userId: input.ownerUserId,
+      provider: input.provider,
       subject: input.providerSubject,
       email: input.email,
       token: input.encryptedToken,
@@ -129,6 +139,7 @@ export class MemoryGmailConnectionRepository implements GmailConnectionRepositor
       ) {
         this.connections.set(teamId, {
           ...candidate,
+          provider: input.provider,
           email: input.email,
           authorizationStatus: "ACTIVE",
           connectionStatus:
@@ -145,10 +156,11 @@ export class MemoryGmailConnectionRepository implements GmailConnectionRepositor
       }
     }
     const previousConnection = this.connections.get(input.teamId);
-    const connection: GmailConnectionRecord = {
+    const connection: MailConnectionRecord = {
       id: previousConnection?.id ?? randomUUID(),
       teamId: input.teamId,
       authorizationId: authorization.id,
+      provider: input.provider,
       email: input.email,
       authorizationStatus: "ACTIVE",
       connectionStatus: "ACTIVE",
@@ -160,8 +172,8 @@ export class MemoryGmailConnectionRepository implements GmailConnectionRepositor
     this.connections.set(input.teamId, connection);
     this.auditActions.push(
       existing || previousConnection || input.intent === "REAUTHORIZE"
-        ? "GMAIL_REAUTHORIZED"
-        : "GMAIL_CONNECTED"
+        ? "MAIL_REAUTHORIZED"
+        : "MAIL_CONNECTED"
     );
     return { connection, obsoleteTokens };
   }
@@ -175,7 +187,7 @@ export class MemoryGmailConnectionRepository implements GmailConnectionRepositor
     const connection = this.connections.get(input.teamId);
     const authorization = this.authorizations.get(input.ownerUserId);
     if (!connection || !authorization) {
-      throw new AppError("GMAIL_CONNECTION_NOT_FOUND", "missing", 404);
+      throw new AppError("MAIL_CONNECTION_NOT_FOUND", "missing", 404);
     }
     this.connections.set(input.teamId, {
       ...connection,
@@ -187,20 +199,24 @@ export class MemoryGmailConnectionRepository implements GmailConnectionRepositor
         candidate.connectionStatus !== "REVOKED"
     );
     const tokenToRevoke =
-      activeConnections.length === 0 ? authorization.token : null;
+      activeConnections.length === 0 && authorization.token
+        ? { provider: authorization.provider, token: authorization.token }
+        : null;
     if (activeConnections.length === 0) {
       this.authorizations.set(input.ownerUserId, {
         ...authorization,
         token: null,
         status: "REVOKED"
       });
+      this.auditActions.push("MAIL_AUTHORIZATION_REVOKED");
     }
-    this.auditActions.push("GMAIL_CONNECTION_DISCONNECTED");
+    this.auditActions.push("MAIL_CONNECTION_DISCONNECTED");
     return { tokenToRevoke };
   }
 
-  public async markAuthorizationRequiresReauth(input: {
+  public async markAuthorizationFailure(input: {
     readonly authorizationId: string;
+    readonly status: "REAUTH_REQUIRED" | "ERROR";
     readonly errorCode: string;
     readonly now: Date;
   }): Promise<void> {
@@ -208,7 +224,7 @@ export class MemoryGmailConnectionRepository implements GmailConnectionRepositor
       if (authorization.id === input.authorizationId) {
         this.authorizations.set(userId, {
           ...authorization,
-          status: "REAUTH_REQUIRED"
+          status: input.status
         });
       }
     }
@@ -216,12 +232,16 @@ export class MemoryGmailConnectionRepository implements GmailConnectionRepositor
       if (connection.authorizationId === input.authorizationId) {
         this.connections.set(teamId, {
           ...connection,
-          authorizationStatus: "REAUTH_REQUIRED",
-          connectionStatus: "REAUTH_REQUIRED",
+          authorizationStatus: input.status,
+          connectionStatus: input.status,
           lastErrorCode: input.errorCode
         });
       }
     }
-    this.auditActions.push("GMAIL_CREDENTIAL_REAUTH_REQUIRED");
+    this.auditActions.push(
+      input.status === "REAUTH_REQUIRED"
+        ? "MAIL_AUTHORIZATION_REAUTH_REQUIRED"
+        : "MAIL_AUTHORIZATION_ERROR"
+    );
   }
 }

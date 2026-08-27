@@ -10,7 +10,10 @@ describe("loadEnvironment", () => {
       GOOGLE_OAUTH_STATE_TTL_MINUTES: 10,
       GMAIL_OAUTH_REDIRECT_URI:
         "http://127.0.0.1:8080/api/v1/auth/gmail/callback",
-      GMAIL_TOKEN_ENCRYPTION_PROVIDER: "local"
+      MICROSOFT_OAUTH_REDIRECT_URI:
+        "http://127.0.0.1:8080/api/v1/auth/mail/microsoft/callback",
+      MICROSOFT_OAUTH_TENANT: "common",
+      MAIL_TOKEN_ENCRYPTION_PROVIDER: "local"
     });
   });
 
@@ -19,7 +22,11 @@ describe("loadEnvironment", () => {
       APP_ENV: "staging",
       PUBLIC_ORIGIN: "https://staging.call-now.example",
       GMAIL_OAUTH_CLIENT_ID: "staging-gmail-client-id",
-      GMAIL_OAUTH_CLIENT_SECRET: "staging-gmail-client-secret"
+      GMAIL_OAUTH_CLIENT_SECRET: "staging-gmail-client-secret",
+      MICROSOFT_OAUTH_CLIENT_ID: "staging-microsoft-client-id",
+      MICROSOFT_OAUTH_CLIENT_SECRET: "staging-microsoft-client-secret",
+      MICROSOFT_OAUTH_REDIRECT_URI:
+        "https://api.staging.call-now.example/api/v1/auth/mail/microsoft/callback"
     };
     expect(() =>
       loadEnvironment({
@@ -35,21 +42,46 @@ describe("loadEnvironment", () => {
         GMAIL_OAUTH_REDIRECT_URI:
           "https://api.staging.call-now.example/api/v1/auth/gmail/callback"
       })
-    ).toThrow("Gmail tokens must use Google Cloud KMS outside development");
+    ).toThrow(
+      "Mail refresh tokens must use Google Cloud KMS outside development"
+    );
 
     expect(
       loadEnvironment({
         ...base,
         GMAIL_OAUTH_REDIRECT_URI:
           "https://api.staging.call-now.example/api/v1/auth/gmail/callback",
-        GMAIL_TOKEN_ENCRYPTION_PROVIDER: "gcp-kms",
-        GMAIL_KMS_KEY_NAME:
+        MAIL_TOKEN_ENCRYPTION_PROVIDER: "gcp-kms",
+        MAIL_KMS_KEY_NAME:
           "projects/test/locations/asia-northeast1/keyRings/call-now/cryptoKeys/gmail"
       })
     ).toMatchObject({
       APP_ENV: "staging",
-      GMAIL_TOKEN_ENCRYPTION_PROVIDER: "gcp-kms"
+      MAIL_TOKEN_ENCRYPTION_PROVIDER: "gcp-kms"
     });
+  });
+
+  it("requires HTTPS and an explicit Microsoft tenant outside development", () => {
+    expect(() =>
+      loadEnvironment({
+        APP_ENV: "staging",
+        PUBLIC_ORIGIN: "https://staging.call-now.example",
+        GMAIL_OAUTH_CLIENT_ID: "staging-gmail-client-id",
+        GMAIL_OAUTH_CLIENT_SECRET: "staging-gmail-client-secret",
+        GMAIL_OAUTH_REDIRECT_URI:
+          "https://api.staging.call-now.example/api/v1/auth/gmail/callback",
+        MICROSOFT_OAUTH_CLIENT_ID: "staging-microsoft-client-id",
+        MICROSOFT_OAUTH_CLIENT_SECRET: "staging-microsoft-client-secret",
+        MICROSOFT_OAUTH_REDIRECT_URI:
+          "http://api.staging.call-now.example/api/v1/auth/mail/microsoft/callback"
+      })
+    ).toThrow(
+      "MICROSOFT_OAUTH_REDIRECT_URI must use HTTPS outside development"
+    );
+
+    expect(() =>
+      loadEnvironment({ MICROSOFT_OAUTH_TENANT: "not/a/tenant" })
+    ).toThrow("MICROSOFT_OAUTH_TENANT is invalid");
   });
 
   it("requires HTTPS in production", () => {

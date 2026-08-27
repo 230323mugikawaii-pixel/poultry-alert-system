@@ -44,13 +44,21 @@ const EnvironmentSchema = Type.Object({
     minimum: 5,
     maximum: 30
   }),
-  GMAIL_TOKEN_ENCRYPTION_PROVIDER: Type.Union([
+  MICROSOFT_OAUTH_CLIENT_ID: Type.String({ minLength: 1 }),
+  MICROSOFT_OAUTH_CLIENT_SECRET: Type.String({ minLength: 1 }),
+  MICROSOFT_OAUTH_REDIRECT_URI: Type.String({ minLength: 1 }),
+  MICROSOFT_OAUTH_TENANT: Type.String({ minLength: 1 }),
+  MICROSOFT_OAUTH_STATE_TTL_MINUTES: Type.Integer({
+    minimum: 5,
+    maximum: 30
+  }),
+  MAIL_TOKEN_ENCRYPTION_PROVIDER: Type.Union([
     Type.Literal("local"),
     Type.Literal("gcp-kms")
   ]),
-  GMAIL_TOKEN_ENCRYPTION_KEY: Type.String(),
-  GMAIL_TOKEN_ENCRYPTION_KEY_VERSION: Type.String({ minLength: 1 }),
-  GMAIL_KMS_KEY_NAME: Type.String(),
+  MAIL_TOKEN_ENCRYPTION_KEY: Type.String(),
+  MAIL_TOKEN_ENCRYPTION_KEY_VERSION: Type.String({ minLength: 1 }),
+  MAIL_KMS_KEY_NAME: Type.String(),
   MAGIC_LINK_TTL_MINUTES: Type.Integer({ minimum: 5, maximum: 60 }),
   SESSION_IDLE_DAYS: Type.Integer({ minimum: 1, maximum: 90 }),
   SESSION_ABSOLUTE_DAYS: Type.Integer({ minimum: 1, maximum: 365 }),
@@ -105,14 +113,32 @@ export function loadEnvironment(
     GMAIL_OAUTH_STATE_TTL_MINUTES: Number(
       source.GMAIL_OAUTH_STATE_TTL_MINUTES ?? "10"
     ),
-    GMAIL_TOKEN_ENCRYPTION_PROVIDER:
-      source.GMAIL_TOKEN_ENCRYPTION_PROVIDER ?? "local",
-    GMAIL_TOKEN_ENCRYPTION_KEY:
+    MICROSOFT_OAUTH_CLIENT_ID:
+      source.MICROSOFT_OAUTH_CLIENT_ID ?? "development-microsoft-client-id",
+    MICROSOFT_OAUTH_CLIENT_SECRET:
+      source.MICROSOFT_OAUTH_CLIENT_SECRET ??
+      "development-microsoft-client-secret",
+    MICROSOFT_OAUTH_REDIRECT_URI:
+      source.MICROSOFT_OAUTH_REDIRECT_URI ??
+      "http://127.0.0.1:8080/api/v1/auth/mail/microsoft/callback",
+    MICROSOFT_OAUTH_TENANT: source.MICROSOFT_OAUTH_TENANT ?? "common",
+    MICROSOFT_OAUTH_STATE_TTL_MINUTES: Number(
+      source.MICROSOFT_OAUTH_STATE_TTL_MINUTES ?? "10"
+    ),
+    MAIL_TOKEN_ENCRYPTION_PROVIDER:
+      source.MAIL_TOKEN_ENCRYPTION_PROVIDER ??
+      source.GMAIL_TOKEN_ENCRYPTION_PROVIDER ??
+      "local",
+    MAIL_TOKEN_ENCRYPTION_KEY:
+      source.MAIL_TOKEN_ENCRYPTION_KEY ??
       source.GMAIL_TOKEN_ENCRYPTION_KEY ??
       "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-    GMAIL_TOKEN_ENCRYPTION_KEY_VERSION:
-      source.GMAIL_TOKEN_ENCRYPTION_KEY_VERSION ?? "local-development-v1",
-    GMAIL_KMS_KEY_NAME: source.GMAIL_KMS_KEY_NAME ?? "",
+    MAIL_TOKEN_ENCRYPTION_KEY_VERSION:
+      source.MAIL_TOKEN_ENCRYPTION_KEY_VERSION ??
+      source.GMAIL_TOKEN_ENCRYPTION_KEY_VERSION ??
+      "local-development-v1",
+    MAIL_KMS_KEY_NAME:
+      source.MAIL_KMS_KEY_NAME ?? source.GMAIL_KMS_KEY_NAME ?? "",
     MAGIC_LINK_TTL_MINUTES: Number(source.MAGIC_LINK_TTL_MINUTES ?? "15"),
     SESSION_IDLE_DAYS: Number(source.SESSION_IDLE_DAYS ?? "30"),
     SESSION_ABSOLUTE_DAYS: Number(source.SESSION_ABSOLUTE_DAYS ?? "90"),
@@ -207,15 +233,54 @@ export function loadEnvironment(
     );
   }
 
+  let microsoftRedirectUri: URL;
+  try {
+    microsoftRedirectUri = new URL(candidate.MICROSOFT_OAUTH_REDIRECT_URI);
+  } catch {
+    throw new Error("MICROSOFT_OAUTH_REDIRECT_URI must be a valid URL");
+  }
+
   if (
     (candidate.APP_ENV === "production" || candidate.APP_ENV === "staging") &&
-    (candidate.GMAIL_TOKEN_ENCRYPTION_PROVIDER !== "gcp-kms" ||
-      !candidate.GMAIL_KMS_KEY_NAME)
+    microsoftRedirectUri.protocol !== "https:"
   ) {
     throw new Error(
-      "Gmail tokens must use Google Cloud KMS outside development"
+      "MICROSOFT_OAUTH_REDIRECT_URI must use HTTPS outside development"
+    );
+  }
+
+  if (
+    (candidate.APP_ENV === "production" || candidate.APP_ENV === "staging") &&
+    (candidate.MICROSOFT_OAUTH_CLIENT_ID.startsWith("development-") ||
+      candidate.MICROSOFT_OAUTH_CLIENT_SECRET.startsWith("development-"))
+  ) {
+    throw new Error(
+      "Microsoft OAuth credentials must be replaced outside development"
+    );
+  }
+
+  if (!isAllowedMicrosoftTenant(candidate.MICROSOFT_OAUTH_TENANT)) {
+    throw new Error("MICROSOFT_OAUTH_TENANT is invalid");
+  }
+
+  if (
+    (candidate.APP_ENV === "production" || candidate.APP_ENV === "staging") &&
+    (candidate.MAIL_TOKEN_ENCRYPTION_PROVIDER !== "gcp-kms" ||
+      !candidate.MAIL_KMS_KEY_NAME)
+  ) {
+    throw new Error(
+      "Mail refresh tokens must use Google Cloud KMS outside development"
     );
   }
 
   return candidate;
+}
+
+function isAllowedMicrosoftTenant(value: string): boolean {
+  return (
+    ["common", "organizations", "consumers"].includes(value.toLowerCase()) ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(
+      value
+    )
+  );
 }

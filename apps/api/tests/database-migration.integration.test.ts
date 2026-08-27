@@ -45,7 +45,14 @@ const gmailMigration = readFileSync(
   ),
   "utf8"
 );
-const migration = baseMigration + gmailMigration;
+const mailProviderMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260826000200_mail_provider_foundation/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const migration = baseMigration + gmailMigration + mailProviderMigration;
 
 const databases: PGlite[] = [];
 
@@ -128,17 +135,32 @@ describe("PostgreSQL migrations", () => {
       ORDER BY enumsortorder;
     `);
     expect(challengeKinds.rows).toContainEqual({ enumlabel: "GMAIL_OAUTH" });
+    expect(challengeKinds.rows).toContainEqual({
+      enumlabel: "MICROSOFT_MAIL_OAUTH"
+    });
 
-    const gmailTables = await database.query<{ table_name: string }>(`
+    const mailTables = await database.query<{ table_name: string }>(`
       SELECT table_name
       FROM information_schema.tables
       WHERE table_schema = 'public'
-        AND table_name IN ('gmail_authorizations', 'gmail_connections')
+        AND table_name IN ('mail_authorizations', 'mail_connections')
       ORDER BY table_name;
     `);
-    expect(gmailTables.rows).toEqual([
-      { table_name: "gmail_authorizations" },
-      { table_name: "gmail_connections" }
+    expect(mailTables.rows).toEqual([
+      { table_name: "mail_authorizations" },
+      { table_name: "mail_connections" }
+    ]);
+
+    const mailProviders = await database.query<{ enumlabel: string }>(`
+      SELECT enumlabel
+      FROM pg_enum
+      JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+      WHERE pg_type.typname = 'MailProvider'
+      ORDER BY enumsortorder;
+    `);
+    expect(mailProviders.rows).toEqual([
+      { enumlabel: "GOOGLE" },
+      { enumlabel: "MICROSOFT" }
     ]);
 
     await database.exec(`
@@ -163,7 +185,7 @@ describe("PostgreSQL migrations", () => {
     ).rejects.toThrow();
 
     await database.exec(`
-      INSERT INTO gmail_authorizations (
+      INSERT INTO mail_authorizations (
         id, "userId", provider, "providerSubject", email,
         "grantedScopes", status, "updatedAt"
       ) VALUES (
@@ -173,8 +195,8 @@ describe("PostgreSQL migrations", () => {
         ARRAY['https://www.googleapis.com/auth/gmail.readonly'],
         'ACTIVE', now()
       );
-      INSERT INTO gmail_connections (
-        id, "teamId", "gmailAuthorizationId", status, "updatedAt"
+      INSERT INTO mail_connections (
+        id, "teamId", "mailAuthorizationId", status, "updatedAt"
       ) VALUES (
         '50000000-0000-0000-0000-000000000001',
         '10000000-0000-0000-0000-000000000001',
@@ -188,10 +210,10 @@ describe("PostgreSQL migrations", () => {
     }>(`
       SELECT
         login_identity."providerSubject" AS login_subject,
-        gmail_authorization."providerSubject" AS monitoring_subject
+        mail_authorization."providerSubject" AS monitoring_subject
       FROM external_identities AS login_identity
-      JOIN gmail_authorizations AS gmail_authorization
-        ON gmail_authorization."userId" = login_identity."userId";
+      JOIN mail_authorizations AS mail_authorization
+        ON mail_authorization."userId" = login_identity."userId";
     `);
     expect(separatedIdentities.rows).toEqual([
       {
@@ -254,6 +276,28 @@ describe("PostgreSQL migrations", () => {
         connection_status: "REAUTH_REQUIRED",
         email: "legacy-monitoring@example.com",
         encryption_provider: "LEGACY_UNKNOWN"
+      }
+    ]);
+
+    await database.exec(mailProviderMigration);
+    const generalized = await database.query<{
+      provider: string;
+      authorization_status: string;
+      connection_status: string;
+    }>(`
+      SELECT
+        mail_authorization.provider,
+        mail_authorization.status AS authorization_status,
+        mail_connection.status AS connection_status
+      FROM mail_connections AS mail_connection
+      JOIN mail_authorizations AS mail_authorization
+        ON mail_authorization.id = mail_connection."mailAuthorizationId";
+    `);
+    expect(generalized.rows).toEqual([
+      {
+        provider: "GOOGLE",
+        authorization_status: "REAUTH_REQUIRED",
+        connection_status: "REAUTH_REQUIRED"
       }
     ]);
   });

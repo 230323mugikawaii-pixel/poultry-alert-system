@@ -27,28 +27,30 @@ describe("database foundation", () => {
       "InvitationRedemption",
       "AuditEvent",
       "SecurityThrottle",
-      "GmailAuthorization",
-      "GmailConnection"
+      "MailAuthorization",
+      "MailConnection"
     ]) {
       expect(schema).toContain(`model ${model} {`);
     }
   });
 
-  it("separates Call Now login identity from Gmail monitoring authorization", () => {
-    const gmailAuthorization = schema.match(
-      /model GmailAuthorization \{([^}]*)\}/
+  it("separates Call Now login identity from mail monitoring authorization", () => {
+    const mailAuthorization = schema.match(
+      /model MailAuthorization \{([^}]*)\}/
     )?.[1];
-    const gmailConnection = schema.match(
-      /model GmailConnection \{([^}]*)\}/
+    const mailConnection = schema.match(
+      /model MailConnection \{([^}]*)\}/
     )?.[1];
 
-    expect(gmailAuthorization).toContain("userId");
-    expect(gmailAuthorization).toContain("encryptedRefreshToken");
-    expect(gmailAuthorization).toMatch(/userId\s+String\s+@unique/);
-    expect(gmailConnection).toContain("teamId");
-    expect(gmailConnection).toContain("gmailAuthorizationId");
-    expect(gmailConnection).not.toContain("encryptedRefreshToken");
+    expect(mailAuthorization).toContain("userId");
+    expect(mailAuthorization).toContain("encryptedRefreshToken");
+    expect(mailAuthorization).toMatch(/userId\s+String\s+@unique/);
+    expect(mailConnection).toContain("teamId");
+    expect(mailConnection).toContain("mailAuthorizationId");
+    expect(mailConnection).not.toContain("encryptedRefreshToken");
     expect(schema).toContain("GMAIL_OAUTH");
+    expect(schema).toContain("MICROSOFT_MAIL_OAUTH");
+    expect(schema).toMatch(/enum MailProvider \{[^}]*GOOGLE[^}]*MICROSOFT/s);
   });
 
   it("binds Google identities by provider subject instead of email alone", () => {
