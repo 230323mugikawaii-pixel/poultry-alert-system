@@ -14,176 +14,10 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=17">
+    <link rel="stylesheet" href="css/style.css?v=18">
 </head>
 
 <body>
-
-  <!-- ========================================
-       トップページ
-  ========================================= -->
-
-  <div id="landingScreen">
-
-    <header class="landing-header">
-
-      <div class="landing-logo">
-        🔔 Call Now
-      </div>
-
-    </header>
-
-
-    <main>
-
-      <section class="hero">
-
-        <div class="hero-text">
-
-          <h1>
-            Call Now
-          </h1>
-
-          <h2>
-            メールを、確実な音へ。
-          </h2>
-
-          <p>
-            大切なメール通知を、見逃しにくい音へ変換します。<br>
-            停止ボタンを押すまで、繰り返し通知します。<br>
-            アカウント登録後、通知したいキーワードを設定できます。
-          </p>
-
-
-          <div class="hero-buttons">
-
-            <button
-              type="button"
-              class="btn primary"
-              onclick="startAccountRegistration()"
-            >
-              アカウント登録 / ログイン
-            </button>
-
-
-            <button
-              type="button"
-              class="btn outline"
-              onclick="scrollToService()"
-            >
-              サービスについて
-            </button>
-
-          </div>
-
-        </div>
-
-
-        <div class="notification-card">
-
-          <div class="notification-icon">
-            🔔
-          </div>
-
-          <h2>
-            Call Now
-          </h2>
-
-          <p>
-            通知中...
-          </p>
-
-        </div>
-
-      </section>
-
-
-      <!-- サービス紹介 -->
-
-      <section
-        id="serviceSection"
-        class="features"
-      >
-
-        <article class="feature">
-
-          <span>
-            🔔
-          </span>
-
-          <h3>
-            音でお知らせ
-          </h3>
-
-          <p>
-            重要な通知を大きな音でお知らせします。
-          </p>
-
-        </article>
-
-
-        <article class="feature">
-
-          <span>
-            🔁
-          </span>
-
-          <h3>
-            自動で繰り返し
-          </h3>
-
-          <p>
-            停止するまで繰り返し通知します。
-          </p>
-
-        </article>
-
-
-        <article class="feature">
-
-          <span>
-            ⏱️
-          </span>
-
-          <h3>
-            確認して終了
-          </h3>
-
-          <p>
-            停止ボタンを押すと通知を終了します。
-          </p>
-
-        </article>
-
-
-        <article class="feature">
-
-          <span>
-            ✉️
-          </span>
-
-          <h3>
-            メールで確認
-          </h3>
-
-          <p>
-            詳しい内容は受信したメールで確認できます。
-          </p>
-
-        </article>
-
-      </section>
-
-    </main>
-
-
-    <footer>
-      © 2026 Call Now. All rights reserved.
-    </footer>
-
-  </div>
-
-
 
   <!-- ========================================
        キーワード設定画面
@@ -256,7 +90,7 @@
         <p>
           3キーワードまで基本料金に含まれます。<br>
           4個目以降は、1個につき年額100円追加されます。<br>
-          監視用Googleアカウント1件が基本料金に含まれます。
+          監視用メールアカウント1件が基本料金に含まれます。
         </p>
 
       </div>
@@ -298,16 +132,16 @@
       </div>
 
 
-      <!-- 監視用Googleアカウント -->
+      <!-- 監視用メールアカウント -->
 
       <div class="single-google-account-section">
 
         <strong>
-          監視用Googleアカウント
+          監視用メールアカウント
         </strong>
 
         <p class="input-help">
-          Googleアカウントを1件連携します。追加料金はありません。
+          GmailまたはMicrosoft 365を1件連携します。追加料金はありません。
         </p>
 
       </div>
@@ -697,7 +531,7 @@
 
 
   <!-- ========================================
-       Googleアカウント選択画面
+       登録・ログイン / アカウント設定画面
   ========================================= -->
 
   <section
@@ -710,10 +544,10 @@
       <button
         id="googleBackButton"
         type="button"
-        class="back-button"
+        class="back-button hidden"
         onclick="backFromGoogle()"
       >
-        ← キーワード設定へ戻る
+        ← ホームへ戻る
       </button>
 
 
@@ -723,7 +557,7 @@
 
 
       <h1 id="googleScreenTitle">
-        Googleアカウントを設定
+        Call Nowに登録・ログイン
       </h1>
 
 
@@ -731,7 +565,7 @@
         id="googleScreenDescription"
         class="description"
       >
-        Call Nowへのログインに使うGoogleアカウントを設定します。
+        利用するアカウントを選んでください。
       </p>
 
 
@@ -740,7 +574,7 @@
         class="google-account-card linked-accounts-card"
       >
         <div class="linked-accounts-heading">
-          <strong>ログイン中のGoogleアカウント</strong>
+          <strong>ログイン方法</strong>
         </div>
 
         <div id="linkedGoogleAccounts"></div>
@@ -817,56 +651,51 @@
       </div>
 
 
-      <!-- Google認証 -->
-
-      <div id="googleAuthCard" class="google-card">
-
-        <div class="google-logo">
-          G
-        </div>
-
-
+      <div id="googleAuthCard" class="google-card login-provider-card">
         <div class="google-card-content">
-
-          <h2 id="googleCardTitle">
-            Googleアカウントを設定
-          </h2>
-
+          <h2 id="googleCardTitle">登録・ログイン方法を選択</h2>
 
           <p id="googleAuthDescription">
-            Googleの認証画面で本人確認してください。
-            Call NowがGoogleのパスワードを保存することはありません。
+            ログイン用アカウントの権限だけを使用します。メール監視の権限は、ログイン後に別途設定します。
           </p>
 
+          <p id="googleError" class="error-message" aria-live="polite"></p>
 
-          <p
-            id="googleError"
-            class="error-message"
-            aria-live="polite"
-          ></p>
+          <div class="login-provider-choices">
+            <button
+              id="googleLoginProviderButton"
+              type="button"
+              class="login-provider-button google-login-button"
+              onclick="startPrimaryLogin('GOOGLE')"
+            >
+              <span aria-hidden="true">G</span>
+              <strong>Googleで続ける</strong>
+            </button>
 
+            <button
+              id="microsoftLoginProviderButton"
+              type="button"
+              class="login-provider-button microsoft-login-button"
+              onclick="startPrimaryLogin('MICROSOFT')"
+            >
+              <span aria-hidden="true">M</span>
+              <strong>Microsoftで続ける</strong>
+            </button>
 
-          <button
-            id="googleAuthButton"
-            type="button"
-            class="google-button"
-            onclick="startGoogleLogin()"
-          >
-            Googleアカウントを設定
-          </button>
+            <button
+              id="appleLoginProviderButton"
+              type="button"
+              class="login-provider-button apple-login-button"
+              onclick="startPrimaryLogin('APPLE')"
+            >
+              <span aria-hidden="true">●</span>
+              <strong>Appleで続ける</strong>
+            </button>
+          </div>
 
+          <p id="loginProviderNotice" class="input-help"></p>
         </div>
-
       </div>
-
-      <button
-        id="finishGoogleLinkButton"
-        type="button"
-        class="btn primary full-width hidden"
-        onclick="finishGoogleAccountLinking()"
-      >
-        設定を完了してホームへ
-      </button>
 
     </div>
 
@@ -901,7 +730,7 @@
         </button>
 
 
-        <div class="app-status">
+        <div id="appMonitoringStatus" class="app-status">
           監視中
         </div>
 
@@ -927,6 +756,11 @@
 
         <div class="dashboard-grid">
 
+          <article id="homeSetupNoticeCard" class="card setup-notice-card hidden">
+            <h2>はじめに設定してください</h2>
+            <div id="homeSetupNotices"></div>
+          </article>
+
           <article class="card">
 
             <h2>
@@ -949,12 +783,12 @@
           <article class="card">
 
             <h2>
-              Googleアカウント
+              アカウント
             </h2>
 
 
             <div id="connectedGoogleAccounts">
-              Googleアカウントの状態を確認しています
+              アカウントの状態を確認しています
             </div>
 
 
@@ -964,7 +798,7 @@
               class="btn outline full-width account-manage-button"
               onclick="openGoogleAccountManager()"
             >
-              Googleアカウントを管理
+              アカウント設定を開く
             </button>
 
           </article>
@@ -1412,7 +1246,7 @@
   <!-- 動作用JavaScript -->
 
     <script src="js/keyword-policy.js?v=2"></script>
-    <script src="js/app.js?v=21"></script>
+    <script src="js/app.js?v=22"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";

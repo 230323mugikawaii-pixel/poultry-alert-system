@@ -109,215 +109,6 @@ button {
 
 
 /* ========================================
-   トップページ
-======================================== */
-
-#landingScreen {
-  min-height: 100vh;
-
-  background: var(--white);
-}
-
-.landing-header {
-  position: sticky;
-
-  top: 0;
-  z-index: 20;
-
-  padding: 20px 6%;
-
-  background:
-    rgba(255, 255, 255, 0.96);
-
-  border-bottom:
-    1px solid var(--border);
-
-  backdrop-filter: blur(12px);
-}
-
-.landing-logo {
-  color: var(--blue);
-
-  font-size: 28px;
-  font-weight: 900;
-}
-
-.hero {
-  display: grid;
-
-  grid-template-columns:
-    1fr 0.8fr;
-
-  align-items: center;
-
-  gap: 60px;
-
-  min-height: 700px;
-
-  padding: 80px 7%;
-}
-
-.hero-text h1 {
-  margin: 0;
-
-  color: var(--blue);
-
-  font-size:
-    clamp(60px, 9vw, 110px);
-
-  line-height: 1;
-}
-
-.hero-text h2 {
-  margin:
-    50px 0 28px;
-
-  font-size:
-    clamp(31px, 4vw, 58px);
-}
-
-.hero-text p {
-  margin: 0;
-
-  font-size:
-    clamp(18px, 2vw, 28px);
-
-  font-weight: 700;
-
-  line-height: 1.9;
-}
-
-.hero-buttons {
-  display: flex;
-
-  flex-wrap: wrap;
-
-  gap: 18px;
-
-  margin-top: 40px;
-}
-
-.notification-card {
-  display: flex;
-
-  min-height: 500px;
-
-  flex-direction: column;
-
-  align-items: center;
-  justify-content: center;
-
-  transform: rotate(7deg);
-
-  color: var(--white);
-
-  background:
-    linear-gradient(
-      150deg,
-      #1976d8,
-      #034893
-    );
-
-  border-radius: 48px;
-
-  box-shadow:
-    0 30px 70px
-    rgba(4, 75, 154, 0.32);
-}
-
-.notification-icon {
-  font-size: 100px;
-}
-
-.notification-card h2 {
-  margin:
-    35px 0;
-
-  font-size: 50px;
-}
-
-.notification-card p {
-  margin: 0;
-
-  font-size: 30px;
-  font-weight: 800;
-}
-
-
-/* ========================================
-   サービス紹介
-======================================== */
-
-.features {
-  display: grid;
-
-  grid-template-columns:
-    repeat(4, 1fr);
-
-  max-width: 1180px;
-
-  margin: auto;
-
-  padding:
-    70px 30px 120px;
-
-  gap: 2px;
-}
-
-.feature {
-  padding:
-    42px 24px;
-
-  text-align: center;
-
-  background: var(--blue-light);
-}
-
-.feature:first-child {
-  border-radius:
-    30px 0 0 30px;
-}
-
-.feature:last-child {
-  border-radius:
-    0 30px 30px 0;
-}
-
-.feature span {
-  display: block;
-
-  margin-bottom: 18px;
-
-  font-size: 55px;
-}
-
-.feature h3 {
-  margin:
-    0 0 10px;
-
-  font-size: 24px;
-}
-
-.feature p {
-  margin: 0;
-
-  font-weight: 700;
-
-  line-height: 1.7;
-}
-
-footer {
-  padding: 30px;
-
-  color: var(--subtext);
-
-  text-align: center;
-
-  background: var(--background);
-}
-
-
-/* ========================================
    初期設定・決済・Google画面
 ======================================== */
 
@@ -1015,6 +806,74 @@ footer {
   font-weight: 800;
 }
 
+.login-provider-card {
+  grid-template-columns: 1fr;
+}
+
+.login-provider-choices {
+  display: grid;
+
+  gap: 12px;
+
+  margin-top: 20px;
+}
+
+.login-provider-button {
+  display: grid;
+
+  width: 100%;
+
+  grid-template-columns: 34px 1fr 34px;
+
+  align-items: center;
+
+  border: 2px solid var(--border);
+
+  border-radius: 15px;
+
+  padding: 14px 18px;
+
+  color: var(--text);
+
+  background: var(--white);
+
+  font: inherit;
+
+  text-align: center;
+}
+
+.login-provider-button span {
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.login-provider-button::after {
+  content: "";
+}
+
+.login-provider-button:not(:disabled):hover {
+  border-color: var(--blue);
+  background: var(--blue-light);
+}
+
+.login-provider-button:disabled,
+.account-remove-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.apple-login-button {
+  color: #fff;
+  background: #111;
+  border-color: #111;
+}
+
+.apple-login-button:not(:disabled):hover {
+  color: #fff;
+  background: #2a2a2a;
+  border-color: #2a2a2a;
+}
+
 .google-button {
   width: 100%;
 
@@ -1263,6 +1122,24 @@ footer {
 
 .card h2 {
   margin-top: 0;
+}
+
+.setup-notice-card {
+  grid-column: 1 / -1;
+
+  border-color: #f3c66d;
+  background: #fffaf0;
+}
+
+.setup-notice-item + .setup-notice-item {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #f3dcae;
+}
+
+.setup-notice-item p {
+  color: var(--subtext);
+  line-height: 1.7;
 }
 
 .status-display {
@@ -1919,60 +1796,6 @@ body.app-dialog-open {
 ======================================== */
 
 @media (max-width: 800px) {
-  .hero {
-    display: block;
-
-    min-height: auto;
-
-    padding:
-      65px 6%;
-  }
-
-  .hero-text h1 {
-    font-size: 72px;
-  }
-
-  .hero-text h2 {
-    margin-top: 45px;
-
-    font-size: 38px;
-  }
-
-  .hero-buttons {
-    display: grid;
-  }
-
-  .notification-card {
-    width: 82%;
-
-    min-height: 480px;
-
-    margin:
-      90px auto 40px;
-  }
-
-  .features {
-    display: block;
-
-    padding:
-      30px 5% 80px;
-  }
-
-  .feature {
-    border-bottom:
-      2px solid #d5e5fa;
-  }
-
-  .feature:first-child {
-    border-radius:
-      30px 30px 0 0;
-  }
-
-  .feature:last-child {
-    border-radius:
-      0 0 30px 30px;
-  }
-
   .test-grid {
     grid-template-columns: 1fr;
   }
@@ -2042,28 +1865,6 @@ body.app-dialog-open {
 
 
 @media (max-width: 390px) {
-  .landing-logo {
-    font-size: 23px;
-  }
-
-  .hero-text h1 {
-    font-size: 60px;
-  }
-
-  .hero-text h2 {
-    font-size: 32px;
-  }
-
-  .notification-card {
-    width: 90%;
-
-    min-height: 410px;
-  }
-
-  .notification-card h2 {
-    font-size: 42px;
-  }
-
   .tab-button small {
     font-size: 9px;
   }
