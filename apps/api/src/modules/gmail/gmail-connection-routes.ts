@@ -47,6 +47,12 @@ export function createGmailConnectionRoutes(
   environment: AppEnvironment
 ): FastifyPluginAsyncTypebox {
   return async (app) => {
+    app.addContentTypeParser(
+      "application/x-www-form-urlencoded",
+      { parseAs: "string" },
+      (_request, body, done) => done(null, body)
+    );
+
     const stateCookieName = `${environment.COOKIE_NAME}_gmail_oauth_state`;
 
     const authenticateUserId = async (request: {

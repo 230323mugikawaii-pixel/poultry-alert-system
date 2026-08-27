@@ -354,8 +354,10 @@ describe("Gmail connection routes", () => {
       url: `/api/v1/teams/${team.teamId}/gmail-connection/oauth/start`,
       headers: {
         origin: environment.PUBLIC_ORIGIN,
-        cookie: sessionCookie(owner.sessionToken)
-      }
+        cookie: sessionCookie(owner.sessionToken),
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      payload: ""
     });
     expect(started.statusCode, started.body).toBe(303);
     const authorizationUrl = new URL(String(started.headers.location));
