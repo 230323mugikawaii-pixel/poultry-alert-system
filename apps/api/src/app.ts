@@ -11,6 +11,8 @@ import type { AuthService } from "./modules/auth/auth-service.js";
 import { createAuthRoutes } from "./modules/auth/auth-routes.js";
 import type { GoogleAuthService } from "./modules/auth/google-auth-service.js";
 import { createGoogleAuthRoutes } from "./modules/auth/google-auth-routes.js";
+import type { GmailConnectionService } from "./modules/gmail/gmail-connection-service.js";
+import { createGmailConnectionRoutes } from "./modules/gmail/gmail-connection-routes.js";
 import type { InvitationService } from "./modules/invitations/invitation-service.js";
 import type { SecurityThrottleService } from "./modules/security/security-throttle-service.js";
 import { createInvitationRoutes } from "./modules/invitations/invitation-routes.js";
@@ -23,6 +25,7 @@ export interface BuildAppOptions {
   readonly logger?: boolean;
   readonly authService?: AuthService;
   readonly googleAuthService?: GoogleAuthService;
+  readonly gmailConnectionService?: GmailConnectionService;
   readonly teamService?: TeamService;
   readonly invitationService?: InvitationService;
   readonly securityThrottleService?: SecurityThrottleService;
@@ -50,7 +53,9 @@ export async function buildApp(
                 "body.password",
                 "body.magicLink",
                 "body.joinToken",
-                "body.invitationPassword"
+                "body.invitationPassword",
+                "body.refreshToken",
+                "body.authorizationCode"
               ],
               censor: "[REDACTED]"
             }
@@ -68,7 +73,8 @@ export async function buildApp(
   await app.register(cookie);
   await app.register(cors, {
     origin: options.environment.PUBLIC_ORIGIN,
-    credentials: true
+    credentials: true,
+    methods: ["GET", "HEAD", "POST", "DELETE", "OPTIONS"]
   });
   await app.register(helmet, {
     contentSecurityPolicy: false
@@ -170,6 +176,25 @@ export async function buildApp(
         options.teamService,
         options.environment,
         options.invitationService
+      )
+    );
+  }
+
+  if (
+    options.authService &&
+    options.teamService &&
+    options.gmailConnectionService
+  ) {
+    if (!options.securityThrottleService) {
+      throw new Error("securityThrottleService is required for Gmail OAuth");
+    }
+    await app.register(
+      createGmailConnectionRoutes(
+        options.authService,
+        options.teamService,
+        options.gmailConnectionService,
+        options.securityThrottleService,
+        options.environment
       )
     );
   }

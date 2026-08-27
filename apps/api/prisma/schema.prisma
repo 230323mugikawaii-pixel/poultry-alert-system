@@ -24,6 +24,7 @@ enum IdentityProvider {
 enum ChallengeKind {
   MAGIC_LINK
   GOOGLE_OAUTH
+  GMAIL_OAUTH
   PASSKEY_REGISTRATION
   PASSKEY_AUTHENTICATION
   JOIN_GRANT
@@ -91,6 +92,14 @@ enum NotificationTargetStatus {
 
 enum GmailConnectionStatus {
   ACTIVE
+  REAUTH_REQUIRED
+  REVOKED
+  ERROR
+}
+
+enum GmailAuthorizationStatus {
+  ACTIVE
+  REAUTH_REQUIRED
   REVOKED
   ERROR
 }
@@ -124,6 +133,7 @@ model User {
   redemptions             InvitationRedemption[]
   initiatedOwnerTransfers OwnerTransfer[]
   auditEvents             AuditEvent[]
+  gmailAuthorization      GmailAuthorization?
 
   @@map("users")
 }
@@ -395,19 +405,44 @@ model NotificationTarget {
   @@map("notification_targets")
 }
 
-model GmailConnection {
-  id                    String                @id @default(uuid()) @db.Uuid
-  teamId                String                @unique @db.Uuid
-  googleSubject         String                @db.VarChar(255)
-  email                 String                @db.VarChar(320)
-  encryptedRefreshToken String                @db.Text
-  scopes                String[]              @default([])
-  status                GmailConnectionStatus @default(ACTIVE)
-  createdAt             DateTime              @default(now()) @db.Timestamptz(3)
-  updatedAt             DateTime              @updatedAt @db.Timestamptz(3)
-  revokedAt             DateTime?             @db.Timestamptz(3)
-  team                  Team                  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+model GmailAuthorization {
+  id                    String                   @id @default(uuid()) @db.Uuid
+  userId                String                   @unique @db.Uuid
+  provider              IdentityProvider         @default(GOOGLE)
+  providerSubject       String                   @db.VarChar(255)
+  email                 String                   @db.VarChar(320)
+  encryptedRefreshToken String?                  @db.Text
+  encryptionProvider    String?                  @db.VarChar(40)
+  encryptionKeyVersion  String?                  @db.VarChar(255)
+  grantedScopes         String[]                 @default([])
+  status                GmailAuthorizationStatus @default(ACTIVE)
+  lastVerifiedAt        DateTime?                @db.Timestamptz(3)
+  revokedAt             DateTime?                @db.Timestamptz(3)
+  createdAt             DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime                 @updatedAt @db.Timestamptz(3)
+  user                  User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  connections           GmailConnection[]
 
+  @@unique([provider, providerSubject])
+  @@index([status, revokedAt])
+  @@map("gmail_authorizations")
+}
+
+model GmailConnection {
+  id                   String                @id @default(uuid()) @db.Uuid
+  teamId               String                @unique @db.Uuid
+  gmailAuthorizationId String                @db.Uuid
+  status               GmailConnectionStatus @default(ACTIVE)
+  historyId            String?               @db.VarChar(255)
+  lastSyncAt           DateTime?             @db.Timestamptz(3)
+  lastErrorCode        String?               @db.VarChar(100)
+  createdAt            DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime              @updatedAt @db.Timestamptz(3)
+  revokedAt            DateTime?             @db.Timestamptz(3)
+  team                 Team                  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  gmailAuthorization   GmailAuthorization    @relation(fields: [gmailAuthorizationId], references: [id], onDelete: Restrict)
+
+  @@index([gmailAuthorizationId, status])
   @@map("gmail_connections")
 }
 

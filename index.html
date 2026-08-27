@@ -14,7 +14,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=15">
+    <link rel="stylesheet" href="css/style.css?v=16">
 </head>
 
 <body>
@@ -50,7 +50,8 @@
 
           <p>
             大切なメール通知を、見逃しにくい音へ変換します。<br>
-            停止ボタンを押すまで、繰り返し通知します。
+            停止ボタンを押すまで、繰り返し通知します。<br>
+            アカウント登録後、通知したいキーワードを設定できます。
           </p>
 
 
@@ -59,9 +60,9 @@
             <button
               type="button"
               class="btn primary"
-              onclick="startSignup()"
+              onclick="startAccountRegistration()"
             >
-              今すぐ始める
+              アカウント登録 / ログイン
             </button>
 
 
@@ -539,7 +540,7 @@
         <div class="payment-detail">
 
           <span>
-            監視用Googleアカウント
+            メール監視アカウント
           </span>
 
           <strong>
@@ -730,7 +731,7 @@
         id="googleScreenDescription"
         class="description"
       >
-        通知の確認と本人確認に使うGoogleアカウントを設定します。
+        Call Nowへのログインに使うGoogleアカウントを設定します。
       </p>
 
 
@@ -739,10 +740,56 @@
         class="google-account-card linked-accounts-card"
       >
         <div class="linked-accounts-heading">
-          <strong>現在設定されている監視用Googleアカウント</strong>
+          <strong>ログイン中のGoogleアカウント</strong>
         </div>
 
         <div id="linkedGoogleAccounts"></div>
+      </div>
+
+
+      <div
+        id="gmailMonitoringAccountCard"
+        class="google-account-card linked-accounts-card hidden"
+      >
+        <div class="linked-accounts-heading">
+          <strong>メール監視アカウント</strong>
+        </div>
+
+        <p class="google-account-role-description">
+          ログインとは別に、重要メールを監視するGoogleアカウントを1件接続できます。
+        </p>
+
+        <div id="gmailMonitoringAccountStatus"></div>
+
+        <div class="gmail-account-actions">
+          <button
+            id="gmailConnectButton"
+            type="button"
+            class="btn outline"
+            aria-describedby="gmailMonitoringAccountStatus"
+            onclick="startGmailConnection()"
+          >
+            Gmail / Google Workspace
+          </button>
+
+          <button
+            id="gmailReauthorizeButton"
+            type="button"
+            class="btn outline hidden"
+            onclick="reauthorizeGmailConnection()"
+          >
+            Gmail監視を再認証
+          </button>
+
+          <button
+            id="gmailDisconnectButton"
+            type="button"
+            class="account-remove-button hidden"
+            onclick="disconnectGmailConnection()"
+          >
+            Gmail監視を解除
+          </button>
+        </div>
       </div>
 
 
@@ -791,7 +838,7 @@
       <button
         id="finishGoogleLinkButton"
         type="button"
-        class="btn primary full-width"
+        class="btn primary full-width hidden"
         onclick="finishGoogleAccountLinking()"
       >
         設定を完了してホームへ
@@ -878,12 +925,12 @@
           <article class="card">
 
             <h2>
-              接続中のGoogleアカウント
+              Googleアカウント
             </h2>
 
 
             <div id="connectedGoogleAccounts">
-              監視用Googleアカウントが設定されていません
+              Googleアカウントの状態を確認しています
             </div>
 
 
@@ -893,7 +940,7 @@
               class="btn outline full-width account-manage-button"
               onclick="openGoogleAccountManager()"
             >
-              Googleアカウントを設定
+              Googleアカウントを管理
             </button>
 
           </article>
@@ -1341,7 +1388,7 @@
   <!-- 動作用JavaScript -->
 
     <script src="js/keyword-policy.js?v=2"></script>
-    <script src="js/app.js?v=19"></script>
+    <script src="js/app.js?v=21"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";

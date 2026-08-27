@@ -17,6 +17,15 @@ const environment: AppEnvironment = {
   GOOGLE_OAUTH_REDIRECT_URI:
     "https://api.test.call-now.example/api/v1/auth/google/callback",
   GOOGLE_OAUTH_STATE_TTL_MINUTES: 10,
+  GMAIL_OAUTH_CLIENT_ID: "test-gmail-client-id",
+  GMAIL_OAUTH_CLIENT_SECRET: "test-gmail-client-secret",
+  GMAIL_OAUTH_REDIRECT_URI:
+    "https://api.test.call-now.example/api/v1/auth/gmail/callback",
+  GMAIL_OAUTH_STATE_TTL_MINUTES: 10,
+  GMAIL_TOKEN_ENCRYPTION_PROVIDER: "local",
+  GMAIL_TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  GMAIL_TOKEN_ENCRYPTION_KEY_VERSION: "test-local-v1",
+  GMAIL_KMS_KEY_NAME: "",
   MAGIC_LINK_TTL_MINUTES: 15,
   SESSION_IDLE_DAYS: 30,
   SESSION_ABSOLUTE_DAYS: 90,
@@ -66,6 +75,32 @@ describe("system routes", () => {
       }
     });
   });
+
+  it.each(["POST", "DELETE"])(
+    "allows %s from the configured frontend origin",
+    async (method) => {
+      const app = await buildApp({ environment, logger: false });
+      apps.push(app);
+
+      const response = await app.inject({
+        method: "OPTIONS",
+        url: "/api/v1/teams/00000000-0000-4000-8000-000000000000/mail-connection",
+        headers: {
+          origin: environment.PUBLIC_ORIGIN,
+          "access-control-request-method": method
+        }
+      });
+
+      expect(response.statusCode).toBe(204);
+      expect(response.headers["access-control-allow-origin"]).toBe(
+        environment.PUBLIC_ORIGIN
+      );
+      expect(response.headers["access-control-allow-credentials"]).toBe("true");
+      expect(response.headers["access-control-allow-methods"]).toBe(
+        "GET, HEAD, POST, DELETE, OPTIONS"
+      );
+    }
+  );
 
   it("reports a dependency outage through readiness without failing liveness", async () => {
     const app = await buildApp({

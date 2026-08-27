@@ -30,6 +30,7 @@ export class MemoryTeamRepository implements TeamRepository {
   public changes: StoredChange[] = [];
   public invitations: IssuedInvitationRecord[] = [];
   public failNextTeamCode = false;
+  public teamCreationCount = 0;
 
   public async createTeam(input: CreateTeamInput): Promise<TeamCreationResult> {
     if (input.seatLimit > 0 && !input.initialInvitation) {
@@ -44,6 +45,7 @@ export class MemoryTeamRepository implements TeamRepository {
     }
     const teamId = randomUUID();
     const membershipId = randomUUID();
+    this.teamCreationCount += 1;
     this.context = {
       teamId,
       teamCode: input.publicCode,
@@ -52,6 +54,7 @@ export class MemoryTeamRepository implements TeamRepository {
       role: "OWNER",
       seatSummary: calculateSeatSummary(input.seatLimit, 0),
       pendingSeatLimit: null,
+      subscriptionStatus: "ACTIVE",
       currentTermAmountYen: input.currentTermAmountYen,
       currentTermStartedAt: input.currentTermStartedAt,
       currentTermEndsAt: input.currentTermEndsAt
@@ -73,6 +76,23 @@ export class MemoryTeamRepository implements TeamRepository {
     return { team: this.context, invitation };
   }
 
+  public async ensureInitialTeam(
+    input: CreateTeamInput
+  ): Promise<TeamContextRecord> {
+    const existing = await this.findCurrentTeam(input.ownerUserId);
+    if (existing) {
+      return existing;
+    }
+    if (this.members.some(({ userId }) => userId === input.ownerUserId)) {
+      throw new AppError(
+        "INITIAL_TEAM_NOT_AVAILABLE",
+        "membership is not active",
+        409
+      );
+    }
+    return (await this.createTeam(input)).team;
+  }
+
   public async findCurrentTeam(
     userId: string
   ): Promise<TeamContextRecord | null> {
@@ -87,6 +107,16 @@ export class MemoryTeamRepository implements TeamRepository {
       role: member.role,
       membershipId: member.membershipId
     };
+  }
+
+  public async findTeamForUser(
+    userId: string,
+    teamId: string
+  ): Promise<TeamContextRecord | null> {
+    if (this.context?.teamId !== teamId) {
+      return null;
+    }
+    return this.findCurrentTeam(userId);
   }
 
   public async listActiveMembers(): Promise<readonly TeamMemberRecord[]> {

@@ -799,6 +799,69 @@ footer {
   color: var(--subtext);
 }
 
+.google-account-role-description {
+  margin: 0;
+
+  color: var(--subtext);
+
+  line-height: 1.7;
+}
+
+.gmail-account-actions {
+  display: flex;
+
+  flex-wrap: wrap;
+
+  gap: 10px;
+}
+
+.gmail-account-actions .btn,
+.gmail-account-actions .account-remove-button {
+  flex: 1 1 210px;
+}
+
+.gmail-account-actions .btn:disabled,
+.gmail-account-actions .account-remove-button:disabled {
+  cursor: not-allowed;
+
+  opacity: 0.55;
+}
+
+#connectedGoogleAccounts {
+  display: grid;
+
+  gap: 14px;
+}
+
+.google-account-role {
+  display: grid;
+
+  min-width: 0;
+
+  grid-template-columns:
+    minmax(0, 1fr) auto;
+
+  gap: 6px 12px;
+
+  padding: 14px;
+
+  border: 1px solid var(--border);
+
+  border-radius: 14px;
+}
+
+.google-account-role .connected-account-summary {
+  margin: 0;
+
+  text-align: right;
+}
+
+.google-account-role .connected-account-email {
+  grid-column: 1 / -1;
+
+  margin: 0;
+}
+
 .connected-account-summary {
   margin-top: 0;
 
@@ -1929,6 +1992,14 @@ body.app-dialog-open {
   .account-change-button,
   .account-remove-button {
     flex: 1 1 160px;
+  }
+
+  .google-account-role {
+    grid-template-columns: 1fr;
+  }
+
+  .google-account-role .connected-account-summary {
+    text-align: left;
   }
 
   .account-select-button {

@@ -1,6 +1,7 @@
 import type { SeatSummary } from "./seat-policy.js";
 
 export type TeamRole = "OWNER" | "MEMBER";
+export type SubscriptionState = "ACTIVE" | "PAST_DUE" | "CANCELED";
 
 export interface TeamContextRecord {
   readonly teamId: string;
@@ -10,6 +11,7 @@ export interface TeamContextRecord {
   readonly role: TeamRole;
   readonly seatSummary: SeatSummary;
   readonly pendingSeatLimit: number | null;
+  readonly subscriptionStatus: SubscriptionState;
   readonly currentTermAmountYen: number;
   readonly currentTermStartedAt: Date;
   readonly currentTermEndsAt: Date;
@@ -66,7 +68,12 @@ export interface SeatLimitChangeResult {
 
 export interface TeamRepository {
   createTeam(input: CreateTeamInput): Promise<TeamCreationResult>;
+  ensureInitialTeam(input: CreateTeamInput): Promise<TeamContextRecord>;
   findCurrentTeam(userId: string): Promise<TeamContextRecord | null>;
+  findTeamForUser(
+    userId: string,
+    teamId: string
+  ): Promise<TeamContextRecord | null>;
   listActiveMembers(teamId: string): Promise<readonly TeamMemberRecord[]>;
   requestSeatLimitChange(input: {
     readonly teamId: string;

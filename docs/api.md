@@ -32,6 +32,7 @@ valid email. The raw token is delivered only through email.
 
 ## Team and subscription
 
+- `POST /api/v1/teams/bootstrap`
 - `POST /api/v1/teams`
 - `GET /api/v1/teams/current`
 - `GET /api/v1/teams/current/members` (OWNER only)
@@ -41,6 +42,27 @@ valid email. The raw token is delivered only through email.
 An increase returns `AWAITING_PAYMENT`; a trusted billing adapter applies it later.
 A safe decrease returns `APPLIED`. An over-capacity decrease returns
 `PENDING_CAPACITY` and suspends invitations.
+
+`teams/bootstrap` is an authenticated, same-origin, idempotent initializer for a
+first paid setup. It creates one zero-additional-seat Team only when the User has
+never had a membership. Existing OWNER or MEMBER membership is returned unchanged;
+inactive former memberships are not promoted to OWNER. Concurrent calls serialize
+on the User row so reload, re-login, and OAuth callback cannot create duplicate
+Teams.
+
+## Gmail monitoring connection
+
+- `GET /api/v1/teams/:teamId/gmail-connection` (OWNER only)
+- `GET /api/v1/teams/:teamId/gmail-connection/provider-status` (OWNER only)
+- `POST /api/v1/teams/:teamId/gmail-connection/oauth/start` (OWNER only)
+- `POST /api/v1/teams/:teamId/gmail-connection/reauthorize` (OWNER only)
+- `GET /api/v1/auth/gmail/callback`
+- `DELETE /api/v1/teams/:teamId/gmail-connection` (OWNER only)
+
+Gmail authorization is independent from the Google identity used to log in. It
+requests offline `gmail.readonly` consent. Refresh tokens never enter JSON responses
+or browser storage; they are encrypted before PostgreSQL persistence. Disconnect
+disables the local credential transactionally before best-effort Google revocation.
 
 ## Invitations and membership
 

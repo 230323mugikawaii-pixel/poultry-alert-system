@@ -24,6 +24,11 @@ const TeamResponse = Type.Object({
   seats: SeatSummaryResponse,
   pendingSeatLimit: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
   subscription: Type.Object({
+    status: Type.Union([
+      Type.Literal("ACTIVE"),
+      Type.Literal("PAST_DUE"),
+      Type.Literal("CANCELED")
+    ]),
     currentTermAmountYen: Type.Integer({ minimum: 6000 }),
     currentTermStartedAt: Type.String(),
     currentTermEndsAt: Type.String()
@@ -66,6 +71,34 @@ export function createTeamRoutes(
         );
       }
     };
+
+    app.post(
+      "/api/v1/teams/bootstrap",
+      {
+        config: { rateLimit: { max: 20, timeWindow: "15 minutes" } },
+        schema: {
+          body: Type.Object({
+            keywords: Type.Optional(
+              Type.Array(Type.String({ minLength: 1, maxLength: 100 }), {
+                maxItems: 100
+              })
+            )
+          }),
+          response: {
+            200: Type.Object({ team: TeamResponse })
+          }
+        }
+      },
+      async (request) => {
+        requireSameOrigin(request);
+        const userId = await authenticateUserId(request);
+        const team = await teamService.ensureInitialTeamForUser({
+          userId,
+          ...(request.body.keywords ? { keywords: request.body.keywords } : {})
+        });
+        return { team: serializeTeam(team) };
+      }
+    );
 
     app.post(
       "/api/v1/teams",
@@ -252,6 +285,7 @@ function serializeTeam(team: TeamContextRecord) {
     seats: team.seatSummary,
     pendingSeatLimit: team.pendingSeatLimit,
     subscription: {
+      status: team.subscriptionStatus,
       currentTermAmountYen: team.currentTermAmountYen,
       currentTermStartedAt: team.currentTermStartedAt.toISOString(),
       currentTermEndsAt: team.currentTermEndsAt.toISOString()
