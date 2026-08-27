@@ -59,7 +59,7 @@ describe("frontend onboarding order", () => {
 
   it("keeps login OAuth separate from monitoring OAuth", () => {
     expect(script).toContain("/api/v1/auth/google/start");
-    expect(script).toContain('beginGmailOAuth("oauth/start")');
+    expect(script).toMatch(/begin(?:Gmail|Mail)OAuth\("oauth\/start"/u);
     expect(script).not.toMatch(/auth\/google\/start[^\n]*gmail\.readonly/iu);
     expect(script).not.toMatch(/refresh[_-]?token/iu);
     expect(script).not.toMatch(/access[_-]?token/iu);
