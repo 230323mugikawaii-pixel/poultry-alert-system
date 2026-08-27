@@ -60,6 +60,12 @@ export function createMailConnectionRoutes(
   environment: AppEnvironment
 ): FastifyPluginAsyncTypebox {
   return async (app) => {
+    app.addContentTypeParser(
+      "application/x-www-form-urlencoded",
+      { parseAs: "string" },
+      (_request, body, done) => done(null, body)
+    );
+
     const authenticateUserId = async (request: {
       readonly cookies: Readonly<Record<string, string | undefined>>;
     }): Promise<string> => {
