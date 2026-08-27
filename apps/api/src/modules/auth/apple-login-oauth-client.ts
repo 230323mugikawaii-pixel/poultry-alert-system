@@ -49,8 +49,6 @@ export class AppleLoginOAuthClient implements PrimaryAuthProviderAdapter {
     url.searchParams.set("scope", "name email");
     url.searchParams.set("state", input.state);
     url.searchParams.set("nonce", input.nonce);
-    url.searchParams.set("code_challenge", input.codeChallenge);
-    url.searchParams.set("code_challenge_method", "S256");
     return url.toString();
   }
 
@@ -67,7 +65,6 @@ export class AppleLoginOAuthClient implements PrimaryAuthProviderAdapter {
         client_id: this.options.clientId,
         client_secret: await this.createClientSecret(),
         code: input.code,
-        code_verifier: input.codeVerifier,
         grant_type: "authorization_code",
         redirect_uri: this.options.redirectUri
       }),

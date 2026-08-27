@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { Type, type Static } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 
@@ -272,6 +273,18 @@ export function loadEnvironment(
     candidate.APPLE_OAUTH_REDIRECT_URI,
     candidate.APP_ENV
   );
+  if (candidate.APPLE_OAUTH_CLIENT_ID) {
+    const appleRedirect = new URL(candidate.APPLE_OAUTH_REDIRECT_URI);
+    if (
+      appleRedirect.protocol !== "https:" ||
+      appleRedirect.hostname === "localhost" ||
+      isIP(appleRedirect.hostname) !== 0
+    ) {
+      throw new Error(
+        "Apple login OAuth redirect URI must use HTTPS with a domain name"
+      );
+    }
+  }
 
   let gmailRedirectUri: URL;
   try {

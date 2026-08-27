@@ -58,7 +58,10 @@ export async function buildApp(
                 "body.joinToken",
                 "body.invitationPassword",
                 "body.refreshToken",
-                "body.authorizationCode"
+                "body.authorizationCode",
+                "body.code",
+                "body.state",
+                "body.user"
               ],
               censor: "[REDACTED]"
             }

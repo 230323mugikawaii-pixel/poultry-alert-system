@@ -29,6 +29,8 @@ Apple Credentialが揃っていない環境では `/api/v1/auth/providers` が `
 
 本番公開前にApple Developer側でServices ID、Sign in with Apple capability、Web return URL、メールリレードメイン、秘密鍵を設定し、秘密鍵はSecret Managerへ保存する。Appleの `form_post` callbackにはHTTPSと `SameSite=None; Secure` のstate Cookieが必要である。
 
+AppleのWeb認証仕様にはPKCEの `code_challenge` / `code_verifier` が定義されていないため、Appleだけは未対応パラメータを送らない。Apple LoginはHTTPS、HttpOnly state Cookie、nonce、5分間・1回限りのauthorization code、署名付きclient secret、ID tokenの署名・issuer・audience・期限検証で保護する。GoogleとMicrosoft LoginはPKCE S256も併用する。
+
 ## Release blockers
 
 - App内からアカウント削除を開始・完了できるAPIと画面

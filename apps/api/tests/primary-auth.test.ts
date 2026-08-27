@@ -71,6 +71,24 @@ describe("primary authentication", () => {
     ).resolves.toHaveLength(2);
   });
 
+  it("rejects a provider subject that is already linked to another user", async () => {
+    const fixture = createFixture([
+      adapter("GOOGLE", "google-subject", "first@example.com"),
+      adapter("MICROSOFT", "microsoft-subject", "first@example.com"),
+      adapter("APPLE", "apple-subject", "second@privaterelay.appleid.com")
+    ]);
+    const first = await login(fixture.service, "GOOGLE");
+    await link(fixture.service, "MICROSOFT", first.user.id);
+    const second = await login(fixture.service, "APPLE");
+
+    await expect(
+      link(fixture.service, "MICROSOFT", second.user.id)
+    ).rejects.toMatchObject({
+      code: "LOGIN_IDENTITY_ALREADY_IN_USE",
+      statusCode: 409
+    });
+  });
+
   it("refuses to reuse state and refuses to remove the last identity", async () => {
     const fixture = createFixture([
       adapter("APPLE", "apple-subject", "relay@privaterelay.appleid.com")

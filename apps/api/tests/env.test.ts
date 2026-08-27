@@ -111,6 +111,19 @@ describe("loadEnvironment", () => {
         APPLE_OAUTH_REDIRECT_URI: "not-a-url"
       })
     ).toThrow("Apple login OAuth redirect URI must be a valid URL");
+
+    expect(() =>
+      loadEnvironment({
+        APPLE_OAUTH_CLIENT_ID: "apple-service-id",
+        APPLE_OAUTH_TEAM_ID: "apple-team-id",
+        APPLE_OAUTH_KEY_ID: "apple-key-id",
+        APPLE_OAUTH_PRIVATE_KEY: "private-key-placeholder",
+        APPLE_OAUTH_REDIRECT_URI:
+          "http://127.0.0.1:8080/api/v1/auth/apple/callback"
+      })
+    ).toThrow(
+      "Apple login OAuth redirect URI must use HTTPS with a domain name"
+    );
   });
 
   it("rejects invalid ports", () => {
