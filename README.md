@@ -10,10 +10,12 @@ GmailやMicrosoft 365へ届く大切なメールを、停止するまで繰り�
 
 ## ログインとメール監視
 
-- Google本人確認はサーバー側OAuthで行い、ログイン状態はHttpOnly Cookieの
+- Google、Microsoft、Appleの本人確認はサーバー側OAuthで行い、ログイン状態はHttpOnly Cookieの
   Phase 1 Sessionだけを正とします。
-- ログインでは `openid`、`email`、`profile` だけを要求します。
-- GoogleのパスワードはCall Nowでは取得・保存しません。
+- GoogleとMicrosoftのログインでは `openid`、`email`、`profile` だけを要求します。
+- ログインに使う各社のパスワードはCall Nowでは取得・保存しません。
+- 1人の利用者へ複数のログイン方法を追加できます。本人性はメールアドレスではなく、各社のprovider subjectで確認します。
+- AppleのCredentialが未設定の環境ではAppleログインを「準備中」と表示し、成功を模倣しません。
 - Gmail監視権限はログインとは別のOAuthで取得し、`gmail.readonly`だけを要求します。
 - Microsoft 365 / Outlookは別のOAuthで delegated `Mail.Read`だけを要求します。
 - 監視用refresh tokenはブラウザへ返さず、サーバー側で暗号化して保存します。

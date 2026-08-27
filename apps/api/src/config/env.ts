@@ -37,6 +37,23 @@ const EnvironmentSchema = Type.Object({
     minimum: 5,
     maximum: 30
   }),
+  MICROSOFT_LOGIN_OAUTH_CLIENT_ID: Type.String(),
+  MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET: Type.String(),
+  MICROSOFT_LOGIN_OAUTH_REDIRECT_URI: Type.String(),
+  MICROSOFT_LOGIN_OAUTH_TENANT: Type.String(),
+  MICROSOFT_LOGIN_OAUTH_STATE_TTL_MINUTES: Type.Integer({
+    minimum: 5,
+    maximum: 30
+  }),
+  APPLE_OAUTH_CLIENT_ID: Type.String(),
+  APPLE_OAUTH_TEAM_ID: Type.String(),
+  APPLE_OAUTH_KEY_ID: Type.String(),
+  APPLE_OAUTH_PRIVATE_KEY: Type.String(),
+  APPLE_OAUTH_REDIRECT_URI: Type.String(),
+  APPLE_OAUTH_STATE_TTL_MINUTES: Type.Integer({
+    minimum: 5,
+    maximum: 30
+  }),
   GMAIL_OAUTH_CLIENT_ID: Type.String({ minLength: 1 }),
   GMAIL_OAUTH_CLIENT_SECRET: Type.String({ minLength: 1 }),
   GMAIL_OAUTH_REDIRECT_URI: Type.String({ minLength: 1 }),
@@ -102,6 +119,25 @@ export function loadEnvironment(
       "http://127.0.0.1:8080/api/v1/auth/google/callback",
     GOOGLE_OAUTH_STATE_TTL_MINUTES: Number(
       source.GOOGLE_OAUTH_STATE_TTL_MINUTES ?? "10"
+    ),
+    MICROSOFT_LOGIN_OAUTH_CLIENT_ID:
+      source.MICROSOFT_LOGIN_OAUTH_CLIENT_ID ?? "",
+    MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET:
+      source.MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET ?? "",
+    MICROSOFT_LOGIN_OAUTH_REDIRECT_URI:
+      source.MICROSOFT_LOGIN_OAUTH_REDIRECT_URI ?? "",
+    MICROSOFT_LOGIN_OAUTH_TENANT:
+      source.MICROSOFT_LOGIN_OAUTH_TENANT ?? "common",
+    MICROSOFT_LOGIN_OAUTH_STATE_TTL_MINUTES: Number(
+      source.MICROSOFT_LOGIN_OAUTH_STATE_TTL_MINUTES ?? "10"
+    ),
+    APPLE_OAUTH_CLIENT_ID: source.APPLE_OAUTH_CLIENT_ID ?? "",
+    APPLE_OAUTH_TEAM_ID: source.APPLE_OAUTH_TEAM_ID ?? "",
+    APPLE_OAUTH_KEY_ID: source.APPLE_OAUTH_KEY_ID ?? "",
+    APPLE_OAUTH_PRIVATE_KEY: source.APPLE_OAUTH_PRIVATE_KEY ?? "",
+    APPLE_OAUTH_REDIRECT_URI: source.APPLE_OAUTH_REDIRECT_URI ?? "",
+    APPLE_OAUTH_STATE_TTL_MINUTES: Number(
+      source.APPLE_OAUTH_STATE_TTL_MINUTES ?? "10"
     ),
     GMAIL_OAUTH_CLIENT_ID:
       source.GMAIL_OAUTH_CLIENT_ID ?? "development-gmail-client-id",
@@ -207,6 +243,36 @@ export function loadEnvironment(
     throw new Error("Google OAuth credentials must be replaced in production");
   }
 
+  validateOptionalPrimaryProvider(
+    "Microsoft login",
+    [
+      candidate.MICROSOFT_LOGIN_OAUTH_CLIENT_ID,
+      candidate.MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET,
+      candidate.MICROSOFT_LOGIN_OAUTH_REDIRECT_URI
+    ],
+    candidate.MICROSOFT_LOGIN_OAUTH_REDIRECT_URI,
+    candidate.APP_ENV
+  );
+  if (
+    candidate.MICROSOFT_LOGIN_OAUTH_CLIENT_ID &&
+    !isAllowedMicrosoftTenant(candidate.MICROSOFT_LOGIN_OAUTH_TENANT)
+  ) {
+    throw new Error("MICROSOFT_LOGIN_OAUTH_TENANT is invalid");
+  }
+
+  validateOptionalPrimaryProvider(
+    "Apple login",
+    [
+      candidate.APPLE_OAUTH_CLIENT_ID,
+      candidate.APPLE_OAUTH_TEAM_ID,
+      candidate.APPLE_OAUTH_KEY_ID,
+      candidate.APPLE_OAUTH_PRIVATE_KEY,
+      candidate.APPLE_OAUTH_REDIRECT_URI
+    ],
+    candidate.APPLE_OAUTH_REDIRECT_URI,
+    candidate.APP_ENV
+  );
+
   let gmailRedirectUri: URL;
   try {
     gmailRedirectUri = new URL(candidate.GMAIL_OAUTH_REDIRECT_URI);
@@ -283,4 +349,32 @@ function isAllowedMicrosoftTenant(value: string): boolean {
       value
     )
   );
+}
+
+function validateOptionalPrimaryProvider(
+  label: string,
+  values: readonly string[],
+  redirectUri: string,
+  appEnvironment: AppEnvironment["APP_ENV"]
+): void {
+  const configuredCount = values.filter(Boolean).length;
+  if (configuredCount === 0) {
+    return;
+  }
+  if (configuredCount !== values.length) {
+    throw new Error(`${label} OAuth configuration is incomplete`);
+  }
+
+  let parsedRedirect: URL;
+  try {
+    parsedRedirect = new URL(redirectUri);
+  } catch {
+    throw new Error(`${label} OAuth redirect URI must be a valid URL`);
+  }
+  if (
+    (appEnvironment === "staging" || appEnvironment === "production") &&
+    parsedRedirect.protocol !== "https:"
+  ) {
+    throw new Error(`${label} OAuth redirect URI must use HTTPS`);
+  }
 }
