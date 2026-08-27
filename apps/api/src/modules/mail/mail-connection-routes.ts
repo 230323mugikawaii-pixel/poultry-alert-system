@@ -329,8 +329,13 @@ export function createMailConnectionRoutes(
       } catch (error) {
         const code =
           error instanceof AppError ? error.code : "MAIL_AUTH_FAILED";
+        const reasonCode =
+          error instanceof AppError &&
+          typeof error.details?.reasonCode === "string"
+            ? error.details.reasonCode
+            : "UNCLASSIFIED";
         request.log.warn(
-          { code, provider },
+          { code, provider, reasonCode },
           "Mail authorization callback failed"
         );
         await reply.redirect(frontendResultUrl(environment, "error", provider));

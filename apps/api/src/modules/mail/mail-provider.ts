@@ -8,6 +8,22 @@ export type MailProviderErrorKind =
   | "TRANSIENT"
   | "UNKNOWN";
 
+export type MailOAuthFailureReason =
+  | "TOKEN_EXCHANGE_FAILED"
+  | "ID_TOKEN_MISSING"
+  | "REFRESH_TOKEN_MISSING"
+  | "ID_TOKEN_INVALID"
+  | "IDENTITY_CLAIMS_INVALID"
+  | "REQUIRED_SCOPE_MISSING"
+  | "PROVIDER_RESPONSE_INVALID";
+
+export class MailOAuthExchangeError extends Error {
+  public constructor(public readonly reasonCode: MailOAuthFailureReason) {
+    super("mail_oauth_exchange_failed");
+    this.name = "MailOAuthExchangeError";
+  }
+}
+
 export interface MailOAuthGrant {
   readonly provider: MailProviderId;
   readonly subject: string;
@@ -38,4 +54,12 @@ export interface MailProviderAdapter {
   refreshAccessToken(refreshToken: string): Promise<RefreshedMailAccess>;
   revokeAuthorization(refreshToken: string): Promise<void>;
   classifyProviderError(error: unknown): MailProviderErrorKind;
+}
+
+export function readMailOAuthFailureReason(
+  error: unknown
+): MailOAuthFailureReason {
+  return error instanceof MailOAuthExchangeError
+    ? error.reasonCode
+    : "PROVIDER_RESPONSE_INVALID";
 }

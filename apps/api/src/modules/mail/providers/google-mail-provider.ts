@@ -1,9 +1,10 @@
 import { CodeChallengeMethod, OAuth2Client } from "google-auth-library";
-import type {
-  MailOAuthGrant,
-  MailProviderAdapter,
-  MailProviderErrorKind,
-  RefreshedMailAccess
+import {
+  MailOAuthExchangeError,
+  type MailOAuthGrant,
+  type MailProviderAdapter,
+  type MailProviderErrorKind,
+  type RefreshedMailAccess
 } from "../mail-provider.js";
 
 export const GMAIL_READONLY_SCOPE =
@@ -50,29 +51,44 @@ export class GoogleMailProvider implements MailProviderAdapter {
     readonly codeVerifier: string;
     readonly expectedNonce: string;
   }): Promise<MailOAuthGrant> {
-    const { tokens } = await this.client.getToken({
-      code: input.code,
-      codeVerifier: input.codeVerifier,
-      redirect_uri: this.options.redirectUri
-    });
-    if (!tokens.id_token || !tokens.refresh_token) {
-      throw new Error("google_mail_oauth_tokens_missing");
+    let tokens;
+    try {
+      ({ tokens } = await this.client.getToken({
+        code: input.code,
+        codeVerifier: input.codeVerifier,
+        redirect_uri: this.options.redirectUri
+      }));
+    } catch {
+      throw new MailOAuthExchangeError("TOKEN_EXCHANGE_FAILED");
+    }
+    if (!tokens.id_token) {
+      throw new MailOAuthExchangeError("ID_TOKEN_MISSING");
+    }
+    if (!tokens.refresh_token) {
+      throw new MailOAuthExchangeError("REFRESH_TOKEN_MISSING");
     }
 
-    const ticket = await this.client.verifyIdToken({
-      idToken: tokens.id_token,
-      audience: this.options.clientId
-    });
+    let ticket;
+    try {
+      ticket = await this.client.verifyIdToken({
+        idToken: tokens.id_token,
+        audience: this.options.clientId
+      });
+    } catch {
+      throw new MailOAuthExchangeError("ID_TOKEN_INVALID");
+    }
     const payload = ticket.getPayload();
     const grantedScopes = normalizeScopes(tokens.scope);
     if (
       !payload?.sub ||
       !payload.email ||
       payload.email_verified !== true ||
-      payload.nonce !== input.expectedNonce ||
-      !grantedScopes.includes(GMAIL_READONLY_SCOPE)
+      payload.nonce !== input.expectedNonce
     ) {
-      throw new Error("google_mail_oauth_claims_or_scope_invalid");
+      throw new MailOAuthExchangeError("IDENTITY_CLAIMS_INVALID");
+    }
+    if (!grantedScopes.includes(GMAIL_READONLY_SCOPE)) {
+      throw new MailOAuthExchangeError("REQUIRED_SCOPE_MISSING");
     }
 
     return {
