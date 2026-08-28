@@ -1,10 +1,15 @@
 # Mail monitoring connection
 
 Call Now login and mail monitoring are separate security boundaries. `ExternalIdentity`
-proves who is signed in to Call Now. `MailAuthorization` stores one User's delegated
-permission for exactly one monitoring account, and each owned Team's `MailConnection`
-references that authorization. A User can select Google or Microsoft, but cannot keep
-both providers active at once. MEMBERs cannot read or change monitoring account data.
+proves who is signed in to Call Now. `MailAuthorization` stores delegated permission
+for each monitoring account, and each owned Team's `MailConnection` references one
+authorization. A User can keep Google and Microsoft active simultaneously, and the
+schema also permits multiple accounts from the same provider. MEMBERs cannot read or
+change monitoring account data.
+
+Each authorization has its own encrypted refresh token. Connections are listed,
+reauthorized, and revoked by ID, so disconnecting one account never disables another
+account's credential.
 
 ## Provider adapters
 

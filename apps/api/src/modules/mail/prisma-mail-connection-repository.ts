@@ -25,6 +25,7 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
     readonly nonce: string;
     readonly intent: MailOAuthIntent;
     readonly provider: MailProviderId;
+    readonly connectionId: string | null;
     readonly expiresAt: Date;
     readonly now: Date;
   }): Promise<void> {
@@ -33,7 +34,7 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
         await transaction.authChallenge.updateMany({
           where: {
             userId: input.userId,
-            kind: { in: ["GMAIL_OAUTH", "MICROSOFT_MAIL_OAUTH"] },
+            kind: challengeKindFor(input.provider),
             consumedAt: null
           },
           data: { consumedAt: input.now }
@@ -51,7 +52,8 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
               codeVerifier: input.codeVerifier,
               nonce: input.nonce,
               intent: input.intent,
-              provider: input.provider
+              provider: input.provider,
+              connectionId: input.connectionId
             },
             expiresAt: input.expiresAt,
             maxAttempts: 1
@@ -116,13 +118,27 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
     );
   }
 
-  public async findConnection(
+  public async listConnections(
     teamId: string,
     ownerUserId: string
+  ): Promise<readonly MailConnectionRecord[]> {
+    await this.assertOwner(this.database, teamId, ownerUserId);
+    const connections = await this.database.mailConnection.findMany({
+      where: { teamId, status: { not: "REVOKED" } },
+      include: { mailAuthorization: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }]
+    });
+    return connections.map(mapConnection);
+  }
+
+  public async findConnectionById(
+    teamId: string,
+    ownerUserId: string,
+    connectionId: string
   ): Promise<MailConnectionRecord | null> {
     await this.assertOwner(this.database, teamId, ownerUserId);
-    const connection = await this.database.mailConnection.findUnique({
-      where: { teamId },
+    const connection = await this.database.mailConnection.findFirst({
+      where: { id: connectionId, teamId, status: { not: "REVOKED" } },
       include: { mailAuthorization: true }
     });
     return connection ? mapConnection(connection) : null;
@@ -137,6 +153,7 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
     readonly encryptedToken: StoredEncryptedToken;
     readonly grantedScopes: readonly string[];
     readonly intent: MailOAuthIntent;
+    readonly connectionId: string | null;
     readonly requestId: string | null;
     readonly now: Date;
   }): Promise<MailGrantPersistenceResult> {
@@ -149,10 +166,6 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
               input.teamId,
               input.ownerUserId
             );
-            const existingAuthorization =
-              await transaction.mailAuthorization.findUnique({
-                where: { userId: input.ownerUserId }
-              });
             const subjectOwner = await transaction.mailAuthorization.findUnique(
               {
                 where: {
@@ -160,8 +173,7 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
                     provider: input.provider,
                     providerSubject: input.providerSubject
                   }
-                },
-                select: { userId: true }
+                }
               }
             );
             if (subjectOwner && subjectOwner.userId !== input.ownerUserId) {
@@ -171,38 +183,46 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
                 409
               );
             }
-
-            const previousConnection =
-              await transaction.mailConnection.findUnique({
-                where: { teamId: input.teamId },
-                include: { mailAuthorization: true }
-              });
-            const obsoleteTokens: ProviderToken[] = [];
-            const previousToken = toProviderToken(existingAuthorization);
-            if (previousToken) {
-              obsoleteTokens.push(previousToken);
-            }
-
-            const accountChanged =
-              Boolean(existingAuthorization) &&
-              (existingAuthorization?.provider !== input.provider ||
-                existingAuthorization?.providerSubject !==
-                  input.providerSubject);
-            const affectedSharedConnections = existingAuthorization
-              ? await transaction.mailConnection.findMany({
+            const targetConnection = input.connectionId
+              ? await transaction.mailConnection.findFirst({
                   where: {
-                    mailAuthorizationId: existingAuthorization.id,
+                    id: input.connectionId,
+                    teamId: input.teamId,
                     status: { not: "REVOKED" }
                   },
-                  select: { id: true, teamId: true }
+                  include: { mailAuthorization: true }
                 })
-              : [];
+              : null;
+            if (input.intent === "REAUTHORIZE" && !targetConnection) {
+              throw new AppError(
+                "MAIL_CONNECTION_NOT_FOUND",
+                "再認証するメール監視アカウントが見つかりません。",
+                404
+              );
+            }
+            if (
+              targetConnection &&
+              (targetConnection.mailAuthorization.provider !== input.provider ||
+                targetConnection.mailAuthorization.providerSubject !==
+                  input.providerSubject)
+            ) {
+              throw new AppError(
+                "MAIL_REAUTH_ACCOUNT_MISMATCH",
+                "再認証では同じメールアカウントを選択してください。別のアカウントは新しく追加できます。",
+                409
+              );
+            }
+
+            const existingAuthorization =
+              targetConnection?.mailAuthorization ?? subjectOwner;
+            const obsoleteTokens: ProviderToken[] = [];
+            const previousToken = toProviderToken(existingAuthorization);
+            if (previousToken) obsoleteTokens.push(previousToken);
+
             const authorization = existingAuthorization
               ? await transaction.mailAuthorization.update({
                   where: { id: existingAuthorization.id },
                   data: {
-                    provider: input.provider,
-                    providerSubject: input.providerSubject,
                     email: input.email,
                     encryptedRefreshToken: input.encryptedToken.ciphertext,
                     encryptionProvider: input.encryptedToken.provider,
@@ -227,36 +247,6 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
                     lastVerifiedAt: input.now
                   }
                 });
-
-            if (accountChanged && affectedSharedConnections.length > 0) {
-              await transaction.mailConnection.updateMany({
-                where: {
-                  id: {
-                    in: affectedSharedConnections.map(({ id }) => id)
-                  }
-                },
-                data: {
-                  status: "ACTIVE",
-                  providerCursor: null,
-                  lastSyncAt: null,
-                  lastErrorCode: null,
-                  revokedAt: null
-                }
-              });
-              for (const affectedConnection of affectedSharedConnections) {
-                await transaction.auditEvent.create({
-                  data: {
-                    teamId: affectedConnection.teamId,
-                    actorUserId: input.ownerUserId,
-                    action: "MAIL_PROVIDER_OR_ACCOUNT_CHANGED",
-                    targetType: "MailConnection",
-                    targetId: affectedConnection.id,
-                    requestId: input.requestId,
-                    metadata: { provider: input.provider }
-                  }
-                });
-              }
-            }
 
             const restoredConnections =
               await transaction.mailConnection.findMany({
@@ -298,14 +288,18 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
             }
 
             const connection = await transaction.mailConnection.upsert({
-              where: { teamId: input.teamId },
+              where: {
+                teamId_mailAuthorizationId: {
+                  teamId: input.teamId,
+                  mailAuthorizationId: authorization.id
+                }
+              },
               create: {
                 teamId: input.teamId,
                 mailAuthorizationId: authorization.id,
                 status: "ACTIVE"
               },
               update: {
-                mailAuthorizationId: authorization.id,
                 status: "ACTIVE",
                 providerCursor: null,
                 lastSyncAt: null,
@@ -315,67 +309,25 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
               include: { mailAuthorization: true }
             });
 
-            const oldAuthorization = previousConnection?.mailAuthorization;
-            if (oldAuthorization && oldAuthorization.id !== authorization.id) {
-              const activeReferences = await transaction.mailConnection.count({
-                where: {
-                  mailAuthorizationId: oldAuthorization.id,
-                  status: { not: "REVOKED" }
-                }
-              });
-              if (activeReferences === 0) {
-                const oldToken = toProviderToken(oldAuthorization);
-                if (oldToken) {
-                  obsoleteTokens.push(oldToken);
-                }
-                await transaction.mailAuthorization.update({
-                  where: { id: oldAuthorization.id },
-                  data: {
-                    status: "REVOKED",
-                    encryptedRefreshToken: null,
-                    encryptionProvider: null,
-                    encryptionKeyVersion: null,
-                    revokedAt: input.now
-                  }
-                });
-                await transaction.auditEvent.create({
-                  data: {
-                    teamId: input.teamId,
-                    actorUserId: input.ownerUserId,
-                    action: "MAIL_AUTHORIZATION_REVOKED",
-                    targetType: "MailAuthorization",
-                    targetId: oldAuthorization.id,
-                    requestId: input.requestId,
-                    metadata: { reason: "CONNECTION_REPLACED" }
-                  }
-                });
-              }
-            }
-
             const action =
-              input.intent === "REAUTHORIZE" || previousConnection
+              input.intent === "REAUTHORIZE" || targetConnection
                 ? "MAIL_REAUTHORIZED"
                 : "MAIL_CONNECTED";
-            if (
-              !accountChanged ||
-              !affectedSharedConnections.some(({ id }) => id === connection.id)
-            ) {
-              await transaction.auditEvent.create({
-                data: {
-                  teamId: input.teamId,
-                  actorUserId: input.ownerUserId,
-                  action,
-                  targetType: "MailConnection",
-                  targetId: connection.id,
-                  requestId: input.requestId,
-                  metadata: {
-                    authorizationStatus: "ACTIVE",
-                    provider: input.provider,
-                    grantedScopeCount: input.grantedScopes.length
-                  }
+            await transaction.auditEvent.create({
+              data: {
+                teamId: input.teamId,
+                actorUserId: input.ownerUserId,
+                action,
+                targetType: "MailConnection",
+                targetId: connection.id,
+                requestId: input.requestId,
+                metadata: {
+                  authorizationStatus: "ACTIVE",
+                  provider: input.provider,
+                  grantedScopeCount: input.grantedScopes.length
                 }
-              });
-            }
+              }
+            });
             return {
               connection: mapConnection(connection),
               obsoleteTokens: deduplicateTokens(obsoleteTokens)
@@ -395,6 +347,7 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
   public disconnect(input: {
     readonly teamId: string;
     readonly ownerUserId: string;
+    readonly connectionId?: string;
     readonly requestId: string | null;
     readonly now: Date;
   }): Promise<MailDisconnectResult> {
@@ -407,8 +360,12 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
               input.teamId,
               input.ownerUserId
             );
-            const connection = await transaction.mailConnection.findUnique({
-              where: { teamId: input.teamId },
+            const connection = await transaction.mailConnection.findFirst({
+              where: {
+                teamId: input.teamId,
+                ...(input.connectionId ? { id: input.connectionId } : {}),
+                status: { not: "REVOKED" }
+              },
               include: { mailAuthorization: true }
             });
             if (!connection) {
@@ -574,16 +531,24 @@ function parseChallengePayload(
   const nonce = readString(value.nonce);
   const intent = value.intent;
   const provider = value.provider;
+  const connectionIdValue = value.connectionId;
+  const connectionId =
+    connectionIdValue === null || connectionIdValue === undefined
+      ? null
+      : readString(connectionIdValue);
   if (
     !teamId ||
     !codeVerifier ||
     !nonce ||
     (provider !== "GOOGLE" && provider !== "MICROSOFT") ||
-    (intent !== "CONNECT" && intent !== "REAUTHORIZE")
+    (intent !== "CONNECT" && intent !== "REAUTHORIZE") ||
+    (connectionIdValue !== null &&
+      connectionIdValue !== undefined &&
+      !connectionId)
   ) {
     return null;
   }
-  return { teamId, codeVerifier, nonce, intent, provider };
+  return { teamId, codeVerifier, nonce, intent, provider, connectionId };
 }
 
 function readString(value: Prisma.JsonValue | undefined): string | null {

@@ -35,9 +35,10 @@ describe("frontend mail connection boundary", () => {
   });
 
   it("uses common server APIs without storing provider credentials", () => {
-    expect(script).toContain('beginMailOAuth("oauth/start", provider)');
-    expect(script).toContain('"reauthorize",\n    mailConnection.provider');
-    expect(script).toContain("/mail-connection/${action}?provider=");
+    expect(script).toContain('beginMailOAuth("oauth/start", provider, null)');
+    expect(script).toContain(
+      "/mail-connections/${encodeURIComponent(connectionId)}"
+    );
     expect(script).toContain("/mail-connection/providers");
     expect(html).toContain('id="googleMailProviderButton"');
     expect(html).toContain('id="microsoftMailProviderButton"');
@@ -52,9 +53,11 @@ describe("frontend mail connection boundary", () => {
     expect(script).not.toMatch(/access[_-]?token/iu);
   });
 
-  it("keeps one active monitoring connection and confirms provider changes", () => {
-    expect(script).toContain("mailConnection.provider !== provider");
-    expect(script).toContain("新しい認証が成功するまで維持されます");
-    expect(script).toContain("mailProviderLabel(mailConnection.provider)");
+  it("renders and manages multiple monitoring connections independently", () => {
+    expect(script).toContain("let mailConnections = []");
+    expect(script).toContain("mailConnections.map(renderMailConnectionItem)");
+    expect(script).toContain("disconnectMailConnection('${connection.id}')");
+    expect(script).toContain("reauthorizeMailConnection('${connection.id}'");
+    expect(frontend).not.toContain("接続先を変更");
   });
 });

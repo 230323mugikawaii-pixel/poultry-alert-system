@@ -21,6 +21,16 @@ const TeamParams = Type.Object({
       "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
   })
 });
+const ConnectionParams = Type.Object({
+  teamId: Type.String({
+    pattern:
+      "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+  }),
+  connectionId: Type.String({
+    pattern:
+      "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+  })
+});
 const ProviderQuery = Type.Object({
   provider: Type.Union([Type.Literal("GOOGLE"), Type.Literal("MICROSOFT")])
 });
@@ -90,19 +100,40 @@ export function createMailConnectionRoutes(
       }
     };
 
-    const getConnection = async (request: {
+    const getConnections = async (request: {
       readonly params: { readonly teamId: string };
       readonly cookies: Readonly<Record<string, string | undefined>>;
     }) => {
       const userId = await authenticateUserId(request);
       await teamService.requireOwnerForTeam(userId, request.params.teamId);
-      const connection = await mailConnectionService.getConnection(
+      const connections = await mailConnectionService.getConnections(
         request.params.teamId,
         userId
       );
       return {
-        connection: connection ? serializeConnection(connection) : null
+        connections: connections.map(serializeConnection)
       };
+    };
+
+    app.get(
+      "/api/v1/teams/:teamId/mail-connections",
+      {
+        schema: {
+          params: TeamParams,
+          response: {
+            200: Type.Object({ connections: Type.Array(ConnectionResponse) })
+          }
+        }
+      },
+      getConnections
+    );
+
+    const getLegacyConnection = async (request: {
+      readonly params: { readonly teamId: string };
+      readonly cookies: Readonly<Record<string, string | undefined>>;
+    }) => {
+      const result = await getConnections(request);
+      return { connection: result.connections[0] ?? null };
     };
 
     app.get(
@@ -117,7 +148,7 @@ export function createMailConnectionRoutes(
           }
         }
       },
-      getConnection
+      getLegacyConnection
     );
 
     // Compatibility for clients shipped with the Gmail-only foundation.
@@ -133,7 +164,7 @@ export function createMailConnectionRoutes(
           }
         }
       },
-      getConnection
+      getLegacyConnection
     );
 
     app.get(
@@ -189,7 +220,8 @@ export function createMailConnectionRoutes(
       request: StartRequest,
       reply: StartReply,
       intent: "CONNECT" | "REAUTHORIZE",
-      provider: MailProviderId
+      provider: MailProviderId,
+      connectionId: string | null = null
     ): Promise<void> => {
       requireSameOrigin(request);
       try {
@@ -225,7 +257,8 @@ export function createMailConnectionRoutes(
             userId,
             request.params.teamId,
             intent,
-            provider
+            provider,
+            connectionId
           );
         const stateCookie = stateCookieConfiguration(environment, provider);
         reply.setCookie(stateCookie.name, authorization.state, {
@@ -261,13 +294,19 @@ export function createMailConnectionRoutes(
     );
 
     app.post(
-      "/api/v1/teams/:teamId/mail-connection/reauthorize",
+      "/api/v1/teams/:teamId/mail-connections/:connectionId/reauthorize",
       {
         config: { rateLimit: { max: 10, timeWindow: "15 minutes" } },
-        schema: { params: TeamParams, querystring: ProviderQuery }
+        schema: { params: ConnectionParams, querystring: ProviderQuery }
       },
       async (request, reply) =>
-        startOAuth(request, reply, "REAUTHORIZE", request.query.provider)
+        startOAuth(
+          request,
+          reply,
+          "REAUTHORIZE",
+          request.query.provider,
+          request.params.connectionId
+        )
     );
 
     app.post(
@@ -277,16 +316,6 @@ export function createMailConnectionRoutes(
         schema: { params: TeamParams }
       },
       async (request, reply) => startOAuth(request, reply, "CONNECT", "GOOGLE")
-    );
-
-    app.post(
-      "/api/v1/teams/:teamId/gmail-connection/reauthorize",
-      {
-        config: { rateLimit: { max: 10, timeWindow: "15 minutes" } },
-        schema: { params: TeamParams }
-      },
-      async (request, reply) =>
-        startOAuth(request, reply, "REAUTHORIZE", "GOOGLE")
     );
 
     const handleCallback = async (
@@ -370,20 +399,15 @@ export function createMailConnectionRoutes(
       await mailConnectionService.disconnect({
         teamId: request.params.teamId,
         ownerUserId: userId,
+        connectionId: request.params.connectionId,
         requestId: request.id
       });
       await reply.status(204).send(null);
     };
 
     app.delete(
-      "/api/v1/teams/:teamId/mail-connection",
-      { schema: { params: TeamParams, response: { 204: Type.Null() } } },
-      disconnect
-    );
-
-    app.delete(
-      "/api/v1/teams/:teamId/gmail-connection",
-      { schema: { params: TeamParams, response: { 204: Type.Null() } } },
+      "/api/v1/teams/:teamId/mail-connections/:connectionId",
+      { schema: { params: ConnectionParams } },
       disconnect
     );
   };
@@ -392,7 +416,7 @@ export function createMailConnectionRoutes(
 interface BaseRequest {
   readonly id: string;
   readonly ip: string;
-  readonly params: { readonly teamId: string };
+  readonly params: { readonly teamId: string; readonly connectionId?: string };
   readonly cookies: Readonly<Record<string, string | undefined>>;
   readonly headers: Readonly<Record<string, string | string[] | undefined>>;
   readonly log: {
@@ -402,7 +426,9 @@ interface BaseRequest {
 }
 
 type StartRequest = BaseRequest;
-type DisconnectRequest = BaseRequest;
+type DisconnectRequest = Omit<BaseRequest, "params"> & {
+  readonly params: { readonly teamId: string; readonly connectionId: string };
+};
 
 interface StartReply {
   setCookie(name: string, value: string, options: object): unknown;

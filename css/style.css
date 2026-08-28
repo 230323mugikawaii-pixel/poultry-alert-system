@@ -619,6 +619,31 @@ button {
   min-width: 0;
 }
 
+.mail-connection-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.mail-connection-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #f8fbff;
+}
+
+.mail-connection-item p {
+  margin: 0 0 4px;
+}
+
+.mail-connection-item .mail-account-actions {
+  flex: 0 0 auto;
+}
+
 .mail-account-actions .btn,
 .mail-account-actions .account-remove-button {
   flex: 1 1 210px;
@@ -1849,6 +1874,15 @@ body.app-dialog-open {
 
   .mail-provider-choices {
     grid-template-columns: 1fr;
+  }
+
+  .mail-connection-item {
+    flex-direction: column;
+  }
+
+  .mail-connection-item .mail-account-actions,
+  .mail-connection-item .mail-account-actions button {
+    width: 100%;
   }
 
   .account-select-button {

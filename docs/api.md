@@ -52,13 +52,14 @@ Teams.
 
 ## Mail monitoring connection
 
-- `GET /api/v1/teams/:teamId/mail-connection` (OWNER only)
+- `GET /api/v1/teams/:teamId/mail-connections` (OWNER only)
+- `GET /api/v1/teams/:teamId/mail-connection` (OWNER-only legacy single-result view)
 - `GET /api/v1/teams/:teamId/mail-connection/providers` (OWNER only)
 - `POST /api/v1/teams/:teamId/mail-connection/oauth/start?provider=GOOGLE|MICROSOFT` (OWNER only)
-- `POST /api/v1/teams/:teamId/mail-connection/reauthorize?provider=GOOGLE|MICROSOFT` (OWNER only)
+- `POST /api/v1/teams/:teamId/mail-connections/:connectionId/reauthorize?provider=GOOGLE|MICROSOFT` (OWNER only)
 - `GET /api/v1/auth/gmail/callback`
 - `GET /api/v1/auth/mail/microsoft/callback`
-- `DELETE /api/v1/teams/:teamId/mail-connection` (OWNER only)
+- `DELETE /api/v1/teams/:teamId/mail-connections/:connectionId` (OWNER only)
 
 Mail authorization is independent from the Google identity used to log in. Google
 requests offline `gmail.readonly`; Microsoft requests delegated offline `Mail.Read`.

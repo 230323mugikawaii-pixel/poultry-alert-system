@@ -143,7 +143,7 @@ model User {
   redemptions             InvitationRedemption[]
   initiatedOwnerTransfers OwnerTransfer[]
   auditEvents             AuditEvent[]
-  mailAuthorization       MailAuthorization?
+  mailAuthorizations      MailAuthorization[]
 
   @@map("users")
 }
@@ -253,7 +253,7 @@ model Team {
   subscription    Subscription?
   keywords        TeamKeyword[]
   invitations     Invitation[]
-  mailConnection  MailConnection?
+  mailConnections MailConnection[]
   ownerTransfers  OwnerTransfer[]
   auditEvents     AuditEvent[]
 
@@ -417,7 +417,7 @@ model NotificationTarget {
 
 model MailAuthorization {
   id                    String                   @id @default(uuid()) @db.Uuid
-  userId                String                   @unique @db.Uuid
+  userId                String                   @db.Uuid
   provider              MailProvider             @default(GOOGLE)
   providerSubject       String                   @db.VarChar(255)
   email                 String                   @db.VarChar(320)
@@ -434,13 +434,14 @@ model MailAuthorization {
   connections           MailConnection[]
 
   @@unique([provider, providerSubject])
+  @@index([userId, status, revokedAt])
   @@index([status, revokedAt])
   @@map("mail_authorizations")
 }
 
 model MailConnection {
   id                   String                @id @default(uuid()) @db.Uuid
-  teamId               String                @unique @db.Uuid
+  teamId               String                @db.Uuid
   mailAuthorizationId  String                @db.Uuid
   status               MailConnectionStatus  @default(ACTIVE)
   providerCursor       String?               @db.VarChar(2048)
@@ -452,6 +453,8 @@ model MailConnection {
   team                 Team                  @relation(fields: [teamId], references: [id], onDelete: Cascade)
   mailAuthorization    MailAuthorization     @relation(fields: [mailAuthorizationId], references: [id], onDelete: Restrict)
 
+  @@unique([teamId, mailAuthorizationId])
+  @@index([teamId, status])
   @@index([mailAuthorizationId, status])
   @@map("mail_connections")
 }
