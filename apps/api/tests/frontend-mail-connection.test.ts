@@ -13,18 +13,19 @@ const frontend = `${html}\n${script}`;
 
 describe("frontend mail connection boundary", () => {
   it("shows login identity and mail monitoring as separate account roles", () => {
-    expect(frontend).toContain("ログイン中のGoogleアカウント");
+    expect(frontend).toContain("ログイン方法");
     expect(frontend).toContain("メール監視アカウント");
     expect(frontend).toContain("Call Nowログイン");
     expect(frontend).toContain("Gmail / Google Workspace");
     expect(frontend).toContain("Microsoft 365 / Outlook");
   });
 
-  it("uses one Google login CTA and bootstraps both provider choices", () => {
+  it("uses three primary login choices and bootstraps monitoring choices", () => {
     expect(frontend).not.toContain("ログインしてホームへ");
-    expect(html).toContain('id="finishGoogleLinkButton"');
-    expect(html).toContain("full-width hidden");
-    expect(script).toContain('mode !== "manage"');
+    expect(html).not.toContain('id="finishGoogleLinkButton"');
+    expect(html).toContain('id="googleLoginProviderButton"');
+    expect(html).toContain('id="microsoftLoginProviderButton"');
+    expect(html).toContain('id="appleLoginProviderButton"');
     expect(script).toContain("/api/v1/teams/bootstrap");
     expect(frontend).toContain(
       "メール監視アカウントの変更は管理者のみ行えます。"

@@ -11,6 +11,8 @@ import type { AuthService } from "./modules/auth/auth-service.js";
 import { createAuthRoutes } from "./modules/auth/auth-routes.js";
 import type { GoogleAuthService } from "./modules/auth/google-auth-service.js";
 import { createGoogleAuthRoutes } from "./modules/auth/google-auth-routes.js";
+import { createPrimaryAuthRoutes } from "./modules/auth/primary-auth-routes.js";
+import type { PrimaryAuthService } from "./modules/auth/primary-auth-service.js";
 import type { MailConnectionService } from "./modules/mail/mail-connection-service.js";
 import { createMailConnectionRoutes } from "./modules/mail/mail-connection-routes.js";
 import type { InvitationService } from "./modules/invitations/invitation-service.js";
@@ -25,6 +27,7 @@ export interface BuildAppOptions {
   readonly logger?: boolean;
   readonly authService?: AuthService;
   readonly googleAuthService?: GoogleAuthService;
+  readonly primaryAuthService?: PrimaryAuthService;
   readonly mailConnectionService?: MailConnectionService;
   readonly teamService?: TeamService;
   readonly invitationService?: InvitationService;
@@ -55,7 +58,10 @@ export async function buildApp(
                 "body.joinToken",
                 "body.invitationPassword",
                 "body.refreshToken",
-                "body.authorizationCode"
+                "body.authorizationCode",
+                "body.code",
+                "body.state",
+                "body.user"
               ],
               censor: "[REDACTED]"
             }
@@ -149,7 +155,21 @@ export async function buildApp(
     );
   }
 
-  if (options.googleAuthService && options.authService) {
+  if (options.primaryAuthService && options.authService) {
+    if (!options.securityThrottleService) {
+      throw new Error(
+        "securityThrottleService is required for primary authentication"
+      );
+    }
+    await app.register(
+      createPrimaryAuthRoutes(
+        options.primaryAuthService,
+        options.authService,
+        options.securityThrottleService,
+        options.environment
+      )
+    );
+  } else if (options.googleAuthService && options.authService) {
     if (!options.securityThrottleService) {
       throw new Error(
         "securityThrottleService is required for Google authentication"
@@ -165,7 +185,10 @@ export async function buildApp(
     );
   }
 
-  if (options.googleAuthService && !options.authService) {
+  if (
+    (options.googleAuthService || options.primaryAuthService) &&
+    !options.authService
+  ) {
     throw new Error("authService is required for Google authentication");
   }
 

@@ -102,3 +102,15 @@ stable 409 response if contention remains.
 - `SEAT_LIMIT_UNCHANGED`
 - `SEAT_INCREASE_NOT_PAYABLE`
 - `IDEMPOTENCY_KEY_CONFLICT`
+# Primary login providers
+
+- `GET /api/v1/auth/providers`
+- `GET /api/v1/auth/:provider/start`
+- `GET /api/v1/auth/google/callback`
+- `GET /api/v1/auth/microsoft/callback`
+- `POST /api/v1/auth/apple/callback`
+- `GET /api/v1/auth/identities`
+- `POST /api/v1/auth/identities/:provider/link/start`
+- `DELETE /api/v1/auth/identities/:provider`
+
+`:provider` は `google`、`microsoft`、`apple` のいずれかです。ログイン成功時は既存のHttpOnly Session Cookieを発行します。追加連携と解除は認証済みSessionおよび同一Originを必須とし、最後のログイン方法は解除できません。同じメールアドレスであることだけを根拠にUserを統合しません。

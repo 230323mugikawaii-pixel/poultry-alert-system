@@ -1,8 +1,10 @@
 import { CodeChallengeMethod, OAuth2Client } from "google-auth-library";
+import type { PrimaryAuthProviderAdapter } from "./primary-auth-provider.js";
 
 const GOOGLE_LOGIN_SCOPES = ["openid", "email", "profile"] as const;
 
 export interface GoogleIdentityProfile {
+  readonly provider?: "GOOGLE";
   readonly subject: string;
   readonly email: string;
   readonly emailVerified: boolean;
@@ -10,6 +12,7 @@ export interface GoogleIdentityProfile {
 }
 
 export interface GoogleOAuthProvider {
+  readonly provider?: "GOOGLE";
   createAuthorizationUrl(input: {
     readonly state: string;
     readonly codeChallenge: string;
@@ -28,7 +31,10 @@ export interface GoogleOAuthClientOptions {
   readonly redirectUri: string;
 }
 
-export class GoogleOAuthClient implements GoogleOAuthProvider {
+export class GoogleOAuthClient
+  implements GoogleOAuthProvider, PrimaryAuthProviderAdapter
+{
+  public readonly provider = "GOOGLE" as const;
   private readonly client: OAuth2Client;
 
   public constructor(private readonly options: GoogleOAuthClientOptions) {
@@ -59,7 +65,7 @@ export class GoogleOAuthClient implements GoogleOAuthProvider {
     readonly code: string;
     readonly codeVerifier: string;
     readonly expectedNonce: string;
-  }): Promise<GoogleIdentityProfile> {
+  }): Promise<GoogleIdentityProfile & { readonly provider: "GOOGLE" }> {
     const { tokens } = await this.client.getToken({
       code: input.code,
       codeVerifier: input.codeVerifier,
@@ -83,6 +89,7 @@ export class GoogleOAuthClient implements GoogleOAuthProvider {
     }
 
     return {
+      provider: this.provider,
       subject: payload.sub,
       email: payload.email,
       emailVerified: payload.email_verified === true,

@@ -6,7 +6,12 @@ import type {
   AuthUserRecord,
   CreateGoogleOAuthChallengeInput,
   CreateMagicLinkChallengeInput,
+  CreatePrimaryOAuthChallengeInput,
   CreateSessionInput,
+  PrimaryIdentityProvider,
+  PrimaryIdentityRecord,
+  PrimaryOAuthChallengeRecord,
+  ResolvePrimaryIdentityInput,
   ResolveGoogleUserInput
 } from "../../src/modules/auth/auth-repository.js";
 import type {
@@ -35,9 +40,21 @@ interface StoredGoogleChallenge extends CreateGoogleOAuthChallengeInput {
   consumed: boolean;
 }
 
+interface StoredPrimaryChallenge extends CreatePrimaryOAuthChallengeInput {
+  consumed: boolean;
+}
+
+interface StoredPrimaryIdentity extends PrimaryIdentityRecord {
+  userId: string;
+  providerSubject: string;
+  revokedAt: Date | null;
+}
+
 export class MemoryAuthRepository implements AuthRepository {
   public readonly challenges: StoredChallenge[] = [];
   public readonly googleChallenges: StoredGoogleChallenge[] = [];
+  public readonly primaryChallenges: StoredPrimaryChallenge[] = [];
+  public readonly primaryIdentities: StoredPrimaryIdentity[] = [];
   public readonly googleIdentities = new Map<string, AuthUserRecord>();
   public readonly users = new Map<string, AuthUserRecord>();
   public readonly sessions: StoredSession[] = [];
@@ -105,6 +122,172 @@ export class MemoryAuthRepository implements AuthRepository {
     this.users.set(input.email, user);
     this.googleIdentities.set(input.providerSubject, user);
     return user;
+  }
+
+  public async createPrimaryOAuthChallenge(
+    input: CreatePrimaryOAuthChallengeInput
+  ): Promise<void> {
+    this.primaryChallenges.push({ ...input, consumed: false });
+  }
+
+  public async consumePrimaryOAuthChallenge(
+    secretHash: string,
+    provider: PrimaryIdentityProvider,
+    authenticatedUserId: string | null,
+    now: Date
+  ): Promise<PrimaryOAuthChallengeRecord | null> {
+    const challenge = this.primaryChallenges.find(
+      (candidate) =>
+        candidate.secretHash === secretHash &&
+        candidate.provider === provider &&
+        !candidate.consumed &&
+        candidate.expiresAt > now &&
+        ((candidate.intent === "LOGIN" && candidate.userId === null) ||
+          (candidate.intent === "LINK" &&
+            candidate.userId === authenticatedUserId))
+    );
+    if (!challenge) return null;
+    challenge.consumed = true;
+    return {
+      provider: challenge.provider,
+      intent: challenge.intent,
+      userId: challenge.userId,
+      codeVerifier: challenge.codeVerifier,
+      nonce: challenge.nonce
+    };
+  }
+
+  public async resolvePrimaryIdentityUser(
+    input: ResolvePrimaryIdentityInput
+  ): Promise<AuthUserRecord> {
+    const identity = this.primaryIdentities.find(
+      (candidate) =>
+        candidate.provider === input.provider &&
+        candidate.providerSubject === input.providerSubject &&
+        !candidate.revokedAt
+    );
+    if (identity) {
+      const user = [...this.users.values()].find(
+        (candidate) => candidate.id === identity.userId
+      );
+      if (!user) throw new Error("memory_identity_user_missing");
+      return user;
+    }
+    const email = requireVerifiedEmail(input);
+    if (this.users.has(email)) {
+      throw new AppError(
+        "LOGIN_IDENTITY_LINK_REQUIRED",
+        "An existing user must explicitly link this login method.",
+        409
+      );
+    }
+    const user: AuthUserRecord = {
+      id: randomUUID(),
+      email,
+      displayName: input.displayName,
+      status: "ACTIVE"
+    };
+    this.users.set(email, user);
+    this.primaryIdentities.push({
+      userId: user.id,
+      provider: input.provider,
+      providerSubject: input.providerSubject,
+      email,
+      linkedAt: input.now,
+      lastUsedAt: input.now,
+      revokedAt: null
+    });
+    return user;
+  }
+
+  public async linkPrimaryIdentity(
+    userId: string,
+    input: ResolvePrimaryIdentityInput
+  ): Promise<PrimaryIdentityRecord> {
+    const email = requireVerifiedEmail(input);
+    const subjectIdentity = this.primaryIdentities.find(
+      (candidate) =>
+        candidate.provider === input.provider &&
+        candidate.providerSubject === input.providerSubject &&
+        !candidate.revokedAt
+    );
+    if (subjectIdentity && subjectIdentity.userId !== userId) {
+      throw new AppError(
+        "LOGIN_IDENTITY_ALREADY_IN_USE",
+        "This login identity is already linked to another user.",
+        409
+      );
+    }
+    const providerIdentity = this.primaryIdentities.find(
+      (candidate) =>
+        candidate.userId === userId && candidate.provider === input.provider
+    );
+    if (
+      providerIdentity &&
+      !providerIdentity.revokedAt &&
+      providerIdentity.providerSubject !== input.providerSubject
+    ) {
+      throw new AppError(
+        "LOGIN_PROVIDER_ALREADY_LINKED",
+        "This provider is already linked.",
+        409
+      );
+    }
+    if (providerIdentity) {
+      Object.assign(providerIdentity, {
+        providerSubject: input.providerSubject,
+        email,
+        lastUsedAt: input.now,
+        revokedAt: null
+      });
+      return providerIdentity;
+    }
+    const identity: StoredPrimaryIdentity = {
+      userId,
+      provider: input.provider,
+      providerSubject: input.providerSubject,
+      email,
+      linkedAt: input.now,
+      lastUsedAt: input.now,
+      revokedAt: null
+    };
+    this.primaryIdentities.push(identity);
+    return identity;
+  }
+
+  public async listPrimaryIdentities(
+    userId: string
+  ): Promise<readonly PrimaryIdentityRecord[]> {
+    return this.primaryIdentities.filter(
+      (identity) => identity.userId === userId && !identity.revokedAt
+    );
+  }
+
+  public async unlinkPrimaryIdentity(
+    userId: string,
+    provider: PrimaryIdentityProvider,
+    now: Date
+  ): Promise<void> {
+    const active = this.primaryIdentities.filter(
+      (identity) => identity.userId === userId && !identity.revokedAt
+    );
+    if (active.length <= 1) {
+      throw new AppError(
+        "LAST_LOGIN_IDENTITY_REQUIRED",
+        "The last login identity cannot be removed.",
+        409
+      );
+    }
+    const target = active.find((identity) => identity.provider === provider);
+    if (!target) {
+      throw new AppError(
+        "LOGIN_IDENTITY_NOT_FOUND",
+        "The login identity was not found.",
+        404
+      );
+    }
+    const index = this.primaryIdentities.indexOf(target);
+    this.primaryIdentities[index] = { ...target, revokedAt: now };
   }
 
   public async consumeMagicLink(
@@ -239,6 +422,17 @@ export class MemoryAuthRepository implements AuthRepository {
       }
     }
   }
+}
+
+function requireVerifiedEmail(input: ResolvePrimaryIdentityInput): string {
+  if (!input.email || !input.emailVerified) {
+    throw new AppError(
+      "LOGIN_EMAIL_NOT_VERIFIED",
+      "A verified email address is required.",
+      403
+    );
+  }
+  return input.email;
 }
 
 export class MemoryMagicLinkEmailSender implements MagicLinkEmailSender {

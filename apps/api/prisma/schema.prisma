@@ -19,6 +19,8 @@ enum CredentialType {
 
 enum IdentityProvider {
   GOOGLE
+  MICROSOFT
+  APPLE
 }
 
 enum MailProvider {
@@ -29,6 +31,8 @@ enum MailProvider {
 enum ChallengeKind {
   MAGIC_LINK
   GOOGLE_OAUTH
+  MICROSOFT_OAUTH
+  APPLE_OAUTH
   GMAIL_OAUTH
   MICROSOFT_MAIL_OAUTH
   PASSKEY_REGISTRATION

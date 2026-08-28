@@ -2,10 +2,13 @@ import { config as loadDotenv } from "dotenv";
 import { buildApp } from "./app.js";
 import { loadEnvironment } from "./config/env.js";
 import { createDatabaseClient } from "./db/client.js";
+import { AppleLoginOAuthClient } from "./modules/auth/apple-login-oauth-client.js";
 import { AuthService } from "./modules/auth/auth-service.js";
 import { SmtpMagicLinkEmailSender } from "./modules/auth/email-sender.js";
-import { GoogleAuthService } from "./modules/auth/google-auth-service.js";
 import { GoogleOAuthClient } from "./modules/auth/google-oauth-client.js";
+import { MicrosoftLoginOAuthClient } from "./modules/auth/microsoft-login-oauth-client.js";
+import type { PrimaryAuthProviderAdapter } from "./modules/auth/primary-auth-provider.js";
+import { PrimaryAuthService } from "./modules/auth/primary-auth-service.js";
 import { PrismaAuthRepository } from "./modules/auth/prisma-auth-repository.js";
 import { MailConnectionService } from "./modules/mail/mail-connection-service.js";
 import { getMailProviderStatuses } from "./modules/mail/mail-provider-configuration.js";
@@ -51,16 +54,54 @@ const authService = new AuthService({
   sessionAbsoluteDays: environment.SESSION_ABSOLUTE_DAYS,
   maxActiveSessions: environment.MAX_ACTIVE_SESSIONS
 });
-const googleAuthService = new GoogleAuthService({
-  repository: authRepository,
-  authService,
-  oauthProvider: new GoogleOAuthClient({
+const primaryAuthProviders: PrimaryAuthProviderAdapter[] = [
+  new GoogleOAuthClient({
     clientId: environment.GOOGLE_OAUTH_CLIENT_ID,
     clientSecret: environment.GOOGLE_OAUTH_CLIENT_SECRET,
     redirectUri: environment.GOOGLE_OAUTH_REDIRECT_URI
-  }),
+  })
+];
+if (
+  environment.MICROSOFT_LOGIN_OAUTH_CLIENT_ID &&
+  environment.MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET &&
+  environment.MICROSOFT_LOGIN_OAUTH_REDIRECT_URI
+) {
+  primaryAuthProviders.push(
+    new MicrosoftLoginOAuthClient({
+      clientId: environment.MICROSOFT_LOGIN_OAUTH_CLIENT_ID,
+      clientSecret: environment.MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET,
+      redirectUri: environment.MICROSOFT_LOGIN_OAUTH_REDIRECT_URI,
+      tenant: environment.MICROSOFT_LOGIN_OAUTH_TENANT
+    })
+  );
+}
+if (
+  environment.APPLE_OAUTH_CLIENT_ID &&
+  environment.APPLE_OAUTH_TEAM_ID &&
+  environment.APPLE_OAUTH_KEY_ID &&
+  environment.APPLE_OAUTH_PRIVATE_KEY &&
+  environment.APPLE_OAUTH_REDIRECT_URI
+) {
+  primaryAuthProviders.push(
+    new AppleLoginOAuthClient({
+      clientId: environment.APPLE_OAUTH_CLIENT_ID,
+      teamId: environment.APPLE_OAUTH_TEAM_ID,
+      keyId: environment.APPLE_OAUTH_KEY_ID,
+      privateKey: environment.APPLE_OAUTH_PRIVATE_KEY,
+      redirectUri: environment.APPLE_OAUTH_REDIRECT_URI
+    })
+  );
+}
+const primaryAuthService = new PrimaryAuthService({
+  repository: authRepository,
+  authService,
+  providerAdapters: primaryAuthProviders,
   tokenPepper: environment.AUTH_TOKEN_PEPPER,
-  stateTtlMinutes: environment.GOOGLE_OAUTH_STATE_TTL_MINUTES
+  stateTtlMinutes: {
+    GOOGLE: environment.GOOGLE_OAUTH_STATE_TTL_MINUTES,
+    MICROSOFT: environment.MICROSOFT_LOGIN_OAUTH_STATE_TTL_MINUTES,
+    APPLE: environment.APPLE_OAUTH_STATE_TTL_MINUTES
+  }
 });
 const teamService = new TeamService({
   repository: new PrismaTeamRepository(database)
@@ -105,7 +146,7 @@ const invitationService = new InvitationService({
 const app = await buildApp({
   environment,
   authService,
-  googleAuthService,
+  primaryAuthService,
   mailConnectionService,
   teamService,
   invitationService,
@@ -117,6 +158,16 @@ const app = await buildApp({
 app.log.info(
   { mailProviders: getMailProviderStatuses(environment) },
   "Mail OAuth provider configuration status"
+);
+app.log.info(
+  {
+    loginProviders: {
+      GOOGLE: primaryAuthService.getProviderAvailability("GOOGLE"),
+      MICROSOFT: primaryAuthService.getProviderAvailability("MICROSOFT"),
+      APPLE: primaryAuthService.getProviderAvailability("APPLE")
+    }
+  },
+  "Primary login provider configuration status"
 );
 app.addHook("onClose", async () => database.$disconnect());
 

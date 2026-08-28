@@ -178,7 +178,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-27.2";
+  "2026-08-28.1";
 
 /*
   正式なURLが決まった場合だけ設定する公開リンク。
@@ -205,6 +205,12 @@ let contractStartDate = null;
 let contractEndDate = null;
 let googleEmail = "";
 let authenticatedUser = null;
+let loginIdentities = [];
+let loginProviderAvailability = {
+  GOOGLE: "UNKNOWN",
+  MICROSOFT: "UNKNOWN",
+  APPLE: "UNKNOWN"
+};
 let currentTeam = null;
 let mailConnection = null;
 let mailProviderAvailability = {
@@ -256,10 +262,15 @@ async function initializeApplication() {
   authenticatedUser =
     await fetchCurrentUser();
 
+  loginProviderAvailability =
+    await fetchLoginProviderAvailability();
+
   googleEmail =
     authenticatedUser?.email || "";
 
   if (authenticatedUser) {
+    loginIdentities =
+      await fetchLoginIdentities();
     currentTeam =
       await fetchCurrentTeamContext();
     synchronizeContractFromCurrentTeam();
@@ -278,12 +289,12 @@ async function initializeApplication() {
 
   renderKeywordInputs();
 
-  const canOpenApp =
-    Boolean(authenticatedUser) &&
-    hasActiveSubscription();
-
-  const googleAuthResult =
-    readGoogleAuthResult();
+  const primaryAuthResult =
+    readPrimaryAuthResult();
+  const identityLinkResult =
+    readIdentityLinkResult();
+  const loginProvider =
+    readLoginProvider();
   const mailAuthResult =
     readMailAuthResult();
   const mailAuthProvider =
@@ -294,30 +305,49 @@ async function initializeApplication() {
     clearAuthResultFromUrl("mailProvider");
   }
 
-  if (googleAuthResult) {
-    clearAuthResultFromUrl("googleAuth");
+  if (primaryAuthResult) {
+    clearAuthResultFromUrl("primaryAuth");
+    clearAuthResultFromUrl("loginProvider");
 
     if (
-      googleAuthResult === "success" &&
+      primaryAuthResult === "success" &&
       authenticatedUser
     ) {
-      if (hasActiveSubscription()) {
-        openApp();
-      } else {
-        openSetupForAuthenticatedUser();
-      }
+      openApp();
       return;
     }
 
     openGoogleScreen("login");
     setText(
       "googleError",
-      "Googleログインに失敗しました。もう一度お試しください。"
+      primaryAuthResult === "unavailable"
+        ? `${loginProviderLabel(loginProvider)}ログインは現在準備中です。`
+        : `${loginProviderLabel(loginProvider)}ログインに失敗しました。もう一度お試しください。`
     );
     return;
   }
 
-  if (canOpenApp) {
+  if (identityLinkResult && authenticatedUser) {
+    clearAuthResultFromUrl("identityLink");
+    clearAuthResultFromUrl("loginProvider");
+    openGoogleScreen("manage");
+    await showAppAlert(
+      identityLinkResult === "success"
+        ? `${loginProviderLabel(loginProvider)}ログインを追加しました。`
+        : identityLinkResult === "unavailable"
+          ? `${loginProviderLabel(loginProvider)}ログインは現在準備中です。`
+          : `${loginProviderLabel(loginProvider)}ログインを追加できませんでした。`,
+      {
+        title:
+          identityLinkResult === "success"
+            ? "ログイン方法を追加しました"
+            : "ログイン方法の追加エラー"
+      }
+    );
+    return;
+  }
+
+  if (authenticatedUser) {
     openApp();
     if (mailAuthResult) {
       await showAppAlert(
@@ -335,7 +365,7 @@ async function initializeApplication() {
       );
     }
   } else {
-    showOnlyScreen("landingScreen");
+    openGoogleScreen("login");
   }
 }
 
@@ -418,6 +448,82 @@ async function fetchCurrentUser() {
       error
     );
     return null;
+  }
+}
+
+
+async function fetchLoginProviderAvailability() {
+  const unknown = {
+    GOOGLE: "UNKNOWN",
+    MICROSOFT: "UNKNOWN",
+    APPLE: "UNKNOWN"
+  };
+  try {
+    const response = await fetch(
+      apiUrl("/api/v1/auth/providers"),
+      {
+        method: "GET",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+        cache: "no-store"
+      }
+    );
+    if (!response.ok) return unknown;
+    const providers =
+      (await response.json())?.providers;
+    if (!Array.isArray(providers)) return unknown;
+    const result = { ...unknown };
+    providers.forEach((entry) => {
+      if (
+        ["GOOGLE", "MICROSOFT", "APPLE"].includes(
+          entry?.provider
+        ) &&
+        ["AVAILABLE", "NOT_CONFIGURED"].includes(
+          entry?.status
+        )
+      ) {
+        result[entry.provider] = entry.status;
+      }
+    });
+    return result;
+  } catch (error) {
+    console.warn(
+      "ログイン方法の準備状況を確認できませんでした。",
+      error
+    );
+    return unknown;
+  }
+}
+
+
+async function fetchLoginIdentities() {
+  try {
+    const response = await fetch(
+      apiUrl("/api/v1/auth/identities"),
+      {
+        method: "GET",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+        cache: "no-store"
+      }
+    );
+    if (!response.ok) return [];
+    const identities =
+      (await response.json())?.identities;
+    if (!Array.isArray(identities)) return [];
+    return identities.filter(
+      (identity) =>
+        ["GOOGLE", "MICROSOFT", "APPLE"].includes(
+          identity?.provider
+        ) &&
+        typeof identity.email === "string"
+    );
+  } catch (error) {
+    console.warn(
+      "ログイン方法を確認できませんでした。",
+      error
+    );
+    return [];
   }
 }
 
@@ -694,16 +800,41 @@ async function fetchMailProviderAvailability() {
 }
 
 
-function readGoogleAuthResult() {
+function readPrimaryAuthResult() {
   const result =
     new URL(window.location.href)
       .searchParams
-      .get("googleAuth");
+      .get("primaryAuth");
 
   return result === "success" ||
-    result === "error"
+    result === "error" ||
+    result === "unavailable"
     ? result
     : null;
+}
+
+
+function readIdentityLinkResult() {
+  const result =
+    new URL(window.location.href)
+      .searchParams
+      .get("identityLink");
+  return result === "success" ||
+    result === "error" ||
+    result === "unavailable"
+    ? result
+    : null;
+}
+
+
+function readLoginProvider() {
+  const provider =
+    new URL(window.location.href)
+      .searchParams
+      .get("loginProvider");
+  return ["MICROSOFT", "APPLE"].includes(provider)
+    ? provider
+    : "GOOGLE";
 }
 
 
@@ -743,37 +874,6 @@ function clearAuthResultFromUrl(parameterName) {
 }
 
 
-/* ========================================
-   トップページ
-======================================== */
-
-function scrollToService() {
-  const section =
-    document.getElementById("serviceSection");
-
-  if (section) {
-    section.scrollIntoView({
-      behavior: "smooth"
-    });
-  }
-}
-
-
-function startAccountRegistration() {
-  if (!authenticatedUser) {
-    openGoogleScreen("login");
-    return;
-  }
-
-  if (hasActiveSubscription()) {
-    openApp();
-    return;
-  }
-
-  openSetupForAuthenticatedUser();
-}
-
-
 function openSetupForAuthenticatedUser() {
   if (!authenticatedUser) {
     openGoogleScreen("login");
@@ -793,12 +893,7 @@ function openSetupForAuthenticatedUser() {
 
 
 function handleSetupBack() {
-  if (setupMode === "edit") {
-    openApp();
-    return;
-  }
-
-  showOnlyScreen("landingScreen");
+  openApp();
 
   window.scrollTo({
     top: 0,
@@ -1517,14 +1612,9 @@ function openGoogleScreen(
 ) {
   if (
     mode === "manage" &&
-    (!authenticatedUser ||
-      !hasActiveSubscription())
+    !authenticatedUser
   ) {
-    if (authenticatedUser) {
-      openSetupForAuthenticatedUser();
-    } else {
-      openGoogleScreen("login");
-    }
+    openGoogleScreen("login");
     return;
   }
 
@@ -1534,51 +1624,35 @@ function openGoogleScreen(
 
   setText(
     "googleBackButton",
-    mode === "manage"
-      ? "← ホームへ戻る"
-      : "← トップへ戻る"
+    "← ホームへ戻る"
   );
+  document
+    .getElementById("googleBackButton")
+    ?.classList.toggle(
+      "hidden",
+      isAuthenticationMode
+    );
 
   setText(
     "googleScreenTitle",
     isAuthenticationMode
-      ? "Googleで登録・ログイン"
+      ? "Call Nowに登録・ログイン"
       : "アカウント設定"
   );
 
   setText(
     "googleScreenDescription",
     isAuthenticationMode
-      ? "Call Nowへのログイン用Googleアカウントで本人確認します。"
-      : "重要メールを監視するアカウントを1件接続してください。ログイン用アカウントとは別に管理されます。"
-  );
-
-  setText(
-    "googleAuthButton",
-    isAuthenticationMode
-      ? "Googleで登録・ログイン"
-      : "Googleアカウントを設定"
+      ? "利用するアカウントを選んでください。認証後はホームへ進みます。"
+      : "ログイン方法と、メール監視用アカウントを別々に管理できます。"
   );
 
   setText(
     "googleCardTitle",
     isAuthenticationMode
-      ? "Googleで登録・ログイン"
-      : "Googleアカウントを設定"
+      ? "登録・ログイン方法を選択"
+      : "ログイン方法を追加"
   );
-
-  const finishButton =
-    document.getElementById(
-      "finishGoogleLinkButton"
-    );
-  if (finishButton) {
-    finishButton.classList.toggle(
-      "hidden",
-      mode !== "manage"
-    );
-    finishButton.textContent =
-      "設定を完了してホームへ";
-  }
 
   showOnlyScreen(
     "googleScreen"
@@ -1636,10 +1710,7 @@ function renderGoogleAccountOptions() {
 
   accountList.innerHTML = "";
 
-  if (
-    showAccountManagement &&
-    !googleEmail
-  ) {
+  if (showAccountManagement && loginIdentities.length === 0) {
     const emptyMessage =
       document.createElement("p");
 
@@ -1647,53 +1718,38 @@ function renderGoogleAccountOptions() {
       "google-account-empty";
 
     emptyMessage.textContent =
-      "ログイン中のGoogleアカウントはありません。";
+      "ログイン方法を確認できませんでした。";
 
     accountList.appendChild(
       emptyMessage
     );
-  } else if (
-    showAccountManagement
-  ) {
-    const accountItem =
-      document.createElement("div");
-
-    accountItem.className =
-      "linked-google-account";
-
-    accountItem.innerHTML = `
-      <span class="account-avatar small-avatar">G</span>
-      <span class="linked-google-email">${escapeHtml(googleEmail)}</span>
-      <span class="linked-google-actions">
-        <button
-          type="button"
-          class="account-change-button"
-          onclick="startGoogleAccountChange()"
-        >
-          別のGoogleアカウントでログイン
-        </button>
-        <button
-          type="button"
-          class="account-remove-button"
-          onclick="removeGoogleAccount()"
-        >
-          ログアウト
-        </button>
-      </span>
-    `;
-
-    accountList.appendChild(
-      accountItem
-    );
-  }
-
-  const finishButton =
-    document.getElementById(
-      "finishGoogleLinkButton"
-    );
-
-  if (finishButton) {
-    finishButton.disabled = false;
+  } else if (showAccountManagement) {
+    loginIdentities.forEach((identity) => {
+      const accountItem =
+        document.createElement("div");
+      accountItem.className =
+        "linked-google-account";
+      const canRemove =
+        loginIdentities.length > 1;
+      accountItem.innerHTML = `
+        <span class="account-avatar small-avatar">${loginProviderMark(identity.provider)}</span>
+        <span class="linked-google-email">
+          <strong>${loginProviderLabel(identity.provider)}</strong><br>
+          ${escapeHtml(identity.email)}
+        </span>
+        <span class="linked-google-actions">
+          <button
+            type="button"
+            class="account-remove-button"
+            ${canRemove ? "" : "disabled"}
+            onclick="unlinkLoginIdentity('${identity.provider}')"
+          >
+            ${canRemove ? "ログイン連携を解除" : "最後のログイン方法"}
+          </button>
+        </span>
+      `;
+      accountList.appendChild(accountItem);
+    });
   }
 
   renderMailMonitoringAccount();
@@ -1707,94 +1763,150 @@ function updateGoogleAuthActionText() {
     );
 
   if (authCard) {
-    authCard.classList.toggle(
-      "hidden",
-      Boolean(googleEmail) &&
-        googleScreenMode === "manage"
-    );
+    authCard.classList.remove("hidden");
   }
 
   if (googleScreenMode !== "manage") {
     setText(
       "googleCardTitle",
-      "Googleで登録・ログイン"
+      "登録・ログイン方法を選択"
     );
 
     setText(
       "googleAuthDescription",
-      "Call Nowへのログイン用Googleアカウントで本人確認してください。メール監視権限はここでは要求しません。"
+      "Google、Microsoft、Appleのいずれかで本人確認してください。メール監視権限はここでは要求しません。"
     );
-
+  } else {
     setText(
-      "googleAuthButton",
-      "Googleで登録・ログイン"
+      "googleCardTitle",
+      "ログイン方法を追加"
     );
-
-    return;
+    setText(
+      "googleAuthDescription",
+      "現在のアカウントへ別のログイン方法を追加できます。同じメールアドレスだけを理由にアカウントを統合することはありません。"
+    );
   }
+  updateLoginProviderButtons();
+}
 
-  setText(
-    "googleCardTitle",
-    "Googleアカウントを設定"
-  );
 
+function updateLoginProviderButtons() {
+  const providers = ["GOOGLE", "MICROSOFT", "APPLE"];
+  const unavailable = [];
+  providers.forEach((provider) => {
+    const button = document.getElementById(
+      `${provider.toLowerCase()}LoginProviderButton`
+    );
+    if (!button) return;
+    const alreadyLinked = loginIdentities.some(
+      (identity) => identity.provider === provider
+    );
+    const available =
+      loginProviderAvailability[provider] === "AVAILABLE";
+    button.disabled =
+      !available ||
+      (googleScreenMode === "manage" && alreadyLinked);
+    const label = button.querySelector("strong");
+    if (label) {
+      label.textContent =
+        googleScreenMode === "manage" && alreadyLinked
+          ? `${loginProviderLabel(provider)}（追加済み）`
+          : googleScreenMode === "manage"
+            ? `${loginProviderLabel(provider)}を追加`
+            : `${loginProviderLabel(provider)}で続ける`;
+    }
+    if (!available) unavailable.push(loginProviderLabel(provider));
+  });
   setText(
-    "googleAuthDescription",
-    "Googleの認証画面で本人確認してください。メール監視アカウントはログイン後に別途接続できます。"
-  );
-
-  setText(
-    "googleAuthButton",
-    "Googleアカウントを設定"
+    "loginProviderNotice",
+    unavailable.length > 0
+      ? `${unavailable.join("・")}は現在準備中です。設定完了後に利用できます。`
+      : ""
   );
 }
 
 
-async function startGoogleAccountChange() {
-  if (!googleEmail) {
-    startGoogleLogin("link");
-    return;
-  }
-
-  const confirmed =
-    await showAppConfirm(
-      `別のGoogleアカウントでログインしますか？
-
-Googleでの本人確認が成功すると、現在のセッションが新しい利用者のセッションへ切り替わります。`,
-      {
-        title: "Googleアカウントの切り替え",
-        confirmText: "ログインを続ける"
-      }
+function startPrimaryLogin(provider) {
+  if (!["GOOGLE", "MICROSOFT", "APPLE"].includes(provider)) return;
+  setText("googleError", "");
+  if (loginProviderAvailability[provider] !== "AVAILABLE") {
+    setText(
+      "googleError",
+      `${loginProviderLabel(provider)}ログインは現在準備中です。`
     );
-
-  if (!confirmed) {
     return;
   }
-
-  startGoogleLogin();
+  if (googleScreenMode === "manage") {
+    const form = document.createElement("form");
+    form.method = "post";
+    form.action = apiUrl(
+      `/api/v1/auth/identities/${provider.toLowerCase()}/link/start`
+    );
+    form.hidden = true;
+    document.body.appendChild(form);
+    form.submit();
+    return;
+  }
+  window.location.assign(
+    apiUrl(`/api/v1/auth/${provider.toLowerCase()}/start`)
+  );
 }
 
 
-async function removeGoogleAccount() {
-  if (!googleEmail) {
-    return;
-  }
-
-  const confirmed =
-    await showAppConfirm(
-      `${googleEmail} からログアウトしますか？`,
+async function unlinkLoginIdentity(provider) {
+  if (loginIdentities.length <= 1) return;
+  const confirmed = await showAppConfirm(
+    `${loginProviderLabel(provider)}ログインの連携を解除しますか？`,
+    {
+      title: "ログイン方法の解除",
+      confirmText: "連携を解除",
+      tone: "danger"
+    }
+  );
+  if (!confirmed) return;
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/auth/identities/${provider.toLowerCase()}`
+      ),
       {
-        title: "ログアウトの確認",
-        confirmText: "ログアウトする",
-        tone: "danger"
+        method: "DELETE",
+        credentials: "include",
+        headers: { Accept: "application/json" }
       }
     );
-
-  if (!confirmed) {
-    return;
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(
+        result?.error?.code || `identity_unlink_${response.status}`
+      );
+    }
+    loginIdentities = await fetchLoginIdentities();
+    renderGoogleAccountOptions();
+    renderConnectedGoogleAccounts();
+    await showAppAlert(
+      `${loginProviderLabel(provider)}ログインの連携を解除しました。`
+    );
+  } catch (error) {
+    console.error("ログイン方法を解除できませんでした。", error);
+    await showAppAlert(
+      "ログイン方法を解除できませんでした。別のログイン方法が追加されているか確認してください。"
+    );
   }
+}
 
-  await performLogout();
+
+function loginProviderLabel(provider) {
+  if (provider === "MICROSOFT") return "Microsoft";
+  if (provider === "APPLE") return "Apple";
+  return "Google";
+}
+
+
+function loginProviderMark(provider) {
+  if (provider === "MICROSOFT") return "M";
+  if (provider === "APPLE") return "●";
+  return "G";
 }
 
 
@@ -1854,7 +1966,7 @@ function renderMailMonitoringAccount() {
   if (!currentTeam) {
     status.innerHTML = `
       <p class="connected-account-empty">
-        メール監視アカウントの準備を完了できませんでした。ページを再読み込みしてください。
+        メール監視を利用するには、先に契約とキーワード設定を完了してください。
       </p>
     `;
     providerChoices.classList.remove("hidden");
@@ -2015,7 +2127,7 @@ async function reauthorizeMailConnection() {
 async function beginMailOAuth(action, provider) {
   if (!authenticatedUser) {
     await showAppAlert(
-      "先にGoogleでCall Nowへログインしてください。"
+      "先にCall Nowへログインしてください。"
     );
     return;
   }
@@ -2024,7 +2136,7 @@ async function beginMailOAuth(action, provider) {
     await showAppAlert(
       currentTeam
         ? "メール監視アカウントの変更は管理者のみ行えます。"
-        : "メール監視アカウントの準備を完了できませんでした。ページを再読み込みしてください。"
+        : "メール監視を利用するには、先に契約とキーワード設定を完了してください。"
     );
     return;
   }
@@ -2114,46 +2226,10 @@ function mailProviderLabel(provider) {
 }
 
 
-function finishGoogleAccountLinking() {
-  if (!authenticatedUser ||
-      !hasActiveSubscription()) {
-    setText(
-      "googleError",
-      authenticatedUser
-        ? "契約情報を確認できませんでした。"
-        : "Googleで登録・ログインしてください。"
-    );
-
-    return;
-  }
-
-  saveData();
-  openApp();
-}
-
-
 function backFromGoogle() {
   if (googleScreenMode === "manage") {
     openApp();
-    return;
   }
-
-  showOnlyScreen("landingScreen");
-
-  window.scrollTo({
-    top: 0
-  });
-}
-
-
-function startGoogleLogin() {
-  setText(
-    "googleError",
-    ""
-  );
-  window.location.assign(
-    apiUrl("/api/v1/auth/google/start")
-  );
 }
 
 
@@ -2195,11 +2271,14 @@ function createContractDates() {
 
 
 function renderContractInformation() {
-  if (
-    !contractStartDate ||
-    !contractEndDate
-  ) {
-    createContractDates();
+  if (!hasActiveSubscription()) {
+    setText("contractStartDate", "未契約");
+    setText("contractEndDate", "―");
+    setText("remainingDays", "―");
+    setText("contractKeywordCount", `${keywords.length}個`);
+    setText("contractPrice", formatYen(totalPrice));
+    updateContractStatusUI();
+    return;
   }
 
   const remainingDays =
@@ -2302,8 +2381,10 @@ function isContractExpired() {
 
 
 function updateContractStatusUI() {
+  const activeSubscription =
+    hasActiveSubscription();
   const expired =
-    isContractExpired();
+    activeSubscription && isContractExpired();
 
   const statusDisplay =
     document.querySelector(
@@ -2322,9 +2403,11 @@ function updateContractStatusUI() {
 
   if (statusDisplay) {
     statusDisplay.textContent =
-      expired
-        ? "⛔ 利用停止"
-        : "✅ 正常";
+      !activeSubscription
+        ? "⚠️ 初期設定が必要"
+        : expired
+          ? "⛔ 利用停止"
+          : "✅ 正常";
 
     statusDisplay.classList.toggle(
       "expired",
@@ -2334,16 +2417,20 @@ function updateContractStatusUI() {
 
   setText(
     "serviceStatusDescription",
-    expired
-      ? "契約期限が切れているため、通知機能を利用できません。"
-      : "すべてのシステムは正常に稼働しています。"
+    !activeSubscription
+      ? "契約、キーワード、メール監視アカウントを設定すると通知を開始できます。"
+      : expired
+        ? "契約期限が切れているため、通知機能を利用できません。"
+        : "すべてのシステムは正常に稼働しています。"
   );
 
   if (appStatus) {
     appStatus.textContent =
-      expired
-        ? "停止中"
-        : "監視中";
+      !activeSubscription
+        ? "未設定"
+        : expired
+          ? "停止中"
+          : "監視中";
 
     appStatus.classList.toggle(
       "expired",
@@ -2357,24 +2444,32 @@ function updateContractStatusUI() {
     )
     .forEach((button) => {
       button.disabled =
-        expired;
+        !activeSubscription || expired;
 
       button.textContent =
-        expired
-          ? "契約更新が必要です"
-          : "テストを実行";
+        !activeSubscription
+          ? "初期設定が必要です"
+          : expired
+            ? "契約更新が必要です"
+            : "テストを実行";
     });
 
   if (renewalButton) {
     renewalButton.textContent =
-      expired
-        ? "契約を1年間更新して再開"
-        : "契約期限を1年間延長";
+      !activeSubscription
+        ? "契約設定を始める"
+        : expired
+          ? "契約を1年間更新して再開"
+          : "契約期限を1年間延長";
   }
 }
 
 
 function renewContract() {
+  if (!hasActiveSubscription()) {
+    openSetupForAuthenticatedUser();
+    return;
+  }
   paymentMode =
     "renewal";
 
@@ -2638,11 +2733,6 @@ function openApp() {
     return;
   }
 
-  if (!hasActiveSubscription()) {
-    openSetupForAuthenticatedUser();
-    return;
-  }
-
   showOnlyScreen(
     "appScreen"
   );
@@ -2654,6 +2744,8 @@ function openApp() {
   renderContractInformation();
 
   renderConnectedGoogleAccounts();
+
+  renderHomeSetupNotices();
 
   showAppPage(
     "homePage"
@@ -2681,13 +2773,20 @@ function renderConnectedGoogleAccounts() {
     document.createElement("div");
   loginAccount.className =
     "google-account-role";
+  const loginProviderNames =
+    loginIdentities.length > 0
+      ? loginIdentities
+          .map((identity) => loginProviderLabel(identity.provider))
+          .join("・")
+      : "ログイン方法を確認中";
   loginAccount.innerHTML = `
     <strong>Call Nowログイン</strong>
     <span class="connected-account-summary">
-      ${googleEmail ? "ログイン中" : "未ログイン"}
+      ${loginIdentities.length > 0 ? `${loginIdentities.length}件設定済み` : "ログイン中"}
     </span>
     <span class="connected-account-email">
-      ${googleEmail ? escapeHtml(googleEmail) : "Googleでログインしてください"}
+      ${escapeHtml(loginProviderNames)}<br>
+      ${escapeHtml(googleEmail)}
     </span>
   `;
 
@@ -2712,7 +2811,7 @@ function renderConnectedGoogleAccounts() {
         ? "重要メールの監視用アカウントを接続できます"
         : currentTeam
           ? "メール監視アカウントの変更は管理者のみ行えます"
-          : "メール監視アカウントの準備中です";
+          : "契約後にメール監視アカウントを設定できます";
   const monitoringProvider =
     mailConnection &&
     mailConnection.connectionStatus !== "REVOKED"
@@ -2734,8 +2833,64 @@ function renderConnectedGoogleAccounts() {
 
   setText(
     "homeGoogleAccountActionButton",
-    "Googleアカウントを管理"
+    "アカウント設定を開く"
   );
+}
+
+
+function renderHomeSetupNotices() {
+  const card = document.getElementById(
+    "homeSetupNoticeCard"
+  );
+  const container = document.getElementById(
+    "homeSetupNotices"
+  );
+  if (!card || !container) return;
+  const notices = [];
+  if (!hasActiveSubscription()) {
+    notices.push({
+      title: "契約とキーワードが未設定です",
+      message:
+        "通知を始めるには、監視キーワードと契約内容を設定してください。",
+      action: "openSetupForAuthenticatedUser()",
+      label: "設定を始める"
+    });
+  }
+  const monitoringActive =
+    mailConnection?.connectionStatus === "ACTIVE" &&
+    mailConnection?.authorizationStatus === "ACTIVE";
+  setText(
+    "appMonitoringStatus",
+    monitoringActive ? "監視中" : "未設定"
+  );
+  if (!monitoringActive) {
+    notices.push({
+      title: "メール監視アカウントが未接続です",
+      message: currentTeam
+        ? "GmailまたはMicrosoft 365の監視用アカウントを1件接続してください。"
+        : "契約完了後に、監視用アカウントを設定できます。",
+      action: currentTeam
+        ? "openGoogleAccountManager()"
+        : "openSetupForAuthenticatedUser()",
+      label: currentTeam
+        ? "メール監視を設定"
+        : "契約設定を開く"
+    });
+  }
+  card.classList.toggle("hidden", notices.length === 0);
+  container.innerHTML = notices
+    .map(
+      (notice) => `
+        <div class="setup-notice-item">
+          <strong>${escapeHtml(notice.title)}</strong>
+          <p>${escapeHtml(notice.message)}</p>
+          <button type="button" class="btn outline full-width" onclick="${notice.action}">
+            ${escapeHtml(notice.label)}
+          </button>
+        </div>
+      `
+    )
+    .join("");
 }
 
 
@@ -2750,11 +2905,6 @@ function showAppPage(
 ) {
   if (!authenticatedUser) {
     openGoogleScreen("login");
-    return;
-  }
-
-  if (!hasActiveSubscription()) {
-    openSetupForAuthenticatedUser();
     return;
   }
 
@@ -2886,6 +3036,7 @@ async function performLogout() {
   closeAlarmNotification();
   authenticatedUser = null;
   googleEmail = "";
+  loginIdentities = [];
   currentTeam = null;
   mailConnection = null;
   mailProviderAvailability = {
@@ -2896,9 +3047,7 @@ async function performLogout() {
   setupMode =
     "signup";
 
-  showOnlyScreen(
-    "landingScreen"
-  );
+  openGoogleScreen("login");
 
   window.scrollTo({
     top: 0,
@@ -4227,8 +4376,7 @@ function showOnlyScreen(screenId) {
   if (
     screenId === "googleScreen" &&
     googleScreenMode === "manage" &&
-    (!authenticatedUser ||
-      !hasActiveSubscription())
+    !authenticatedUser
   ) {
     openGoogleScreen("login");
     return;
@@ -4242,19 +4390,7 @@ function showOnlyScreen(screenId) {
     return;
   }
 
-  if (
-    [
-      "renewalCompleteScreen",
-      "appScreen"
-    ].includes(screenId) &&
-    !hasActiveSubscription()
-  ) {
-    openSetupForAuthenticatedUser();
-    return;
-  }
-
   const screenIds = [
-    "landingScreen",
     "setupScreen",
     "paymentScreen",
     "renewalCompleteScreen",

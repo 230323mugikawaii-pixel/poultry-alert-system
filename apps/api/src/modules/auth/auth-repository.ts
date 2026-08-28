@@ -37,6 +37,43 @@ export interface ResolveGoogleUserInput {
   readonly now: Date;
 }
 
+export type PrimaryIdentityProvider = "GOOGLE" | "MICROSOFT" | "APPLE";
+export type PrimaryOAuthIntent = "LOGIN" | "LINK";
+
+export interface CreatePrimaryOAuthChallengeInput {
+  readonly provider: PrimaryIdentityProvider;
+  readonly intent: PrimaryOAuthIntent;
+  readonly userId: string | null;
+  readonly secretHash: string;
+  readonly codeVerifier: string;
+  readonly nonce: string;
+  readonly expiresAt: Date;
+}
+
+export interface PrimaryOAuthChallengeRecord {
+  readonly provider: PrimaryIdentityProvider;
+  readonly intent: PrimaryOAuthIntent;
+  readonly userId: string | null;
+  readonly codeVerifier: string;
+  readonly nonce: string;
+}
+
+export interface ResolvePrimaryIdentityInput {
+  readonly provider: PrimaryIdentityProvider;
+  readonly providerSubject: string;
+  readonly email: string | null;
+  readonly displayName: string | null;
+  readonly emailVerified: boolean;
+  readonly now: Date;
+}
+
+export interface PrimaryIdentityRecord {
+  readonly provider: PrimaryIdentityProvider;
+  readonly email: string;
+  readonly linkedAt: Date;
+  readonly lastUsedAt: Date | null;
+}
+
 export interface CreateSessionInput {
   readonly userId: string;
   readonly tokenHash: string;
@@ -61,6 +98,30 @@ export interface AuthRepository {
     readonly nonce: string;
   } | null>;
   resolveGoogleUser(input: ResolveGoogleUserInput): Promise<AuthUserRecord>;
+  createPrimaryOAuthChallenge(
+    input: CreatePrimaryOAuthChallengeInput
+  ): Promise<void>;
+  consumePrimaryOAuthChallenge(
+    secretHash: string,
+    provider: PrimaryIdentityProvider,
+    authenticatedUserId: string | null,
+    now: Date
+  ): Promise<PrimaryOAuthChallengeRecord | null>;
+  resolvePrimaryIdentityUser(
+    input: ResolvePrimaryIdentityInput
+  ): Promise<AuthUserRecord>;
+  linkPrimaryIdentity(
+    userId: string,
+    input: ResolvePrimaryIdentityInput
+  ): Promise<PrimaryIdentityRecord>;
+  listPrimaryIdentities(
+    userId: string
+  ): Promise<readonly PrimaryIdentityRecord[]>;
+  unlinkPrimaryIdentity(
+    userId: string,
+    provider: PrimaryIdentityProvider,
+    now: Date
+  ): Promise<void>;
   consumeMagicLink(
     secretHash: string,
     now: Date

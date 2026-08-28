@@ -9,6 +9,11 @@ import type {
   GoogleOAuthProvider
 } from "../src/modules/auth/google-oauth-client.js";
 import { PrismaAuthRepository } from "../src/modules/auth/prisma-auth-repository.js";
+import type {
+  PrimaryAuthProviderAdapter,
+  PrimaryIdentityProfile
+} from "../src/modules/auth/primary-auth-provider.js";
+import { PrimaryAuthService } from "../src/modules/auth/primary-auth-service.js";
 import { MailConnectionService } from "../src/modules/mail/mail-connection-service.js";
 import type {
   MailOAuthGrant,
@@ -134,6 +139,78 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       code: "GOOGLE_LOGIN_INVALID_OR_EXPIRED",
       statusCode: 401
     });
+  });
+
+  it("links primary providers by subject without email-only account merging", async () => {
+    const repository = new PrismaAuthRepository(database);
+    const authService = new AuthService({
+      repository,
+      emailSender: { sendMagicLink: async () => undefined },
+      publicOrigin: "https://acceptance.call-now.example",
+      tokenPepper: testPepper,
+      magicLinkTtlMinutes: 15,
+      sessionIdleDays: 30,
+      sessionAbsoluteDays: 90,
+      maxActiveSessions: 5
+    });
+    const service = new PrimaryAuthService({
+      repository,
+      authService,
+      providerAdapters: [
+        new PostgresPrimaryOAuthProvider(
+          "GOOGLE",
+          "primary-google-subject",
+          "primary@example.com"
+        ),
+        new PostgresPrimaryOAuthProvider(
+          "MICROSOFT",
+          "tenant:primary-microsoft-subject",
+          "primary@example.com"
+        )
+      ],
+      tokenPepper: testPepper,
+      stateTtlMinutes: { GOOGLE: 10, MICROSOFT: 10, APPLE: 10 }
+    });
+    const googleLogin = await completePrimaryLogin(service, "GOOGLE");
+
+    await expect(
+      completePrimaryLogin(service, "MICROSOFT")
+    ).rejects.toMatchObject({ code: "LOGIN_IDENTITY_LINK_REQUIRED" });
+
+    const linkRequest = await service.createAuthorizationRequest({
+      provider: "MICROSOFT",
+      intent: "LINK",
+      authenticatedUserId: googleLogin.user.id
+    });
+    await service.completeAuthorization({
+      provider: "MICROSOFT",
+      state: linkRequest.state,
+      code: "postgres-primary-code",
+      authenticatedUserId: googleLogin.user.id,
+      clientContext: { ipAddress: "127.0.0.1", userAgent: "Postgres test" }
+    });
+
+    await expect(
+      database.externalIdentity.count({
+        where: { userId: googleLogin.user.id, revokedAt: null }
+      })
+    ).resolves.toBe(2);
+
+    const unlinkAttempts = await Promise.allSettled([
+      service.unlinkIdentity(googleLogin.user.id, "GOOGLE"),
+      service.unlinkIdentity(googleLogin.user.id, "MICROSOFT")
+    ]);
+    expect(
+      unlinkAttempts.filter(({ status }) => status === "fulfilled")
+    ).toHaveLength(1);
+    expect(
+      unlinkAttempts.filter(({ status }) => status === "rejected")
+    ).toHaveLength(1);
+    await expect(
+      database.externalIdentity.count({
+        where: { userId: googleLogin.user.id, revokedAt: null }
+      })
+    ).resolves.toBe(1);
   });
 
   it("bootstraps one initial team under concurrency and preserves member roles", async () => {
@@ -1117,12 +1194,73 @@ class PostgresGoogleOAuthProvider implements GoogleOAuthProvider {
       throw new Error("Invalid PostgreSQL Google auth fixture");
     }
     return {
+      provider: "GOOGLE",
       subject: "postgres-google-subject",
       email: "postgres-google@example.com",
       emailVerified: true,
       displayName: "PostgreSQL Google User"
     };
   }
+}
+
+class PostgresPrimaryOAuthProvider implements PrimaryAuthProviderAdapter {
+  private nonce: string | null = null;
+
+  public constructor(
+    public readonly provider: "GOOGLE" | "MICROSOFT" | "APPLE",
+    private readonly subject: string,
+    private readonly email: string
+  ) {}
+
+  public createAuthorizationUrl(input: {
+    readonly state: string;
+    readonly codeChallenge: string;
+    readonly nonce: string;
+  }): string {
+    this.nonce = input.nonce;
+    return `https://identity.example/authorize?state=${encodeURIComponent(input.state)}`;
+  }
+
+  public async exchangeCode(input: {
+    readonly code: string;
+    readonly codeVerifier: string;
+    readonly expectedNonce: string;
+  }): Promise<PrimaryIdentityProfile> {
+    if (
+      input.code !== "postgres-primary-code" ||
+      !input.codeVerifier ||
+      input.expectedNonce !== this.nonce
+    ) {
+      throw new Error("Invalid PostgreSQL primary auth fixture");
+    }
+    return {
+      provider: this.provider,
+      subject: this.subject,
+      email: this.email,
+      emailVerified: true,
+      displayName: "PostgreSQL Primary User"
+    };
+  }
+}
+
+async function completePrimaryLogin(
+  service: PrimaryAuthService,
+  provider: "GOOGLE" | "MICROSOFT" | "APPLE"
+) {
+  const request = await service.createAuthorizationRequest({
+    provider,
+    intent: "LOGIN",
+    authenticatedUserId: null
+  });
+  const result = await service.completeAuthorization({
+    provider,
+    state: request.state,
+    code: "postgres-primary-code",
+    authenticatedUserId: null,
+    clientContext: { ipAddress: "127.0.0.1", userAgent: "Postgres test" }
+  });
+  if (result.intent !== "LOGIN") throw new Error("expected_primary_login");
+  return result;
 }
 
 class PostgresMailProviderAdapter implements MailProviderAdapter {
