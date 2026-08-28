@@ -2226,6 +2226,63 @@ body.app-dialog-open {
   flex: 1 1 0;
 }
 
+.owner-keyword-provider-section {
+  margin: 24px 0;
+}
+
+.owner-keyword-provider-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 5px;
+  margin-bottom: 14px;
+  border-radius: 14px;
+  background: #edf4fc;
+}
+
+.owner-keyword-provider-tab {
+  flex: 1 1 0;
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #53657c;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.owner-keyword-provider-tab.active {
+  background: #0862c7;
+  color: #fff;
+  box-shadow: 0 6px 16px rgb(8 98 199 / 20%);
+}
+
+.owner-keyword-provider-tab .tab-complete {
+  margin-left: 5px;
+}
+
+.owner-keyword-provider-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border: 1px solid #d8e2ef;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.owner-keyword-provider-heading h2,
+.owner-keyword-provider-heading p {
+  margin: 3px 0;
+}
+
+.owner-keyword-decision-status {
+  flex: 0 0 auto;
+  color: #087a42;
+  font-weight: 800;
+}
+
 .center-text {
   text-align: center;
 }
@@ -2318,6 +2375,10 @@ body.app-dialog-open {
   .seat-setup-card {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .owner-keyword-provider-heading {
+    display: grid;
   }
 
   .seat-count-field select {

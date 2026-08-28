@@ -58,6 +58,35 @@ test("setup exposes the compact three-step flow and explicit final actions", () 
   assert.match(appSource, /このMicrosoft 365アカウントを監視しますか/);
 });
 
+test("OAuth returns to provider setup and configured cards show an unambiguous state", () => {
+  assert.match(
+    appSource,
+    /ownerOnboarding\?\.status === "PENDING"[\s\S]*openOwnerSetup\(\)/
+  );
+  assert.match(appSource, /✓ 設定しました/);
+  assert.match(appSource, /Googleアカウントを変更/);
+  assert.match(appSource, /Microsoftアカウントを変更/);
+});
+
+test("provider keywords are decided separately and restored from the server", () => {
+  assert.match(htmlSource, /id="ownerKeywordProviderTabs"/);
+  assert.match(appSource, /choice\.keywordsConfirmedAt/);
+  assert.match(appSource, /変更あり・再決定が必要/);
+  assert.match(
+    appSource,
+    /\/api\/v1\/owner-onboarding\/choices\/\$\{encodeURIComponent\(currentChoice\.id\)\}\/keywords/
+  );
+  assert.match(appSource, /このアカウントのキーワードを決定/);
+  assert.match(appSource, /Gmailの通知キーワード/);
+  assert.match(appSource, /Microsoft 365の通知キーワード/);
+  assert.match(appSource, /resetOwnerOnboardingClientState\(\)/);
+});
+
+test("Home does not render the large setup notice card", () => {
+  assert.doesNotMatch(htmlSource, /id="homeSetupNoticeCard"/);
+  assert.doesNotMatch(htmlSource, /はじめに設定してください/);
+});
+
 test("both skipped providers are rejected inline and demo purchase is explicit", () => {
   assert.match(
     appSource,

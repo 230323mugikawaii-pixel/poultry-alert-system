@@ -14,7 +14,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=21">
+    <link rel="stylesheet" href="css/style.css?v=22">
 </head>
 
 <body>
@@ -242,6 +242,26 @@
         登録した言葉がメールに含まれていた場合に通知します。
         基本料金には3個までのキーワードが含まれます。
       </p>
+
+      <div id="ownerKeywordProviderSection" class="owner-keyword-provider-section">
+        <nav
+          id="ownerKeywordProviderTabs"
+          class="owner-keyword-provider-tabs hidden"
+          aria-label="監視アカウントを選択"
+        ></nav>
+        <div class="owner-keyword-provider-heading">
+          <div>
+            <p id="ownerKeywordProviderLabel" class="small-label"></p>
+            <h2 id="ownerKeywordProviderTitle"></h2>
+            <p id="ownerKeywordProviderEmail" class="input-help"></p>
+          </div>
+          <span
+            id="ownerKeywordDecisionStatus"
+            class="owner-keyword-decision-status"
+            aria-live="polite"
+          ></span>
+        </div>
+      </div>
 
 
       <!-- 基本プラン -->
@@ -967,11 +987,6 @@
 
 
         <div class="dashboard-grid">
-
-          <article id="homeSetupNoticeCard" class="card setup-notice-card hidden">
-            <h2>はじめに設定してください</h2>
-            <div id="homeSetupNotices"></div>
-          </article>
 
           <article class="card alert-card">
               <div class="alert-card-heading">
