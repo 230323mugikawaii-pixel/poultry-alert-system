@@ -170,9 +170,11 @@ export class PrismaNotificationMemberRepository implements NotificationMemberRep
         );
         let seatLimit = subscription.seatLimit;
         let pendingSeatLimit = subscription.pendingSeatLimit;
+        let pendingSeatLimitApplied = false;
         if (pendingSeatLimit !== null && occupied <= pendingSeatLimit) {
           seatLimit = pendingSeatLimit;
           pendingSeatLimit = null;
+          pendingSeatLimitApplied = true;
           await transaction.subscription.update({
             where: { id: subscription.id },
             data: { seatLimit, pendingSeatLimit: null }
@@ -193,7 +195,7 @@ export class PrismaNotificationMemberRepository implements NotificationMemberRep
             action: "NOTIFICATION_MEMBER_DISABLED",
             targetType: "NotificationMember",
             targetId: member.id,
-            metadata: { pendingSeatLimitApplied: pendingSeatLimit === null }
+            metadata: { pendingSeatLimitApplied }
           }
         });
         const members = await transaction.notificationMember.findMany({
