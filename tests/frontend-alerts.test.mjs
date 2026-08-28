@@ -24,6 +24,8 @@ test("in-app alert updates use credentialed SSE and explicit acknowledgement", (
   assert.match(appSource, /\/alerts\/\$\{encodeURIComponent\(alertId\)\}\/acknowledge/);
   assert.match(appSource, /currentAlarmAlertContext/);
   assert.match(appSource, /void acknowledgeAlert\(/);
+  assert.match(appSource, /acknowledgedByName/);
+  assert.match(appSource, /すでに\$\{acknowledgedByName\}さんが対応を開始しています/);
   assert.doesNotMatch(appSource, /serviceWorker\.register/);
 });
 

@@ -1277,10 +1277,13 @@ function renderAlertList(containerId, alerts, audience) {
     .map((alert) => {
       const active = alert.status === "ACTIVE";
       const acknowledged = alert.status === "ACKNOWLEDGED";
+      const acknowledgedByName =
+        alert.acknowledgedByName ||
+        (alert.acknowledgedBy === "OWNER" ? "代表者" : "通知メンバー");
       const statusText = active
         ? "未確認"
         : acknowledged
-          ? `確認済み（${alert.acknowledgedBy === "OWNER" ? "代表者" : "通知メンバー"}）`
+          ? `確認済み（${acknowledgedByName}さんが対応中）`
           : "対応完了";
       const actions = active
         ? `<button type="button" class="btn primary" onclick="acknowledgeAlert('${escapeHtml(alert.id)}', '${audience}')">確認する</button>`
@@ -1294,7 +1297,7 @@ function renderAlertList(containerId, alerts, audience) {
             <p class="alert-list-meta">
               ${escapeHtml(formatAlarmDetectedAt(alert.detectedAt))}・${escapeHtml(mailProviderLabel(alert.source.provider))}
             </p>
-            <p class="alert-list-status">${statusText}</p>
+            <p class="alert-list-status">${escapeHtml(statusText)}</p>
           </div>
           <div class="alert-list-actions">${actions}</div>
         </article>
@@ -1315,12 +1318,22 @@ async function acknowledgeAlert(alertId, audience) {
       headers: { Accept: "application/json" },
     });
     if (!response.ok) throw new Error("alert_acknowledge_failed");
+    const result = await response.json();
     if (audience === "OWNER") {
       await refreshOwnerAlerts();
     } else {
       await refreshNotificationMemberAlerts();
     }
     closeAlarmNotification();
+    if (result.alreadyAcknowledged) {
+      const acknowledgedByName =
+        result.alert?.acknowledgedByName ||
+        (result.alert?.acknowledgedBy === "OWNER" ? "代表者" : "通知メンバー");
+      await showAppAlert(
+        `すでに${acknowledgedByName}さんが対応を開始しています。`,
+        { title: "対応開始済み" },
+      );
+    }
   } catch {
     await showAppAlert(
       "通知を確認済みにできませんでした。通信状態を確認して、もう一度お試しください。",

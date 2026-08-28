@@ -14,6 +14,8 @@ const alertInclude = {
   sourceMailConnection: {
     select: { mailAuthorization: { select: { provider: true } } }
   },
+  acknowledgedByUser: { select: { displayName: true } },
+  acknowledgedByNotificationMember: { select: { displayName: true } },
   _count: { select: { recipients: true } }
 } satisfies Prisma.AlertInclude;
 
@@ -360,6 +362,11 @@ function mapAlert(alert: AlertWithSource): AlertRecord {
       ? "OWNER"
       : alert.acknowledgedByNotificationMemberId
         ? "NOTIFICATION_MEMBER"
+        : null,
+    acknowledgedByName: alert.acknowledgedByUserId
+      ? alert.acknowledgedByUser?.displayName || "代表者"
+      : alert.acknowledgedByNotificationMemberId
+        ? alert.acknowledgedByNotificationMember?.displayName || "通知メンバー"
         : null,
     resolvedAt: alert.resolvedAt,
     createdAt: alert.createdAt,

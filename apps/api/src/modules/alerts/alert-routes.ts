@@ -34,6 +34,10 @@ const AlertResponse = Type.Object({
     Type.Literal("NOTIFICATION_MEMBER"),
     Type.Null()
   ]),
+  acknowledgedByName: Type.Union([
+    Type.String({ minLength: 1, maxLength: 100 }),
+    Type.Null()
+  ]),
   resolvedAt: Type.Union([Type.String(), Type.Null()]),
   recipientCount: Type.Integer({ minimum: 1 }),
   updatedAt: Type.String()
@@ -287,6 +291,7 @@ function serializeAlert(alert: AlertRecord) {
     },
     acknowledgedAt: alert.acknowledgedAt?.toISOString() ?? null,
     acknowledgedBy: alert.acknowledgedBy,
+    acknowledgedByName: alert.acknowledgedByName,
     resolvedAt: alert.resolvedAt?.toISOString() ?? null,
     recipientCount: alert.recipientCount,
     updatedAt: alert.updatedAt.toISOString()

@@ -76,6 +76,7 @@ class MemoryAlertRepository implements AlertRepository {
       matchedKeyword: input.matchedKeyword,
       acknowledgedAt: null,
       acknowledgedBy: null,
+      acknowledgedByName: null,
       resolvedAt: null,
       createdAt: input.now,
       updatedAt: input.now,

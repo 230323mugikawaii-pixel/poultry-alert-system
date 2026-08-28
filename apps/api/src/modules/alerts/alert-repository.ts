@@ -12,6 +12,7 @@ export interface AlertRecord {
   readonly matchedKeyword: string;
   readonly acknowledgedAt: Date | null;
   readonly acknowledgedBy: AlertAcknowledgedBy | null;
+  readonly acknowledgedByName: string | null;
   readonly resolvedAt: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;

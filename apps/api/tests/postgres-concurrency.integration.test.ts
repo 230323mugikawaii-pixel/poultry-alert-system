@@ -1481,6 +1481,10 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
   it("allows one simultaneous acknowledgement and enforces team isolation", async () => {
     const clock = { value: new Date("2026-08-28T08:00:00.000Z") };
     const owner = await createUser("ack-owner@example.com");
+    await database.user.update({
+      where: { id: owner.id },
+      data: { displayName: "代表者" }
+    });
     const services = createServices(clock, "482741");
     const invitation = await prepareInvitationCredential({
       now: clock.value,
@@ -1506,7 +1510,8 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     });
     const member = await memberService.create({
       teamId: team.team.teamId,
-      actorUserId: owner.id
+      actorUserId: owner.id,
+      displayName: "田中"
     });
     const connection = await createActiveMailConnection(
       owner.id,
@@ -1545,6 +1550,38 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     ).toHaveLength(1);
     expect(acknowledgements[0]?.alert.status).toBe("ACKNOWLEDGED");
     expect(acknowledgements[1]?.alert.status).toBe("ACKNOWLEDGED");
+    expect(
+      acknowledgements.map(({ alert }) => alert.acknowledgedByName)
+    ).toEqual(
+      Array(2).fill(
+        acknowledgements[0]?.alert.acknowledgedBy === "OWNER"
+          ? "代表者"
+          : "田中"
+      )
+    );
+    await expect(
+      database.alert.findUniqueOrThrow({
+        where: { id: created.alert.id },
+        select: {
+          acknowledgedAt: true,
+          acknowledgedByUserId: true,
+          acknowledgedByNotificationMemberId: true
+        }
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        acknowledgedAt: clock.value,
+        ...(acknowledgements[0]?.alert.acknowledgedBy === "OWNER"
+          ? {
+              acknowledgedByUserId: owner.id,
+              acknowledgedByNotificationMemberId: null
+            }
+          : {
+              acknowledgedByUserId: null,
+              acknowledgedByNotificationMemberId: member.member.id
+            })
+      })
+    );
     await expect(
       database.auditEvent.count({
         where: { action: "ALERT_ACKNOWLEDGED", targetId: created.alert.id }

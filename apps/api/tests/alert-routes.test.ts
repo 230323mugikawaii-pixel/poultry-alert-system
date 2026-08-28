@@ -229,6 +229,7 @@ function createAlert(teamId: string): AlertRecord {
     matchedKeyword: "停電のお知らせ",
     acknowledgedAt: null,
     acknowledgedBy: null,
+    acknowledgedByName: null,
     resolvedAt: null,
     createdAt: now,
     updatedAt: now,
