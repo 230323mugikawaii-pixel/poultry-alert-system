@@ -36,6 +36,10 @@ export class MemoryTeamRepository implements TeamRepository {
     if (input.seatLimit > 0 && !input.initialInvitation) {
       throw new Error("initial_invitation_required");
     }
+    return this.storeTeam(input);
+  }
+
+  private async storeTeam(input: CreateTeamInput): Promise<TeamCreationResult> {
     if (this.failNextTeamCode) {
       this.failNextTeamCode = false;
       throw new AppError("TEAM_CODE_CONFLICT", "collision", 409);
@@ -74,6 +78,13 @@ export class MemoryTeamRepository implements TeamRepository {
         ? this.createInvitation(input.seatLimit, input.initialInvitation)
         : null;
     return { team: this.context, invitation };
+  }
+
+  public completeOwnerOnboardingPurchase(
+    input: CreateTeamInput & { readonly onboardingId: string }
+  ): Promise<TeamCreationResult> {
+    void input.onboardingId;
+    return this.storeTeam(input);
   }
 
   public async ensureInitialTeam(

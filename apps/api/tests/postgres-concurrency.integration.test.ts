@@ -26,6 +26,8 @@ import { PrismaMailConnectionRepository } from "../src/modules/mail/prisma-mail-
 import { NotificationMemberService } from "../src/modules/notification-members/notification-member-service.js";
 import { PrismaNotificationMemberRepository } from "../src/modules/notification-members/prisma-notification-member-repository.js";
 import { LocalAesGcmTokenEncryptionProvider } from "../src/modules/mail/token-encryption.js";
+import { OwnerOnboardingService } from "../src/modules/onboarding/owner-onboarding-service.js";
+import { PrismaOwnerOnboardingRepository } from "../src/modules/onboarding/prisma-owner-onboarding-repository.js";
 import { InvitationService } from "../src/modules/invitations/invitation-service.js";
 import { prepareInvitationCredential } from "../src/modules/invitations/invitation-credential.js";
 import { PrismaInvitationRepository } from "../src/modules/invitations/prisma-invitation-repository.js";
@@ -55,6 +57,8 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
         audit_events,
         alert_recipients,
         alerts,
+        onboarding_mail_choices,
+        owner_onboardings,
         notification_member_sessions,
         notification_members,
         external_identities,
@@ -662,6 +666,228 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     ).resolves.toMatchObject({ status: "ACTIVE" });
     expect(google.revokedTokens).toEqual([google.refreshToken]);
     expect(microsoft.revokedTokens).toEqual([]);
+  });
+
+  it("keeps owner mail grants pending until an atomic demo purchase and explicit activation", async () => {
+    const clock = { value: new Date("2026-08-29T00:00:00.000Z") };
+    const authRepository = new PrismaAuthRepository(database);
+    const authService = new AuthService({
+      repository: authRepository,
+      emailSender: { sendMagicLink: async () => undefined },
+      publicOrigin: "https://acceptance.call-now.example",
+      tokenPepper: testPepper,
+      magicLinkTtlMinutes: 15,
+      sessionIdleDays: 30,
+      sessionAbsoluteDays: 90,
+      maxActiveSessions: 5,
+      now: () => clock.value
+    });
+    const teamService = new TeamService({
+      repository: new PrismaTeamRepository(database),
+      now: () => clock.value,
+      teamCodeGenerator: () => "482799"
+    });
+    const google = new PostgresMailProviderAdapter("GOOGLE");
+    const microsoft = new PostgresMailProviderAdapter("MICROSOFT");
+    const service = new OwnerOnboardingService({
+      repository: new PrismaOwnerOnboardingRepository(database),
+      authRepository,
+      authService,
+      teamService,
+      providerAdapters: [google, microsoft],
+      tokenEncryption: new LocalAesGcmTokenEncryptionProvider(
+        Buffer.alloc(32, 10).toString("base64"),
+        "postgres-owner-onboarding-v1"
+      ),
+      tokenPepper: testPepper,
+      stateTtlMinutes: { GOOGLE: 10, MICROSOFT: 10 },
+      onboardingTtlHours: 168,
+      now: () => clock.value
+    });
+
+    const googleRequest = await service.createAuthorizationRequest({
+      provider: "GOOGLE",
+      authenticatedUserId: null
+    });
+    const first = await service.completeAuthorization({
+      provider: "GOOGLE",
+      state: googleRequest.state,
+      code: "postgres-gmail-code",
+      authenticatedUserId: null,
+      clientContext: { ipAddress: "127.0.0.1" }
+    });
+    const userId = first.login?.user.id;
+    expect(userId).toBeTypeOf("string");
+    if (!userId) throw new Error("owner_onboarding_user_missing");
+    await expect(database.team.count()).resolves.toBe(0);
+    await expect(database.subscription.count()).resolves.toBe(0);
+    await expect(database.mailConnection.count()).resolves.toBe(0);
+
+    const microsoftRequest = await service.createAuthorizationRequest({
+      provider: "MICROSOFT",
+      authenticatedUserId: userId
+    });
+    const second = await service.completeAuthorization({
+      provider: "MICROSOFT",
+      state: microsoftRequest.state,
+      code: "postgres-microsoft-code",
+      authenticatedUserId: userId,
+      clientContext: { ipAddress: "127.0.0.1" }
+    });
+    expect(second.login).toBeNull();
+    expect(second.onboarding?.choices).toHaveLength(2);
+    await expect(
+      database.externalIdentity.count({ where: { userId } })
+    ).resolves.toBe(2);
+    await expect(database.user.count()).resolves.toBe(1);
+
+    const purchased = await service.completeDemoPurchase({
+      userId,
+      onboardingId: second.onboarding?.id ?? "",
+      keywords: ["停電のお知らせ", "Call Now"],
+      seatCount: 3
+    });
+    expect(purchased.team).toMatchObject({
+      role: "OWNER",
+      currentTermAmountYen: 6200,
+      seatSummary: { seatLimit: 2, activeMemberCount: 0 }
+    });
+    await expect(
+      database.teamMembership.count({
+        where: { userId, role: "OWNER", status: "ACTIVE" }
+      })
+    ).resolves.toBe(1);
+    await expect(database.subscription.count()).resolves.toBe(1);
+    await expect(database.mailConnection.count()).resolves.toBe(0);
+
+    const purchasedOnboarding = await service.getCurrent(userId);
+    const googleChoice = purchasedOnboarding?.choices.find(
+      ({ provider }) => provider === "GOOGLE"
+    );
+    const microsoftChoice = purchasedOnboarding?.choices.find(
+      ({ provider }) => provider === "MICROSOFT"
+    );
+    await service.activateChoice({
+      userId,
+      choiceId: googleChoice?.id ?? "",
+      requestId: "postgres-owner-activate"
+    });
+    const completed = await service.deferChoice(
+      userId,
+      microsoftChoice?.id ?? ""
+    );
+    expect(completed.status).toBe("COMPLETED");
+    await expect(
+      database.mailConnection.findMany({
+        select: { status: true },
+        orderBy: { createdAt: "asc" }
+      })
+    ).resolves.toEqual([{ status: "ACTIVE" }]);
+    await expect(
+      service.completeDemoPurchase({
+        userId,
+        onboardingId: completed.id,
+        keywords: ["ignored"],
+        seatCount: 9
+      })
+    ).resolves.toMatchObject({
+      team: { teamId: purchased.team.teamId, currentTermAmountYen: 6200 }
+    });
+    await expect(database.team.count()).resolves.toBe(1);
+    await expect(database.subscription.count()).resolves.toBe(1);
+
+    const storedAuthorization =
+      await database.mailAuthorization.findFirstOrThrow({
+        where: { userId, provider: "GOOGLE" }
+      });
+    expect(storedAuthorization.encryptedRefreshToken).not.toContain(
+      google.refreshToken
+    );
+
+    const restoreRequest = await service.createAuthorizationRequest({
+      provider: "GOOGLE",
+      authenticatedUserId: null
+    });
+    const restored = await service.completeAuthorization({
+      provider: "GOOGLE",
+      state: restoreRequest.state,
+      code: "postgres-gmail-code",
+      authenticatedUserId: null,
+      clientContext: { ipAddress: "127.0.0.1" }
+    });
+    expect(restored).toMatchObject({
+      hasExistingTeam: true,
+      onboarding: null,
+      login: { user: { id: userId } }
+    });
+    await expect(database.user.count()).resolves.toBe(1);
+    await expect(database.team.count()).resolves.toBe(1);
+    expect(google.revokedTokens).toEqual([]);
+  });
+
+  it("expires and locally disables abandoned owner onboarding grants", async () => {
+    const clock = { value: new Date("2026-08-29T01:00:00.000Z") };
+    const authRepository = new PrismaAuthRepository(database);
+    const authService = new AuthService({
+      repository: authRepository,
+      emailSender: { sendMagicLink: async () => undefined },
+      publicOrigin: "https://acceptance.call-now.example",
+      tokenPepper: testPepper,
+      magicLinkTtlMinutes: 15,
+      sessionIdleDays: 30,
+      sessionAbsoluteDays: 90,
+      maxActiveSessions: 5,
+      now: () => clock.value
+    });
+    const google = new PostgresMailProviderAdapter("GOOGLE");
+    const service = new OwnerOnboardingService({
+      repository: new PrismaOwnerOnboardingRepository(database),
+      authRepository,
+      authService,
+      teamService: new TeamService({
+        repository: new PrismaTeamRepository(database),
+        now: () => clock.value,
+        teamCodeGenerator: () => "482798"
+      }),
+      providerAdapters: [google],
+      tokenEncryption: new LocalAesGcmTokenEncryptionProvider(
+        Buffer.alloc(32, 11).toString("base64"),
+        "postgres-owner-cleanup-v1"
+      ),
+      tokenPepper: testPepper,
+      stateTtlMinutes: { GOOGLE: 10, MICROSOFT: 10 },
+      onboardingTtlHours: 168,
+      now: () => clock.value
+    });
+    const request = await service.createAuthorizationRequest({
+      provider: "GOOGLE",
+      authenticatedUserId: null
+    });
+    const result = await service.completeAuthorization({
+      provider: "GOOGLE",
+      state: request.state,
+      code: "postgres-gmail-code",
+      authenticatedUserId: null,
+      clientContext: {}
+    });
+    const userId = result.login?.user.id;
+    if (!userId) throw new Error("owner_onboarding_user_missing");
+    clock.value = new Date("2026-09-06T01:00:01.000Z");
+    await service.cleanupExpired();
+
+    await expect(
+      database.ownerOnboarding.findUniqueOrThrow({
+        where: { userId },
+        select: { status: true, abandonedAt: true }
+      })
+    ).resolves.toMatchObject({ status: "EXPIRED", abandonedAt: clock.value });
+    await expect(
+      database.mailAuthorization.findFirstOrThrow({
+        where: { userId },
+        select: { status: true, encryptedRefreshToken: true }
+      })
+    ).resolves.toEqual({ status: "REVOKED", encryptedRefreshToken: null });
+    expect(google.revokedTokens).toEqual([google.refreshToken]);
   });
 
   it("admits only five members to five seats and returns 409 for the loser", async () => {

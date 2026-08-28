@@ -128,6 +128,7 @@ enum AlertRecipientStatus {
 
 enum MailConnectionStatus {
   ACTIVE
+  PAUSED
   REAUTH_REQUIRED
   REVOKED
   ERROR
@@ -138,6 +139,21 @@ enum MailAuthorizationStatus {
   REAUTH_REQUIRED
   REVOKED
   ERROR
+}
+
+enum OwnerOnboardingStatus {
+  PENDING
+  PURCHASED
+  COMPLETED
+  EXPIRED
+  ABANDONED
+}
+
+enum OnboardingMailChoiceStatus {
+  AUTHORIZED
+  ACTIVATED
+  DEFERRED
+  SKIPPED
 }
 
 enum OwnerTransferStatus {
@@ -172,6 +188,7 @@ model User {
   mailAuthorizations      MailAuthorization[]
   alertRecipients         AlertRecipient[]
   acknowledgedAlerts      Alert[]                @relation("AlertAcknowledgedByUser")
+  ownerOnboarding         OwnerOnboarding?
 
   @@map("users")
 }
@@ -286,6 +303,7 @@ model Team {
   alerts          Alert[]
   ownerTransfers  OwnerTransfer[]
   auditEvents     AuditEvent[]
+  ownerOnboarding OwnerOnboarding?
 
   @@map("teams")
 }
@@ -500,11 +518,49 @@ model MailAuthorization {
   updatedAt             DateTime                 @updatedAt @db.Timestamptz(3)
   user                  User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
   connections           MailConnection[]
+  onboardingChoices     OnboardingMailChoice[]
 
   @@unique([provider, providerSubject])
   @@index([userId, status, revokedAt])
   @@index([status, revokedAt])
   @@map("mail_authorizations")
+}
+
+model OwnerOnboarding {
+  id          String                @id @default(uuid()) @db.Uuid
+  userId      String                @unique @db.Uuid
+  teamId      String?               @unique @db.Uuid
+  status      OwnerOnboardingStatus @default(PENDING)
+  seatCount   Int?
+  keywords    String[]              @default([])
+  expiresAt   DateTime              @db.Timestamptz(3)
+  purchasedAt DateTime?             @db.Timestamptz(3)
+  completedAt DateTime?             @db.Timestamptz(3)
+  abandonedAt DateTime?             @db.Timestamptz(3)
+  createdAt   DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime              @updatedAt @db.Timestamptz(3)
+  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team        Team?                 @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  choices     OnboardingMailChoice[]
+
+  @@index([status, expiresAt])
+  @@map("owner_onboardings")
+}
+
+model OnboardingMailChoice {
+  id                  String                       @id @default(uuid()) @db.Uuid
+  onboardingId        String                       @db.Uuid
+  provider            MailProvider
+  mailAuthorizationId String?                      @db.Uuid
+  status              OnboardingMailChoiceStatus
+  createdAt           DateTime                     @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime                     @updatedAt @db.Timestamptz(3)
+  onboarding          OwnerOnboarding              @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
+  mailAuthorization   MailAuthorization?           @relation(fields: [mailAuthorizationId], references: [id], onDelete: SetNull)
+
+  @@unique([onboardingId, provider])
+  @@index([mailAuthorizationId])
+  @@map("onboarding_mail_choices")
 }
 
 model MailConnection {

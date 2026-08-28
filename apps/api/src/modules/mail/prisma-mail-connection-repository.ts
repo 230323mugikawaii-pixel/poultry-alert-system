@@ -450,6 +450,101 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
     );
   }
 
+  public setMonitoringState(input: {
+    readonly teamId: string;
+    readonly ownerUserId: string;
+    readonly connectionId: string;
+    readonly status: "ACTIVE" | "PAUSED";
+    readonly requestId: string | null;
+    readonly now: Date;
+  }): Promise<MailConnectionRecord> {
+    return retrySerializableTransaction(
+      () =>
+        this.database.$transaction(
+          async (transaction) => {
+            await this.assertOwner(
+              transaction,
+              input.teamId,
+              input.ownerUserId
+            );
+            const connection = await transaction.mailConnection.findFirst({
+              where: {
+                id: input.connectionId,
+                teamId: input.teamId,
+                status: { not: "REVOKED" }
+              },
+              include: { mailAuthorization: true }
+            });
+            if (!connection) {
+              throw new AppError(
+                "MAIL_CONNECTION_NOT_FOUND",
+                "メール監視アカウントが見つかりません。",
+                404
+              );
+            }
+            if (
+              input.status === "ACTIVE" &&
+              connection.mailAuthorization.status !== "ACTIVE"
+            ) {
+              throw new AppError(
+                "MAIL_REAUTHORIZATION_REQUIRED",
+                "監視を再開するにはメールアカウントの再設定が必要です。",
+                409
+              );
+            }
+            if (
+              (input.status === "PAUSED" &&
+                !["ACTIVE", "PAUSED"].includes(connection.status)) ||
+              (input.status === "ACTIVE" &&
+                !["ACTIVE", "PAUSED"].includes(connection.status))
+            ) {
+              throw new AppError(
+                "MAIL_CONNECTION_STATE_INVALID",
+                "現在の状態では監視状態を変更できません。",
+                409
+              );
+            }
+            const updated = await transaction.mailConnection.update({
+              where: { id: connection.id },
+              data: {
+                status: input.status,
+                ...(input.status === "ACTIVE"
+                  ? { lastErrorCode: null, revokedAt: null }
+                  : {})
+              },
+              include: { mailAuthorization: true }
+            });
+            if (connection.status !== input.status) {
+              await transaction.auditEvent.create({
+                data: {
+                  teamId: input.teamId,
+                  actorUserId: input.ownerUserId,
+                  action:
+                    input.status === "ACTIVE"
+                      ? "MAIL_MONITORING_RESUMED"
+                      : "MAIL_MONITORING_PAUSED",
+                  targetType: "MailConnection",
+                  targetId: connection.id,
+                  requestId: input.requestId,
+                  metadata: {
+                    provider: connection.mailAuthorization.provider
+                  }
+                }
+              });
+            }
+            return mapConnection(updated);
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
+      () =>
+        new AppError(
+          "MAIL_MONITORING_STATE_CONFLICT",
+          "監視状態の変更が競合しました。もう一度お試しください。",
+          409
+        )
+    );
+  }
+
   public async markAuthorizationFailure(input: {
     readonly authorizationId: string;
     readonly status: "REAUTH_REQUIRED" | "ERROR";

@@ -1,10 +1,16 @@
 import { timingSafeEqual } from "node:crypto";
 import type { FastifyPluginAsyncTypebox } from "@fastify/type-provider-typebox";
+import type { FastifyReply } from "fastify";
 import { Type } from "@sinclair/typebox";
 import type { AppEnvironment } from "../../config/env.js";
 import { AppError } from "../../lib/app-error.js";
 import type { AuthService } from "../auth/auth-service.js";
-import { usesSecureCookies } from "../auth/session-cookie.js";
+import { setSessionCookie, usesSecureCookies } from "../auth/session-cookie.js";
+import {
+  ownerOnboardingResultUrl,
+  ownerOnboardingStateCookie
+} from "../onboarding/owner-onboarding-routes.js";
+import type { OwnerOnboardingService } from "../onboarding/owner-onboarding-service.js";
 import type { SecurityThrottleService } from "../security/security-throttle-service.js";
 import type { TeamService } from "../teams/team-service.js";
 import type { MailConnectionRecord } from "./mail-connection-repository.js";
@@ -52,6 +58,7 @@ const ConnectionResponse = Type.Object({
   ]),
   connectionStatus: Type.Union([
     Type.Literal("ACTIVE"),
+    Type.Literal("PAUSED"),
     Type.Literal("REAUTH_REQUIRED"),
     Type.Literal("REVOKED"),
     Type.Literal("ERROR")
@@ -67,7 +74,8 @@ export function createMailConnectionRoutes(
   teamService: TeamService,
   mailConnectionService: MailConnectionService,
   securityThrottle: SecurityThrottleService,
-  environment: AppEnvironment
+  environment: AppEnvironment,
+  ownerOnboardingService?: OwnerOnboardingService
 ): FastifyPluginAsyncTypebox {
   return async (app) => {
     if (!app.hasContentTypeParser("application/x-www-form-urlencoded")) {
@@ -320,10 +328,88 @@ export function createMailConnectionRoutes(
 
     const handleCallback = async (
       request: CallbackRequest,
-      reply: CallbackReply,
+      reply: FastifyReply,
       provider: MailProviderId
     ): Promise<void> => {
       const state = request.query.state ?? "";
+      const onboardingCookie = ownerOnboardingStateCookie(
+        environment,
+        provider
+      );
+      const onboardingCookieState =
+        request.cookies[onboardingCookie.name] ?? "";
+      if (onboardingCookieState) {
+        reply.clearCookie(onboardingCookie.name, {
+          path: onboardingCookie.path
+        });
+        if (
+          request.query.error ||
+          !request.query.code ||
+          !state ||
+          !safeEqual(state, onboardingCookieState) ||
+          !ownerOnboardingService
+        ) {
+          await reply.redirect(
+            ownerOnboardingResultUrl(environment, "error", provider)
+          );
+          return;
+        }
+        try {
+          const authenticatedUserId = await optionalAuthenticatedUserId(
+            request.cookies,
+            authService,
+            environment
+          );
+          await securityThrottle.consume([
+            throttleRule(
+              "owner_onboarding_callback_global",
+              ["all"],
+              2_000,
+              1,
+              5
+            ),
+            throttleRule(
+              "owner_onboarding_callback_source",
+              [request.ip],
+              30,
+              15,
+              15
+            ),
+            throttleRule("owner_onboarding_callback_state", [state], 3, 15, 15)
+          ]);
+          const result = await ownerOnboardingService.completeAuthorization({
+            provider,
+            state,
+            code: request.query.code,
+            authenticatedUserId,
+            clientContext: {
+              ipAddress: request.ip,
+              ...(typeof request.headers["user-agent"] === "string"
+                ? { userAgent: request.headers["user-agent"] }
+                : {})
+            }
+          });
+          if (result.login) {
+            setSessionCookie(reply, environment, result.login.sessionToken);
+          }
+          await reply.redirect(
+            ownerOnboardingResultUrl(environment, "success", provider)
+          );
+        } catch (error) {
+          const code =
+            error instanceof AppError
+              ? error.code
+              : "OWNER_ONBOARDING_CALLBACK_FAILED";
+          request.log.warn(
+            { code, provider },
+            "Owner onboarding authorization callback failed"
+          );
+          await reply.redirect(
+            ownerOnboardingResultUrl(environment, "error", provider)
+          );
+        }
+        return;
+      }
       const stateCookie = stateCookieConfiguration(environment, provider);
       const cookieState = request.cookies[stateCookie.name] ?? "";
       reply.clearCookie(stateCookie.name, { path: stateCookie.path });
@@ -410,6 +496,46 @@ export function createMailConnectionRoutes(
       { schema: { params: ConnectionParams } },
       disconnect
     );
+
+    const setMonitoringState = async (
+      request: DisconnectRequest,
+      status: "ACTIVE" | "PAUSED"
+    ) => {
+      requireSameOrigin(request);
+      const userId = await authenticateUserId(request);
+      await teamService.requireOwnerForTeam(userId, request.params.teamId);
+      return serializeConnection(
+        await mailConnectionService.setMonitoringState({
+          teamId: request.params.teamId,
+          ownerUserId: userId,
+          connectionId: request.params.connectionId,
+          status,
+          requestId: request.id
+        })
+      );
+    };
+
+    app.post(
+      "/api/v1/teams/:teamId/mail-connections/:connectionId/pause",
+      {
+        schema: {
+          params: ConnectionParams,
+          response: { 200: ConnectionResponse }
+        }
+      },
+      async (request) => setMonitoringState(request, "PAUSED")
+    );
+
+    app.post(
+      "/api/v1/teams/:teamId/mail-connections/:connectionId/resume",
+      {
+        schema: {
+          params: ConnectionParams,
+          response: { 200: ConnectionResponse }
+        }
+      },
+      async (request) => setMonitoringState(request, "ACTIVE")
+    );
   };
 }
 
@@ -448,12 +574,8 @@ interface CallbackRequest {
     readonly error?: string;
   };
   readonly cookies: Readonly<Record<string, string | undefined>>;
+  readonly headers: Readonly<Record<string, string | string[] | undefined>>;
   readonly log: { warn(data: object, message: string): unknown };
-}
-
-interface CallbackReply {
-  clearCookie(name: string, options: object): unknown;
-  redirect(url: string): unknown;
 }
 
 function serializeConnection(connection: MailConnectionRecord) {
@@ -510,6 +632,20 @@ function safeEqual(first: string, second: string): boolean {
     firstBuffer.length === secondBuffer.length &&
     timingSafeEqual(firstBuffer, secondBuffer)
   );
+}
+
+async function optionalAuthenticatedUserId(
+  cookies: Readonly<Record<string, string | undefined>>,
+  authService: AuthService,
+  environment: AppEnvironment
+): Promise<string | null> {
+  const token = cookies[environment.COOKIE_NAME];
+  if (!token) return null;
+  try {
+    return (await authService.authenticate(token)).user.id;
+  } catch {
+    return null;
+  }
 }
 
 function throttleRule(

@@ -736,6 +736,35 @@ describe("Gmail connection routes", () => {
     expect(googleConnection?.id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
     );
+    const memberPause = await app.inject({
+      method: "POST",
+      url: `/api/v1/teams/${team.teamId}/mail-connections/${googleConnection?.id}/pause`,
+      headers: {
+        origin: environment.PUBLIC_ORIGIN,
+        cookie: sessionCookie(member.sessionToken)
+      }
+    });
+    expect(memberPause.statusCode).toBe(403);
+    const paused = await app.inject({
+      method: "POST",
+      url: `/api/v1/teams/${team.teamId}/mail-connections/${googleConnection?.id}/pause`,
+      headers: {
+        origin: environment.PUBLIC_ORIGIN,
+        cookie: sessionCookie(owner.sessionToken)
+      }
+    });
+    expect(paused.statusCode, paused.body).toBe(200);
+    expect(paused.json()).toMatchObject({ connectionStatus: "PAUSED" });
+    const resumed = await app.inject({
+      method: "POST",
+      url: `/api/v1/teams/${team.teamId}/mail-connections/${googleConnection?.id}/resume`,
+      headers: {
+        origin: environment.PUBLIC_ORIGIN,
+        cookie: sessionCookie(owner.sessionToken)
+      }
+    });
+    expect(resumed.statusCode, resumed.body).toBe(200);
+    expect(resumed.json()).toMatchObject({ connectionStatus: "ACTIVE" });
     const disconnected = await app.inject({
       method: "DELETE",
       url: `/api/v1/teams/${team.teamId}/mail-connections/${googleConnection?.id}`,

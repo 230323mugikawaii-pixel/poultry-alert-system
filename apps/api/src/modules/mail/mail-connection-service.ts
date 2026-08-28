@@ -203,6 +203,23 @@ export class MailConnectionService {
     await this.revokeObsoleteToken(result.tokenToRevoke);
   }
 
+  public setMonitoringState(input: {
+    readonly teamId: string;
+    readonly ownerUserId: string;
+    readonly connectionId: string;
+    readonly status: "ACTIVE" | "PAUSED";
+    readonly requestId?: string;
+  }): Promise<MailConnectionRecord> {
+    return this.options.repository.setMonitoringState({
+      teamId: input.teamId,
+      ownerUserId: input.ownerUserId,
+      connectionId: input.connectionId,
+      status: input.status,
+      requestId: input.requestId ?? null,
+      now: this.now()
+    });
+  }
+
   public async markProviderFailure(input: {
     readonly authorizationId: string;
     readonly provider: MailProviderId;

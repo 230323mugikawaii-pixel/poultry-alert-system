@@ -117,6 +117,58 @@ export class TeamService {
     );
   }
 
+  public async completeOwnerOnboardingPurchase(input: {
+    readonly userId: string;
+    readonly onboardingId: string;
+    readonly keywords: readonly string[];
+    readonly seatCount: number;
+  }): Promise<TeamCreationResult> {
+    if (
+      !Number.isInteger(input.seatCount) ||
+      input.seatCount < 1 ||
+      input.seatCount > 101
+    ) {
+      throw new AppError(
+        "INVALID_SEAT_CONFIGURATION",
+        "利用人数は1〜101人で設定してください。",
+        400
+      );
+    }
+    const seatLimit = input.seatCount - 1;
+    calculateSeatSummary(seatLimit, 0);
+    const keywords = normalizeTeamKeywords(input.keywords);
+    const now = this.now();
+    const termEnd = new Date(now);
+    termEnd.setUTCFullYear(termEnd.getUTCFullYear() + 1);
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        return await this.options.repository.completeOwnerOnboardingPurchase({
+          onboardingId: input.onboardingId,
+          ownerUserId: input.userId,
+          publicCode: this.teamCodeGenerator(),
+          name: null,
+          seatLimit,
+          keywords,
+          currentTermStartedAt: now,
+          currentTermEndsAt: termEnd,
+          currentTermAmountYen: calculateAnnualPriceYen(
+            seatLimit,
+            keywords.length
+          ),
+          initialInvitation: null
+        });
+      } catch (error) {
+        if (!isTeamCodeConflict(error)) throw error;
+      }
+    }
+    throw new AppError(
+      "TEAM_CODE_GENERATION_FAILED",
+      "初期設定を完了できませんでした。もう一度お試しください。",
+      503
+    );
+  }
+
   public async getCurrentTeam(userId: string): Promise<TeamContextRecord> {
     const context = await this.options.repository.findCurrentTeam(userId);
     if (!context) {

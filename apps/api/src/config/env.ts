@@ -70,6 +70,9 @@ const EnvironmentSchema = Type.Object({
     minimum: 5,
     maximum: 30
   }),
+  OWNER_ONBOARDING_TTL_HOURS: Type.Optional(
+    Type.Integer({ minimum: 24, maximum: 720 })
+  ),
   MAIL_TOKEN_ENCRYPTION_PROVIDER: Type.Union([
     Type.Literal("local"),
     Type.Literal("gcp-kms")
@@ -161,6 +164,9 @@ export function loadEnvironment(
     MICROSOFT_OAUTH_TENANT: source.MICROSOFT_OAUTH_TENANT ?? "common",
     MICROSOFT_OAUTH_STATE_TTL_MINUTES: Number(
       source.MICROSOFT_OAUTH_STATE_TTL_MINUTES ?? "10"
+    ),
+    OWNER_ONBOARDING_TTL_HOURS: Number(
+      source.OWNER_ONBOARDING_TTL_HOURS ?? "168"
     ),
     MAIL_TOKEN_ENCRYPTION_PROVIDER:
       source.MAIL_TOKEN_ENCRYPTION_PROVIDER ??
