@@ -1953,6 +1953,14 @@ body.app-dialog-open {
   font-weight: 800;
 }
 
+.guest-home-status {
+  padding: 12px 14px;
+  border-radius: 12px;
+  color: #8a5a00;
+  background: #fff4d6;
+  font-weight: 800;
+}
+
 .guest-home-card .btn + .btn {
   margin-top: 12px;
 }

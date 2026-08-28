@@ -24,6 +24,7 @@ test("frontend authentication uses the server session API", () => {
   assert.doesNotMatch(htmlSource, /ログインしてホームへ/);
   assert.doesNotMatch(htmlSource, /id="landingScreen"/);
   assert.match(htmlSource, /id="guestHomeScreen"/);
+  assert.match(htmlSource, /まだ設定されていません/);
   assert.match(appSource, /\/api\/v1\/notification-members\/me/);
   assert.match(appSource, /\/api\/v1\/notification-members\/login/);
 });
