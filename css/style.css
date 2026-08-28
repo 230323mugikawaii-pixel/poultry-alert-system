@@ -1987,6 +1987,89 @@ body.app-dialog-open {
   margin-top: 24px;
 }
 
+.member-alert-card {
+  margin-top: 20px;
+}
+
+.alert-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.alert-card-heading p {
+  margin-bottom: 0;
+  color: var(--subtext);
+}
+
+.alert-stream-status {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: #176a3a;
+  background: #e8f7ee;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.alert-stream-status.reconnecting {
+  color: #8a5a00;
+  background: #fff4d6;
+}
+
+.alert-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.alert-list-empty {
+  margin: 0;
+  padding: 16px;
+  border-radius: 14px;
+  color: var(--subtext);
+  background: #f5f8fc;
+}
+
+.alert-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid #d8e2ef;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.alert-list-item.active {
+  border-color: #f2b7b7;
+  background: #fff8f8;
+}
+
+.alert-list-item h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.alert-list-meta,
+.alert-list-status {
+  margin: 4px 0 0;
+  color: var(--subtext);
+  font-size: 0.9rem;
+}
+
+.alert-list-status {
+  font-weight: 800;
+}
+
+.alert-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+
 .member-management-card {
   margin-top: 24px;
 }
@@ -2070,7 +2153,8 @@ body.app-dialog-open {
   }
 
   .member-management-heading,
-  .notification-member-item {
+  .notification-member-item,
+  .alert-list-item {
     grid-template-columns: 1fr;
     display: grid;
   }
@@ -2080,6 +2164,14 @@ body.app-dialog-open {
   }
 
   .notification-member-actions {
+    flex-wrap: wrap;
+  }
+
+  .alert-card-heading {
+    display: grid;
+  }
+
+  .alert-list-actions {
     flex-wrap: wrap;
   }
 
