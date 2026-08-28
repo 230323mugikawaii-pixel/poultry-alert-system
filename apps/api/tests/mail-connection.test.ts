@@ -353,7 +353,9 @@ describe("MailConnectionService", () => {
       authorizationStatus: "ACTIVE",
       connectionStatus: "ACTIVE"
     });
-    const stored = fixture.repository.authorizations.get("owner-user-id");
+    const stored = [...fixture.repository.authorizations.values()].find(
+      (authorization) => authorization.userId === "owner-user-id"
+    );
     expect(stored?.token?.ciphertext).not.toContain(syntheticRefreshToken);
     await expect(
       fixture.service.completeAuthorization({
@@ -457,7 +459,8 @@ describe("MailConnectionService", () => {
       "owner-user-id",
       "team-id",
       "REAUTHORIZE",
-      "GOOGLE"
+      "GOOGLE",
+      connected.id
     );
     await fixture.service.completeAuthorization({
       provider: "GOOGLE",
@@ -472,7 +475,7 @@ describe("MailConnectionService", () => {
       provider: "GOOGLE",
       error: { code: "invalid_grant" }
     });
-    expect(fixture.repository.connections.get("team-id")).toMatchObject({
+    expect(fixture.repository.connections.get(connected.id)).toMatchObject({
       authorizationStatus: "REAUTH_REQUIRED",
       connectionStatus: "REAUTH_REQUIRED",
       lastErrorCode: "REAUTHORIZATION_REQUIRED"
@@ -480,13 +483,14 @@ describe("MailConnectionService", () => {
 
     await fixture.service.disconnect({
       teamId: "team-id",
-      ownerUserId: "owner-user-id"
+      ownerUserId: "owner-user-id",
+      connectionId: connected.id
     });
-    expect(fixture.repository.connections.get("team-id")).toMatchObject({
+    expect(fixture.repository.connections.get(connected.id)).toMatchObject({
       connectionStatus: "REVOKED"
     });
     expect(
-      fixture.repository.authorizations.get("owner-user-id")?.token
+      fixture.repository.authorizations.get(connected.authorizationId)?.token
     ).toBeNull();
     expect(fixture.provider.revokedTokens).toContain(
       `${syntheticRefreshToken}-rotated`
@@ -501,7 +505,7 @@ describe("MailConnectionService", () => {
       "CONNECT",
       "GOOGLE"
     );
-    await fixture.service.completeAuthorization({
+    const connected = await fixture.service.completeAuthorization({
       provider: "GOOGLE",
       state: first.state,
       code: "valid-gmail-code",
@@ -511,7 +515,8 @@ describe("MailConnectionService", () => {
       "owner-user-id",
       "team-id",
       "REAUTHORIZE",
-      "GOOGLE"
+      "GOOGLE",
+      connected.id
     );
     await fixture.service.completeAuthorization({
       provider: "GOOGLE",
@@ -686,38 +691,70 @@ describe("Gmail connection routes", () => {
     expect(microsoftCallback.headers.location).toBe(
       `${environment.PUBLIC_ORIGIN}/?mailAuth=success&mailProvider=MICROSOFT`
     );
-    const switchedView = await app.inject({
+    const connectionsView = await app.inject({
       method: "GET",
-      url: `/api/v1/teams/${team.teamId}/mail-connection`,
+      url: `/api/v1/teams/${team.teamId}/mail-connections`,
       headers: { cookie: sessionCookie(owner.sessionToken) }
     });
-    expect(switchedView.json()).toMatchObject({
-      connection: {
-        provider: "MICROSOFT",
-        email: "monitoring@outlook.example",
-        connectionStatus: "ACTIVE"
-      }
-    });
-    expect(provider.revokedTokens).toContain(syntheticRefreshToken);
+    const activeConnections = connectionsView.json<{
+      connections: Array<{
+        id: string;
+        provider: string;
+        email: string;
+        connectionStatus: string;
+      }>;
+    }>().connections;
+    expect(activeConnections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provider: "GOOGLE",
+          email: "monitoring@example.com",
+          connectionStatus: "ACTIVE"
+        }),
+        expect.objectContaining({
+          provider: "MICROSOFT",
+          email: "monitoring@outlook.example",
+          connectionStatus: "ACTIVE"
+        })
+      ])
+    );
+    expect(activeConnections).toHaveLength(2);
+    expect(provider.revokedTokens).toHaveLength(0);
 
     const memberView = await app.inject({
       method: "GET",
-      url: `/api/v1/teams/${team.teamId}/mail-connection`,
+      url: `/api/v1/teams/${team.teamId}/mail-connections`,
       headers: { cookie: sessionCookie(member.sessionToken) }
     });
     expect(memberView.statusCode).toBe(403);
     expect(memberView.body).not.toContain("monitoring@example.com");
 
+    const googleConnection = activeConnections.find(
+      ({ provider }) => provider === "GOOGLE"
+    );
+    expect(googleConnection).toBeDefined();
+    expect(googleConnection?.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+    );
     const disconnected = await app.inject({
       method: "DELETE",
-      url: `/api/v1/teams/${team.teamId}/mail-connection`,
+      url: `/api/v1/teams/${team.teamId}/mail-connections/${googleConnection?.id}`,
       headers: {
         origin: environment.PUBLIC_ORIGIN,
         cookie: sessionCookie(owner.sessionToken)
       }
     });
-    expect(disconnected.statusCode).toBe(204);
-    expect(microsoftProvider.revokedTokens).toContain(syntheticRefreshToken);
+    expect(disconnected.statusCode, disconnected.body).toBe(204);
+    expect(provider.revokedTokens).toContain(syntheticRefreshToken);
+    expect(microsoftProvider.revokedTokens).toHaveLength(0);
+    const remaining = await app.inject({
+      method: "GET",
+      url: `/api/v1/teams/${team.teamId}/mail-connections`,
+      headers: { cookie: sessionCookie(owner.sessionToken) }
+    });
+    expect(remaining.json()).toMatchObject({
+      connections: [{ provider: "MICROSOFT", connectionStatus: "ACTIVE" }]
+    });
     await app.close();
   });
 

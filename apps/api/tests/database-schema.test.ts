@@ -44,9 +44,11 @@ describe("database foundation", () => {
 
     expect(mailAuthorization).toContain("userId");
     expect(mailAuthorization).toContain("encryptedRefreshToken");
-    expect(mailAuthorization).toMatch(/userId\s+String\s+@unique/);
+    expect(mailAuthorization).not.toMatch(/userId\s+String\s+@unique/);
+    expect(mailAuthorization).toContain("@@index([userId, status, revokedAt])");
     expect(mailConnection).toContain("teamId");
     expect(mailConnection).toContain("mailAuthorizationId");
+    expect(mailConnection).toContain("@@unique([teamId, mailAuthorizationId])");
     expect(mailConnection).not.toContain("encryptedRefreshToken");
     expect(schema).toContain("GMAIL_OAUTH");
     expect(schema).toContain("MICROSOFT_MAIL_OAUTH");

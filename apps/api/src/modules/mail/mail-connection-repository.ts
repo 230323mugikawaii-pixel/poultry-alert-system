@@ -13,6 +13,7 @@ export interface MailOAuthChallengeRecord {
   readonly nonce: string;
   readonly intent: MailOAuthIntent;
   readonly provider: MailProviderId;
+  readonly connectionId: string | null;
 }
 
 export interface MailConnectionRecord {
@@ -52,6 +53,7 @@ export interface MailConnectionRepository {
     readonly nonce: string;
     readonly intent: MailOAuthIntent;
     readonly provider: MailProviderId;
+    readonly connectionId: string | null;
     readonly expiresAt: Date;
     readonly now: Date;
   }): Promise<void>;
@@ -60,9 +62,14 @@ export interface MailConnectionRepository {
     expectedUserId: string,
     now: Date
   ): Promise<MailOAuthChallengeRecord | null>;
-  findConnection(
+  listConnections(
     teamId: string,
     ownerUserId: string
+  ): Promise<readonly MailConnectionRecord[]>;
+  findConnectionById(
+    teamId: string,
+    ownerUserId: string,
+    connectionId: string
   ): Promise<MailConnectionRecord | null>;
   saveGrant(input: {
     readonly teamId: string;
@@ -73,12 +80,14 @@ export interface MailConnectionRepository {
     readonly encryptedToken: StoredEncryptedToken;
     readonly grantedScopes: readonly string[];
     readonly intent: MailOAuthIntent;
+    readonly connectionId: string | null;
     readonly requestId: string | null;
     readonly now: Date;
   }): Promise<MailGrantPersistenceResult>;
   disconnect(input: {
     readonly teamId: string;
     readonly ownerUserId: string;
+    readonly connectionId?: string;
     readonly requestId: string | null;
     readonly now: Date;
   }): Promise<MailDisconnectResult>;

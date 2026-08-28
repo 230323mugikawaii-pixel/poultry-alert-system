@@ -42,11 +42,16 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
     readonly nonce: string;
     readonly intent: MailOAuthIntent;
     readonly provider: MailProviderId;
+    readonly connectionId: string | null;
     readonly expiresAt: Date;
     readonly now: Date;
   }): Promise<void> {
     for (const challenge of this.challenges) {
-      if (challenge.userId === input.userId && !challenge.consumedAt) {
+      if (
+        challenge.userId === input.userId &&
+        challenge.provider === input.provider &&
+        !challenge.consumedAt
+      ) {
         challenge.consumedAt = input.now;
       }
     }
@@ -58,6 +63,7 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
       nonce: input.nonce,
       intent: input.intent,
       provider: input.provider,
+      connectionId: input.connectionId,
       expiresAt: input.expiresAt,
       consumedAt: null
     });
@@ -83,13 +89,27 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
     return challenge;
   }
 
-  public async findConnection(
+  public async listConnections(
     teamId: string,
     ownerUserId: string
+  ): Promise<readonly MailConnectionRecord[]> {
+    void ownerUserId;
+    return [...this.connections.values()].filter(
+      (connection) =>
+        connection.teamId === teamId &&
+        connection.connectionStatus !== "REVOKED"
+    );
+  }
+
+  public async findConnectionById(
+    teamId: string,
+    ownerUserId: string,
+    connectionId: string
   ): Promise<MailConnectionRecord | null> {
-    const authorization = this.authorizations.get(ownerUserId);
-    const connection = this.connections.get(teamId);
-    return authorization && connection?.authorizationId === authorization.id
+    void ownerUserId;
+    const connection = this.connections.get(connectionId);
+    return connection?.teamId === teamId &&
+      connection.connectionStatus !== "REVOKED"
       ? connection
       : null;
   }
@@ -103,6 +123,7 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
     readonly encryptedToken: StoredEncryptedToken;
     readonly grantedScopes: readonly string[];
     readonly intent: MailOAuthIntent;
+    readonly connectionId: string | null;
     readonly requestId: string | null;
     readonly now: Date;
   }) {
@@ -115,7 +136,32 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
     if (duplicate) {
       throw new AppError("MAIL_ACCOUNT_ALREADY_IN_USE", "duplicate", 409);
     }
-    const existing = this.authorizations.get(input.ownerUserId);
+    const targetConnection = input.connectionId
+      ? this.connections.get(input.connectionId)
+      : undefined;
+    if (
+      input.intent === "REAUTHORIZE" &&
+      (!targetConnection || targetConnection.teamId !== input.teamId)
+    ) {
+      throw new AppError("MAIL_CONNECTION_NOT_FOUND", "missing", 404);
+    }
+    const subjectAuthorization = [...this.authorizations.values()].find(
+      (authorization) =>
+        authorization.userId === input.ownerUserId &&
+        authorization.provider === input.provider &&
+        authorization.subject === input.providerSubject
+    );
+    const targetAuthorization = targetConnection
+      ? this.authorizations.get(targetConnection.authorizationId)
+      : undefined;
+    if (
+      targetAuthorization &&
+      (targetAuthorization.provider !== input.provider ||
+        targetAuthorization.subject !== input.providerSubject)
+    ) {
+      throw new AppError("MAIL_REAUTH_ACCOUNT_MISMATCH", "mismatch", 409);
+    }
+    const existing = targetAuthorization ?? subjectAuthorization;
     const obsoleteTokens: ProviderToken[] = existing?.token
       ? [{ provider: existing.provider, token: existing.token }]
       : [];
@@ -130,14 +176,14 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
       status: "ACTIVE",
       lastVerifiedAt: input.now
     };
-    this.authorizations.set(input.ownerUserId, authorization);
-    for (const [teamId, candidate] of this.connections) {
+    this.authorizations.set(authorization.id, authorization);
+    for (const [connectionId, candidate] of this.connections) {
       if (
-        teamId !== input.teamId &&
+        candidate.teamId !== input.teamId &&
         candidate.authorizationId === authorization.id &&
         candidate.connectionStatus !== "REVOKED"
       ) {
-        this.connections.set(teamId, {
+        this.connections.set(connectionId, {
           ...candidate,
           provider: input.provider,
           email: input.email,
@@ -155,7 +201,11 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
         });
       }
     }
-    const previousConnection = this.connections.get(input.teamId);
+    const previousConnection = [...this.connections.values()].find(
+      (candidate) =>
+        candidate.teamId === input.teamId &&
+        candidate.authorizationId === authorization.id
+    );
     const connection: MailConnectionRecord = {
       id: previousConnection?.id ?? randomUUID(),
       teamId: input.teamId,
@@ -169,7 +219,7 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
       lastSyncAt: null,
       lastErrorCode: null
     };
-    this.connections.set(input.teamId, connection);
+    this.connections.set(connection.id, connection);
     this.auditActions.push(
       existing || previousConnection || input.intent === "REAUTHORIZE"
         ? "MAIL_REAUTHORIZED"
@@ -181,15 +231,24 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
   public async disconnect(input: {
     readonly teamId: string;
     readonly ownerUserId: string;
+    readonly connectionId?: string;
     readonly requestId: string | null;
     readonly now: Date;
   }) {
-    const connection = this.connections.get(input.teamId);
-    const authorization = this.authorizations.get(input.ownerUserId);
+    const connection = input.connectionId
+      ? this.connections.get(input.connectionId)
+      : [...this.connections.values()].find(
+          (candidate) =>
+            candidate.teamId === input.teamId &&
+            candidate.connectionStatus !== "REVOKED"
+        );
+    const authorization = connection
+      ? this.authorizations.get(connection.authorizationId)
+      : undefined;
     if (!connection || !authorization) {
       throw new AppError("MAIL_CONNECTION_NOT_FOUND", "missing", 404);
     }
-    this.connections.set(input.teamId, {
+    this.connections.set(connection.id, {
       ...connection,
       connectionStatus: "REVOKED"
     });
@@ -203,7 +262,7 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
         ? { provider: authorization.provider, token: authorization.token }
         : null;
     if (activeConnections.length === 0) {
-      this.authorizations.set(input.ownerUserId, {
+      this.authorizations.set(authorization.id, {
         ...authorization,
         token: null,
         status: "REVOKED"
@@ -220,17 +279,17 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
     readonly errorCode: string;
     readonly now: Date;
   }): Promise<void> {
-    for (const [userId, authorization] of this.authorizations) {
+    for (const [authorizationId, authorization] of this.authorizations) {
       if (authorization.id === input.authorizationId) {
-        this.authorizations.set(userId, {
+        this.authorizations.set(authorizationId, {
           ...authorization,
           status: input.status
         });
       }
     }
-    for (const [teamId, connection] of this.connections) {
+    for (const [connectionId, connection] of this.connections) {
       if (connection.authorizationId === input.authorizationId) {
-        this.connections.set(teamId, {
+        this.connections.set(connectionId, {
           ...connection,
           authorizationStatus: input.status,
           connectionStatus: input.status,

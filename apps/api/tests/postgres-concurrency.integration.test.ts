@@ -340,7 +340,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       authorizationStatus: "ACTIVE",
       connectionStatus: "ACTIVE"
     });
-    const stored = await database.mailAuthorization.findUniqueOrThrow({
+    const stored = await database.mailAuthorization.findFirstOrThrow({
       where: { userId: owner.id }
     });
     expect(stored.encryptedRefreshToken).not.toContain(
@@ -378,13 +378,13 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       requestId: "postgres-gmail-disconnect"
     });
     await expect(
-      database.mailAuthorization.findUniqueOrThrow({
+      database.mailAuthorization.findFirstOrThrow({
         where: { userId: owner.id },
         select: { status: true, encryptedRefreshToken: true }
       })
     ).resolves.toEqual({ status: "REVOKED", encryptedRefreshToken: null });
     await expect(
-      database.mailConnection.findUniqueOrThrow({
+      database.mailConnection.findFirstOrThrow({
         where: { teamId: created.team.teamId },
         select: { status: true }
       })
@@ -464,7 +464,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     ).resolves.toBe(2);
 
     const sharedAuthorization =
-      await database.mailAuthorization.findUniqueOrThrow({
+      await database.mailAuthorization.findFirstOrThrow({
         where: { userId: owner.id },
         select: { id: true }
       });
@@ -486,7 +486,13 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       owner.id,
       first.team.teamId,
       "REAUTHORIZE",
-      "GOOGLE"
+      "GOOGLE",
+      (
+        await database.mailConnection.findFirstOrThrow({
+          where: { teamId: first.team.teamId },
+          select: { id: true }
+        })
+      ).id
     );
     await gmailService.completeAuthorization({
       provider: "GOOGLE",
@@ -508,7 +514,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       ownerUserId: owner.id
     });
     const retainedAuthorization =
-      await database.mailAuthorization.findUniqueOrThrow({
+      await database.mailAuthorization.findFirstOrThrow({
         where: { userId: owner.id },
         select: { status: true, encryptedRefreshToken: true }
       });
@@ -521,7 +527,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       ownerUserId: owner.id
     });
     await expect(
-      database.mailAuthorization.findUniqueOrThrow({
+      database.mailAuthorization.findFirstOrThrow({
         where: { userId: owner.id },
         select: { status: true, encryptedRefreshToken: true }
       })
@@ -531,7 +537,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     ]);
   });
 
-  it("switches one user from Google to Microsoft without two active authorizations", async () => {
+  it("keeps Google and Microsoft monitoring connections active at the same time", async () => {
     const owner = await createUser("provider-switch-owner@example.com");
     const clock = { value: new Date("2026-08-26T01:00:00.000Z") };
     const created = await createServices(
@@ -575,7 +581,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       "MICROSOFT"
     );
     await expect(
-      database.mailAuthorization.findUniqueOrThrow({
+      database.mailAuthorization.findFirstOrThrow({
         where: { userId: owner.id },
         select: { provider: true, status: true }
       })
@@ -589,32 +595,65 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
 
     await expect(
       database.mailAuthorization.count({ where: { userId: owner.id } })
-    ).resolves.toBe(1);
-    const stored = await database.mailAuthorization.findUniqueOrThrow({
+    ).resolves.toBe(2);
+    const stored = await database.mailAuthorization.findMany({
       where: { userId: owner.id },
-      include: { connections: true }
+      include: { connections: true },
+      orderBy: { provider: "asc" }
     });
-    expect(stored).toMatchObject({
-      provider: "MICROSOFT",
-      providerSubject: "tenant:postgres-microsoft-subject",
-      email: "monitoring-postgres@outlook.example",
-      status: "ACTIVE"
-    });
-    expect(stored.connections).toHaveLength(1);
-    expect(stored.connections[0]).toMatchObject({
-      teamId: created.team.teamId,
-      status: "ACTIVE",
-      providerCursor: null
-    });
-    expect(stored.encryptedRefreshToken).not.toContain(microsoft.refreshToken);
+    expect(stored).toHaveLength(2);
+    expect(
+      stored.map(({ provider, status }) => ({ provider, status }))
+    ).toEqual(
+      expect.arrayContaining([
+        { provider: "GOOGLE", status: "ACTIVE" },
+        { provider: "MICROSOFT", status: "ACTIVE" }
+      ])
+    );
+    expect(stored.flatMap(({ connections }) => connections)).toHaveLength(2);
+    const microsoftStored = stored.find(
+      ({ provider }) => provider === "MICROSOFT"
+    );
+    expect(microsoftStored?.encryptedRefreshToken).not.toContain(
+      microsoft.refreshToken
+    );
     await expect(
       encryption.decrypt({
-        ciphertext: stored.encryptedRefreshToken ?? "",
-        provider: stored.encryptionProvider ?? "",
-        keyVersion: stored.encryptionKeyVersion ?? ""
+        ciphertext: microsoftStored?.encryptedRefreshToken ?? "",
+        provider: microsoftStored?.encryptionProvider ?? "",
+        keyVersion: microsoftStored?.encryptionKeyVersion ?? ""
       })
     ).resolves.toBe(microsoft.refreshToken);
+    const googleStored = stored.find(({ provider }) => provider === "GOOGLE");
+    const googleConnectionId = googleStored?.connections[0]?.id;
+    expect(googleConnectionId).toBeDefined();
+    if (!googleStored || !googleConnectionId || !microsoftStored) {
+      throw new Error("mail_connection_fixture_missing");
+    }
+    await mailService.disconnect({
+      teamId: created.team.teamId,
+      ownerUserId: owner.id,
+      connectionId: googleConnectionId
+    });
+    await expect(
+      database.mailConnection.count({
+        where: { teamId: created.team.teamId, status: "ACTIVE" }
+      })
+    ).resolves.toBe(1);
+    await expect(
+      database.mailAuthorization.findFirstOrThrow({
+        where: { id: googleStored.id },
+        select: { status: true, encryptedRefreshToken: true }
+      })
+    ).resolves.toEqual({ status: "REVOKED", encryptedRefreshToken: null });
+    await expect(
+      database.mailAuthorization.findFirstOrThrow({
+        where: { id: microsoftStored.id },
+        select: { status: true, encryptedRefreshToken: true }
+      })
+    ).resolves.toMatchObject({ status: "ACTIVE" });
     expect(google.revokedTokens).toEqual([google.refreshToken]);
+    expect(microsoft.revokedTokens).toEqual([]);
   });
 
   it("admits only five members to five seats and returns 409 for the loser", async () => {

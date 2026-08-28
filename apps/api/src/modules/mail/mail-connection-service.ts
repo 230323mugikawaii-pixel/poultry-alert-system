@@ -45,13 +45,42 @@ export class MailConnectionService {
     userId: string,
     teamId: string,
     intent: MailOAuthIntent,
-    provider: MailProviderId
+    provider: MailProviderId,
+    connectionId: string | null = null
   ): Promise<{
     readonly state: string;
     readonly authorizationUrl: string;
     readonly expiresAt: Date;
   }> {
     const adapter = this.requireProvider(provider);
+    if (intent === "REAUTHORIZE") {
+      if (!connectionId) {
+        throw new AppError(
+          "MAIL_CONNECTION_REQUIRED",
+          "再認証するメール監視アカウントを選択してください。",
+          400
+        );
+      }
+      const connection = await this.options.repository.findConnectionById(
+        teamId,
+        userId,
+        connectionId
+      );
+      if (!connection) {
+        throw new AppError(
+          "MAIL_CONNECTION_NOT_FOUND",
+          "メール監視アカウントが見つかりません。",
+          404
+        );
+      }
+      if (connection.provider !== provider) {
+        throw new AppError(
+          "MAIL_PROVIDER_MISMATCH",
+          "選択したメール監視アカウントと認証先が一致しません。",
+          409
+        );
+      }
+    }
     const state = randomBytes(32).toString("base64url");
     const nonce = randomBytes(32).toString("base64url");
     const codeVerifier = randomBytes(32).toString("base64url");
@@ -70,6 +99,7 @@ export class MailConnectionService {
       nonce,
       intent,
       provider,
+      connectionId,
       expiresAt,
       now
     });
@@ -138,6 +168,7 @@ export class MailConnectionService {
       encryptedToken,
       grantedScopes: [...new Set(grant.grantedScopes)].sort(),
       intent: challenge.intent,
+      connectionId: challenge.connectionId,
       requestId: input.requestId ?? null,
       now: this.now()
     });
@@ -149,21 +180,23 @@ export class MailConnectionService {
     return persisted.connection;
   }
 
-  public getConnection(
+  public getConnections(
     teamId: string,
     ownerUserId: string
-  ): Promise<MailConnectionRecord | null> {
-    return this.options.repository.findConnection(teamId, ownerUserId);
+  ): Promise<readonly MailConnectionRecord[]> {
+    return this.options.repository.listConnections(teamId, ownerUserId);
   }
 
   public async disconnect(input: {
     readonly teamId: string;
     readonly ownerUserId: string;
+    readonly connectionId?: string;
     readonly requestId?: string;
   }): Promise<void> {
     const result = await this.options.repository.disconnect({
       teamId: input.teamId,
       ownerUserId: input.ownerUserId,
+      ...(input.connectionId ? { connectionId: input.connectionId } : {}),
       requestId: input.requestId ?? null,
       now: this.now()
     });
