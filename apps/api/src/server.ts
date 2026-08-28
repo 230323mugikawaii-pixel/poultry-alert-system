@@ -2,6 +2,8 @@ import { config as loadDotenv } from "dotenv";
 import { buildApp } from "./app.js";
 import { loadEnvironment } from "./config/env.js";
 import { createDatabaseClient } from "./db/client.js";
+import { AlertService } from "./modules/alerts/alert-service.js";
+import { PrismaAlertRepository } from "./modules/alerts/prisma-alert-repository.js";
 import { AppleLoginOAuthClient } from "./modules/auth/apple-login-oauth-client.js";
 import { AuthService } from "./modules/auth/auth-service.js";
 import { SmtpMagicLinkEmailSender } from "./modules/auth/email-sender.js";
@@ -153,6 +155,9 @@ const notificationMemberService = new NotificationMemberService({
   sessionAbsoluteDays: environment.SESSION_ABSOLUTE_DAYS,
   maxActiveSessions: environment.MAX_ACTIVE_SESSIONS
 });
+const alertService = new AlertService({
+  repository: new PrismaAlertRepository(database)
+});
 const app = await buildApp({
   environment,
   authService,
@@ -161,6 +166,7 @@ const app = await buildApp({
   teamService,
   invitationService,
   notificationMemberService,
+  alertService,
   securityThrottleService,
   readinessCheck: async () => {
     await database.$queryRaw`SELECT 1`;

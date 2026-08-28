@@ -178,7 +178,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-28.1";
+  "2026-08-28.2";
 
 /*
   正式なURLが決まった場合だけ設定する公開リンク。
@@ -219,6 +219,11 @@ let mailProviderAvailability = {
   MICROSOFT: "UNKNOWN"
 };
 let notificationMemberManagement = null;
+let ownerAlerts = [];
+let notificationMemberAlerts = [];
+let alertEventSource = null;
+let currentAlarmAlertContext = null;
+const notifiedAlertIds = new Set();
 let legacyGoogleAccountsFallbackBackup =
   [];
 let contractStorageMigrationPending =
@@ -290,6 +295,8 @@ async function initializeApplication() {
       if (currentTeam?.role === "OWNER") {
         notificationMemberManagement =
           await fetchNotificationMembers();
+        ownerAlerts =
+          await fetchOwnerAlerts();
       }
     }
   }
@@ -1075,6 +1082,13 @@ function openNotificationMemberApp() {
     notificationMemberSession.team.name ||
       `通知グループ ${notificationMemberSession.team.teamCode}`
   );
+  renderAlertList(
+    "notificationMemberAlertList",
+    notificationMemberAlerts,
+    "NOTIFICATION_MEMBER"
+  );
+  void refreshNotificationMemberAlerts();
+  startNotificationMemberAlertStream();
   window.scrollTo({ top: 0 });
 }
 
@@ -1096,7 +1110,259 @@ async function logoutNotificationMember() {
     );
   }
   notificationMemberSession = null;
+  notificationMemberAlerts = [];
+  stopAlertEventStream();
   openGuestHome();
+}
+
+
+async function fetchOwnerAlerts() {
+  if (!currentTeam || currentTeam.role !== "OWNER") {
+    return [];
+  }
+  return fetchAlerts(
+    `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/alerts`,
+  );
+}
+
+async function fetchNotificationMemberAlerts() {
+  if (!notificationMemberSession) {
+    return [];
+  }
+  return fetchAlerts("/api/v1/notification-members/alerts");
+}
+
+async function fetchAlerts(path) {
+  try {
+    const response = await fetch(apiUrl(path), {
+      method: "GET",
+      credentials: "include",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      return [];
+    }
+    const payload = await response.json();
+    return Array.isArray(payload.alerts) ? payload.alerts : [];
+  } catch {
+    return [];
+  }
+}
+
+async function refreshOwnerAlerts() {
+  ownerAlerts = await fetchOwnerAlerts();
+  applyAlertUpdate(ownerAlerts, "OWNER");
+}
+
+async function refreshNotificationMemberAlerts() {
+  notificationMemberAlerts = await fetchNotificationMemberAlerts();
+  applyAlertUpdate(notificationMemberAlerts, "NOTIFICATION_MEMBER");
+}
+
+function startOwnerAlertStream() {
+  if (!currentTeam || currentTeam.role !== "OWNER") {
+    stopAlertEventStream();
+    return;
+  }
+  startAlertEventStream(
+    `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/alerts/events`,
+    "OWNER",
+  );
+}
+
+function startNotificationMemberAlertStream() {
+  if (!notificationMemberSession) {
+    stopAlertEventStream();
+    return;
+  }
+  startAlertEventStream(
+    "/api/v1/notification-members/alerts/events",
+    "NOTIFICATION_MEMBER",
+  );
+}
+
+function startAlertEventStream(path, audience) {
+  stopAlertEventStream();
+  if (typeof window.EventSource !== "function") {
+    setAlertStreamStatus(audience, "再接続中", true);
+    return;
+  }
+  const stream = new EventSource(apiUrl(path), {
+    withCredentials: true,
+  });
+  alertEventSource = stream;
+  setAlertStreamStatus(audience, "接続中", false);
+  stream.addEventListener("alerts", (event) => {
+    try {
+      const payload = JSON.parse(event.data);
+      const alerts = Array.isArray(payload.alerts) ? payload.alerts : [];
+      if (audience === "OWNER") {
+        ownerAlerts = alerts;
+      } else {
+        notificationMemberAlerts = alerts;
+      }
+      applyAlertUpdate(alerts, audience);
+      setAlertStreamStatus(audience, "接続中", false);
+    } catch {
+      setAlertStreamStatus(audience, "再接続中", true);
+    }
+  });
+  stream.addEventListener("session-ended", () => {
+    stopAlertEventStream();
+    if (audience === "NOTIFICATION_MEMBER") {
+      notificationMemberSession = null;
+      openNotificationMemberLogin();
+    } else {
+      authenticatedUser = null;
+      openGuestHome();
+    }
+  });
+  stream.onerror = () => {
+    setAlertStreamStatus(audience, "再接続中", true);
+  };
+}
+
+function stopAlertEventStream() {
+  if (alertEventSource) {
+    alertEventSource.close();
+    alertEventSource = null;
+  }
+}
+
+function setAlertStreamStatus(audience, text, reconnecting) {
+  const elementId =
+    audience === "OWNER"
+      ? "ownerAlertStreamStatus"
+      : "notificationMemberAlertStreamStatus";
+  setText(elementId, text);
+  document
+    .getElementById(elementId)
+    ?.classList.toggle("reconnecting", reconnecting);
+}
+
+function applyAlertUpdate(alerts, audience) {
+  renderAlertList(
+    audience === "OWNER" ? "ownerAlertList" : "notificationMemberAlertList",
+    alerts,
+    audience,
+  );
+  const current = currentAlarmAlertContext
+    ? alerts.find((alert) => alert.id === currentAlarmAlertContext.alertId)
+    : null;
+  if (currentAlarmAlertContext && current?.status !== "ACTIVE") {
+    closeAlarmNotification();
+  }
+  const nextAlert = alerts.find(
+    (alert) => alert.status === "ACTIVE" && !notifiedAlertIds.has(alert.id),
+  );
+  if (nextAlert) {
+    notifiedAlertIds.add(nextAlert.id);
+    showAlarmNotification(nextAlert.matchedKeyword, nextAlert.detectedAt, {
+      alertId: nextAlert.id,
+      audience,
+    });
+  }
+}
+
+function renderAlertList(containerId, alerts, audience) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  if (alerts.length === 0) {
+    container.innerHTML =
+      '<p class="alert-list-empty">現在、確認が必要な通知はありません。</p>';
+    return;
+  }
+  container.innerHTML = alerts
+    .map((alert) => {
+      const active = alert.status === "ACTIVE";
+      const acknowledged = alert.status === "ACKNOWLEDGED";
+      const acknowledgedByName =
+        alert.acknowledgedByName ||
+        (alert.acknowledgedBy === "OWNER" ? "代表者" : "通知メンバー");
+      const statusText = active
+        ? "未対応"
+        : acknowledged
+          ? `${acknowledgedByName}さんが対応中`
+          : "対応完了";
+      const actions = active
+        ? `<button type="button" class="btn primary" onclick="acknowledgeAlert('${escapeHtml(alert.id)}', '${audience}')">対応を開始</button>`
+        : audience === "OWNER" && acknowledged
+          ? `<button type="button" class="btn outline" onclick="resolveAlert('${escapeHtml(alert.id)}')">対応完了にする</button>`
+          : "";
+      return `
+        <article class="alert-list-item ${active ? "active" : ""}">
+          <div>
+            <h3>「${escapeHtml(alert.matchedKeyword)}」を検知</h3>
+            <p class="alert-list-meta">
+              ${escapeHtml(formatAlarmDetectedAt(alert.detectedAt))}・${escapeHtml(mailProviderLabel(alert.source.provider))}
+            </p>
+            <p class="alert-list-status">${escapeHtml(statusText)}</p>
+          </div>
+          <div class="alert-list-actions">${actions}</div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+async function acknowledgeAlert(alertId, audience) {
+  const path =
+    audience === "OWNER"
+      ? `/api/v1/teams/${encodeURIComponent(currentTeam?.id || "")}/alerts/${encodeURIComponent(alertId)}/acknowledge`
+      : `/api/v1/notification-members/alerts/${encodeURIComponent(alertId)}/acknowledge`;
+  try {
+    const response = await fetch(apiUrl(path), {
+      method: "POST",
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error("alert_acknowledge_failed");
+    const result = await response.json();
+    if (audience === "OWNER") {
+      await refreshOwnerAlerts();
+    } else {
+      await refreshNotificationMemberAlerts();
+    }
+    closeAlarmNotification();
+    if (result.alreadyAcknowledged) {
+      const acknowledgedByName =
+        result.alert?.acknowledgedByName ||
+        (result.alert?.acknowledgedBy === "OWNER" ? "代表者" : "通知メンバー");
+      await showAppAlert(
+        `すでに${acknowledgedByName}さんが対応を開始しています。`,
+        { title: "対応開始済み" },
+      );
+    }
+  } catch {
+    await showAppAlert(
+      "対応開始を記録できませんでした。通信状態を確認して、もう一度お試しください。",
+      { title: "対応開始エラー" },
+    );
+  }
+}
+
+async function resolveAlert(alertId) {
+  if (!currentTeam || currentTeam.role !== "OWNER") return;
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/alerts/${encodeURIComponent(alertId)}/resolve`,
+      ),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+      },
+    );
+    if (!response.ok) throw new Error("alert_resolve_failed");
+    await refreshOwnerAlerts();
+  } catch {
+    await showAppAlert(
+      "通知を対応完了にできませんでした。もう一度お試しください。",
+      { title: "通知の更新エラー" },
+    );
+  }
 }
 
 
@@ -3196,6 +3462,14 @@ function openApp() {
 
   renderHomeSetupNotices();
 
+  renderAlertList(
+    "ownerAlertList",
+    ownerAlerts,
+    "OWNER"
+  );
+  void refreshOwnerAlerts();
+  startOwnerAlertStream();
+
   showAppPage(
     "homePage"
   );
@@ -3511,6 +3785,8 @@ async function performLogout() {
     MICROSOFT: "UNKNOWN"
   };
   notificationMemberManagement = null;
+  ownerAlerts = [];
+  stopAlertEventStream();
 
   setupMode =
     "signup";
@@ -3957,7 +4233,16 @@ function initializeAlarmNotification() {
   if (stopButton) {
     stopButton.addEventListener(
       "click",
-      closeAlarmNotification
+      () => {
+        const context = currentAlarmAlertContext;
+        closeAlarmNotification();
+        if (context) {
+          void acknowledgeAlert(
+            context.alertId,
+            context.audience
+          );
+        }
+      }
     );
   }
 
@@ -4273,7 +4558,8 @@ function stopAlarmSound() {
 
 function showAlarmNotification(
   keyword,
-  detectedAt
+  detectedAt,
+  alertContext = null
 ) {
   const modal =
     document.getElementById(
@@ -4311,6 +4597,8 @@ function showAlarmNotification(
 
   alarmFocusBeforeOpen =
     document.activeElement;
+  currentAlarmAlertContext =
+    alertContext;
 
   if (keywordElement) {
     keywordElement.textContent =
@@ -4345,6 +4633,9 @@ function showAlarmNotification(
   );
 
   if (stopButton) {
+    stopButton.textContent = alertContext
+      ? "対応を開始して通知音を停止"
+      : "通知音を停止";
     stopButton.focus();
   }
 
@@ -4395,6 +4686,7 @@ function closeAlarmNotification() {
   }
 
   alarmFocusBeforeOpen = null;
+  currentAlarmAlertContext = null;
 }
 
 

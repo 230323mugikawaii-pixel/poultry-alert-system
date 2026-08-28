@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseClient, type DatabaseClient } from "../src/db/client.js";
 import { AppError } from "../src/lib/app-error.js";
+import { AlertService } from "../src/modules/alerts/alert-service.js";
+import { PrismaAlertRepository } from "../src/modules/alerts/prisma-alert-repository.js";
 import { AuthService } from "../src/modules/auth/auth-service.js";
 import { GoogleAuthService } from "../src/modules/auth/google-auth-service.js";
 import type {
@@ -51,6 +53,8 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     await database.$executeRawUnsafe(`
       TRUNCATE TABLE
         audit_events,
+        alert_recipients,
+        alerts,
         notification_member_sessions,
         notification_members,
         external_identities,
@@ -1373,6 +1377,236 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       })
     ).resolves.toEqual({ seatLimit: 1, pendingSeatLimit: null });
   });
+
+  it("creates one idempotent alert and fans out only to active recipients", async () => {
+    const clock = { value: new Date("2026-08-28T07:00:00.000Z") };
+    const owner = await createUser("alert-owner@example.com");
+    const services = createServices(clock, "482740");
+    const invitation = await prepareInvitationCredential({
+      now: clock.value,
+      ttlDays: 30
+    });
+    const team = await services.teamService.createTeam(
+      { ownerUserId: owner.id, seatLimit: 2 },
+      invitation
+    );
+    const memberRepository = new PrismaNotificationMemberRepository(database);
+    let generated = 0;
+    const memberService = new NotificationMemberService({
+      repository: memberRepository,
+      securityThrottle: new SecurityThrottleService(
+        new PrismaSecurityThrottleRepository(database),
+        testPepper,
+        () => clock.value
+      ),
+      tokenPepper: testPepper,
+      sessionIdleDays: 30,
+      sessionAbsoluteDays: 90,
+      maxActiveSessions: 5,
+      now: () => clock.value,
+      callNowIdGenerator: () => `CN-A${String(++generated).padStart(7, "0")}`
+    });
+    const activeMember = await memberService.create({
+      teamId: team.team.teamId,
+      actorUserId: owner.id,
+      displayName: "通知担当"
+    });
+    const disabledMember = await memberService.create({
+      teamId: team.team.teamId,
+      actorUserId: owner.id,
+      displayName: "停止済み"
+    });
+    await memberService.disable({
+      teamId: team.team.teamId,
+      memberId: disabledMember.member.id,
+      actorUserId: owner.id
+    });
+    const connection = await createActiveMailConnection(
+      owner.id,
+      team.team.teamId,
+      "alert-google-subject"
+    );
+    const alertService = new AlertService({
+      repository: new PrismaAlertRepository(database),
+      now: () => clock.value
+    });
+    const input = {
+      teamId: team.team.teamId,
+      sourceMailConnectionId: connection.id,
+      sourceEventId: "gmail-history-1001",
+      matchedKeyword: "停電のお知らせ",
+      detectedAt: clock.value
+    };
+
+    const ingestionResults = await Promise.all([
+      alertService.ingest(input),
+      alertService.ingest(input)
+    ]);
+    const first = ingestionResults.find(({ created }) => created);
+    const duplicate = ingestionResults.find(({ created }) => !created);
+    if (!first || !duplicate) {
+      throw new Error("Expected one created and one idempotent alert result");
+    }
+
+    expect(first).toMatchObject({
+      created: true,
+      alert: { recipientCount: 2, matchedKeyword: "停電のお知らせ" }
+    });
+    expect(duplicate).toMatchObject({
+      created: false,
+      alert: { id: first.alert.id, recipientCount: 2 }
+    });
+    await expect(database.alert.count()).resolves.toBe(1);
+    await expect(
+      database.alertRecipient.findMany({
+        where: { alertId: first.alert.id },
+        select: { kind: true, notificationMemberId: true }
+      })
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        { kind: "OWNER", notificationMemberId: null },
+        {
+          kind: "NOTIFICATION_MEMBER",
+          notificationMemberId: activeMember.member.id
+        }
+      ])
+    );
+    await expect(
+      database.alertRecipient.count({
+        where: { notificationMemberId: disabledMember.member.id }
+      })
+    ).resolves.toBe(0);
+  });
+
+  it("allows one simultaneous acknowledgement and enforces team isolation", async () => {
+    const clock = { value: new Date("2026-08-28T08:00:00.000Z") };
+    const owner = await createUser("ack-owner@example.com");
+    await database.user.update({
+      where: { id: owner.id },
+      data: { displayName: "代表者" }
+    });
+    const services = createServices(clock, "482741");
+    const invitation = await prepareInvitationCredential({
+      now: clock.value,
+      ttlDays: 30
+    });
+    const team = await services.teamService.createTeam(
+      { ownerUserId: owner.id, seatLimit: 1 },
+      invitation
+    );
+    const memberService = new NotificationMemberService({
+      repository: new PrismaNotificationMemberRepository(database),
+      securityThrottle: new SecurityThrottleService(
+        new PrismaSecurityThrottleRepository(database),
+        testPepper,
+        () => clock.value
+      ),
+      tokenPepper: testPepper,
+      sessionIdleDays: 30,
+      sessionAbsoluteDays: 90,
+      maxActiveSessions: 5,
+      now: () => clock.value,
+      callNowIdGenerator: () => "CN-B0000001"
+    });
+    const member = await memberService.create({
+      teamId: team.team.teamId,
+      actorUserId: owner.id,
+      displayName: "田中"
+    });
+    const connection = await createActiveMailConnection(
+      owner.id,
+      team.team.teamId,
+      "ack-google-subject"
+    );
+    const alertService = new AlertService({
+      repository: new PrismaAlertRepository(database),
+      now: () => clock.value
+    });
+    const created = await alertService.ingest({
+      teamId: team.team.teamId,
+      sourceMailConnectionId: connection.id,
+      sourceEventId: "gmail-history-2001",
+      matchedKeyword: "システム障害",
+      detectedAt: clock.value
+    });
+
+    const acknowledgements = await Promise.all([
+      alertService.acknowledgeByOwner({
+        teamId: team.team.teamId,
+        alertId: created.alert.id,
+        userId: owner.id
+      }),
+      alertService.acknowledgeByNotificationMember({
+        teamId: team.team.teamId,
+        alertId: created.alert.id,
+        memberId: member.member.id
+      })
+    ]);
+    expect(
+      acknowledgements.filter(({ alreadyAcknowledged }) => !alreadyAcknowledged)
+    ).toHaveLength(1);
+    expect(
+      acknowledgements.filter(({ alreadyAcknowledged }) => alreadyAcknowledged)
+    ).toHaveLength(1);
+    expect(acknowledgements[0]?.alert.status).toBe("ACKNOWLEDGED");
+    expect(acknowledgements[1]?.alert.status).toBe("ACKNOWLEDGED");
+    expect(
+      acknowledgements.map(({ alert }) => alert.acknowledgedByName)
+    ).toEqual(
+      Array(2).fill(
+        acknowledgements[0]?.alert.acknowledgedBy === "OWNER"
+          ? "代表者"
+          : "田中"
+      )
+    );
+    await expect(
+      database.alert.findUniqueOrThrow({
+        where: { id: created.alert.id },
+        select: {
+          acknowledgedAt: true,
+          acknowledgedByUserId: true,
+          acknowledgedByNotificationMemberId: true
+        }
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        acknowledgedAt: clock.value,
+        ...(acknowledgements[0]?.alert.acknowledgedBy === "OWNER"
+          ? {
+              acknowledgedByUserId: owner.id,
+              acknowledgedByNotificationMemberId: null
+            }
+          : {
+              acknowledgedByUserId: null,
+              acknowledgedByNotificationMemberId: member.member.id
+            })
+      })
+    );
+    await expect(
+      database.auditEvent.count({
+        where: { action: "ALERT_ACKNOWLEDGED", targetId: created.alert.id }
+      })
+    ).resolves.toBe(1);
+
+    const otherOwner = await createUser("other-alert-owner@example.com");
+    const otherTeam = await createServices(
+      clock,
+      "482742"
+    ).teamService.createTeam({
+      ownerUserId: otherOwner.id,
+      seatLimit: 0
+    });
+    await expect(
+      alertService.acknowledgeByOwner({
+        teamId: otherTeam.team.teamId,
+        alertId: created.alert.id,
+        userId: otherOwner.id
+      })
+    ).rejects.toMatchObject({ code: "ALERT_NOT_FOUND", statusCode: 404 });
+    await expect(
+      alertService.listForOwner(otherTeam.team.teamId, otherOwner.id)
+    ).resolves.toEqual([]);
+  });
 });
 
 class PostgresGoogleOAuthProvider implements GoogleOAuthProvider {
@@ -1598,6 +1832,31 @@ function createServices(
 function createUser(email: string) {
   return database.user.create({
     data: { email, emailVerifiedAt: new Date("2026-08-24T00:00:00.000Z") }
+  });
+}
+
+async function createActiveMailConnection(
+  userId: string,
+  teamId: string,
+  providerSubject: string
+) {
+  const authorization = await database.mailAuthorization.create({
+    data: {
+      userId,
+      provider: "GOOGLE",
+      providerSubject,
+      email: `${providerSubject}@example.com`,
+      grantedScopes: [GMAIL_READONLY_SCOPE],
+      status: "ACTIVE",
+      lastVerifiedAt: new Date("2026-08-28T00:00:00.000Z")
+    }
+  });
+  return database.mailConnection.create({
+    data: {
+      teamId,
+      mailAuthorizationId: authorization.id,
+      status: "ACTIVE"
+    }
   });
 }
 

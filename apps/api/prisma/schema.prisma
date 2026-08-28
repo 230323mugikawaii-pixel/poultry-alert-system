@@ -105,6 +105,27 @@ enum NotificationMemberStatus {
   DISABLED
 }
 
+enum AlertStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum AlertRecipientKind {
+  OWNER
+  NOTIFICATION_MEMBER
+}
+
+enum AlertDeliveryChannel {
+  IN_APP
+}
+
+enum AlertRecipientStatus {
+  PENDING
+  ACKNOWLEDGED
+  CLOSED
+}
+
 enum MailConnectionStatus {
   ACTIVE
   REAUTH_REQUIRED
@@ -149,6 +170,8 @@ model User {
   initiatedOwnerTransfers OwnerTransfer[]
   auditEvents             AuditEvent[]
   mailAuthorizations      MailAuthorization[]
+  alertRecipients         AlertRecipient[]
+  acknowledgedAlerts      Alert[]                @relation("AlertAcknowledgedByUser")
 
   @@map("users")
 }
@@ -260,6 +283,7 @@ model Team {
   invitations     Invitation[]
   mailConnections MailConnection[]
   notificationMembers NotificationMember[]
+  alerts          Alert[]
   ownerTransfers  OwnerTransfer[]
   auditEvents     AuditEvent[]
 
@@ -279,6 +303,8 @@ model NotificationMember {
   disabledAt        DateTime?                   @db.Timestamptz(3)
   team              Team                        @relation(fields: [teamId], references: [id], onDelete: Cascade)
   sessions          NotificationMemberSession[]
+  alertRecipients    AlertRecipient[]
+  acknowledgedAlerts Alert[]                     @relation("AlertAcknowledgedByNotificationMember")
 
   @@index([teamId, status])
   @@map("notification_members")
@@ -494,11 +520,59 @@ model MailConnection {
   revokedAt            DateTime?             @db.Timestamptz(3)
   team                 Team                  @relation(fields: [teamId], references: [id], onDelete: Cascade)
   mailAuthorization    MailAuthorization     @relation(fields: [mailAuthorizationId], references: [id], onDelete: Restrict)
+  alerts               Alert[]
 
   @@unique([teamId, mailAuthorizationId])
   @@index([teamId, status])
   @@index([mailAuthorizationId, status])
   @@map("mail_connections")
+}
+
+model Alert {
+  id                                 String              @id @default(uuid()) @db.Uuid
+  teamId                             String              @db.Uuid
+  sourceMailConnectionId             String              @db.Uuid
+  sourceEventId                      String              @db.VarChar(191)
+  status                             AlertStatus         @default(ACTIVE)
+  detectedAt                         DateTime            @db.Timestamptz(3)
+  matchedKeyword                     String              @db.VarChar(100)
+  acknowledgedAt                     DateTime?           @db.Timestamptz(3)
+  acknowledgedByUserId               String?             @db.Uuid
+  acknowledgedByNotificationMemberId String?             @db.Uuid
+  resolvedAt                         DateTime?           @db.Timestamptz(3)
+  createdAt                          DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt                          DateTime            @updatedAt @db.Timestamptz(3)
+  team                               Team                @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  sourceMailConnection               MailConnection      @relation(fields: [sourceMailConnectionId], references: [id], onDelete: Restrict)
+  acknowledgedByUser                 User?               @relation("AlertAcknowledgedByUser", fields: [acknowledgedByUserId], references: [id], onDelete: SetNull)
+  acknowledgedByNotificationMember   NotificationMember? @relation("AlertAcknowledgedByNotificationMember", fields: [acknowledgedByNotificationMemberId], references: [id], onDelete: SetNull)
+  recipients                         AlertRecipient[]
+
+  @@unique([sourceMailConnectionId, sourceEventId])
+  @@index([teamId, status, detectedAt])
+  @@map("alerts")
+}
+
+model AlertRecipient {
+  id                   String               @id @default(uuid()) @db.Uuid
+  alertId              String               @db.Uuid
+  kind                 AlertRecipientKind
+  userId               String?              @db.Uuid
+  notificationMemberId String?              @db.Uuid
+  channel              AlertDeliveryChannel @default(IN_APP)
+  status               AlertRecipientStatus @default(PENDING)
+  acknowledgedAt       DateTime?            @db.Timestamptz(3)
+  createdAt            DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime             @updatedAt @db.Timestamptz(3)
+  alert                Alert                @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  user                 User?                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notificationMember   NotificationMember?  @relation(fields: [notificationMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([alertId, userId, channel])
+  @@unique([alertId, notificationMemberId, channel])
+  @@index([userId, status, createdAt])
+  @@index([notificationMemberId, status, createdAt])
+  @@map("alert_recipients")
 }
 
 model OwnerTransfer {

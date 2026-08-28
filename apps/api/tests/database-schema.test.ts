@@ -28,10 +28,23 @@ describe("database foundation", () => {
       "AuditEvent",
       "SecurityThrottle",
       "MailAuthorization",
-      "MailConnection"
+      "MailConnection",
+      "Alert",
+      "AlertRecipient"
     ]) {
       expect(schema).toContain(`model ${model} {`);
     }
+  });
+
+  it("defines provider-neutral alert fan-out and idempotency", () => {
+    expect(schema).toContain("enum AlertStatus");
+    expect(schema).toContain("enum AlertDeliveryChannel");
+    expect(schema).toContain("sourceEventId");
+    expect(schema).toContain(
+      "@@unique([sourceMailConnectionId, sourceEventId])"
+    );
+    expect(schema).toContain("model AlertRecipient {");
+    expect(schema).toContain("notificationMemberId");
   });
 
   it("separates Call Now login identity from mail monitoring authorization", () => {

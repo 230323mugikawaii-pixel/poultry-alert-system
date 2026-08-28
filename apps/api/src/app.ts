@@ -7,6 +7,8 @@ import type { TypeBoxTypeProvider } from "@fastify/type-provider-typebox";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { AppEnvironment } from "./config/env.js";
 import { AppError } from "./lib/app-error.js";
+import type { AlertService } from "./modules/alerts/alert-service.js";
+import { createAlertRoutes } from "./modules/alerts/alert-routes.js";
 import type { AuthService } from "./modules/auth/auth-service.js";
 import { createAuthRoutes } from "./modules/auth/auth-routes.js";
 import type { GoogleAuthService } from "./modules/auth/google-auth-service.js";
@@ -34,6 +36,7 @@ export interface BuildAppOptions {
   readonly teamService?: TeamService;
   readonly invitationService?: InvitationService;
   readonly notificationMemberService?: NotificationMemberService;
+  readonly alertService?: AlertService;
   readonly securityThrottleService?: SecurityThrottleService;
   readonly readinessCheck?: () => Promise<void>;
 }
@@ -249,6 +252,23 @@ export async function buildApp(
         options.authService,
         options.teamService,
         options.notificationMemberService,
+        options.environment
+      )
+    );
+  }
+
+  if (
+    options.authService &&
+    options.teamService &&
+    options.notificationMemberService &&
+    options.alertService
+  ) {
+    await app.register(
+      createAlertRoutes(
+        options.authService,
+        options.teamService,
+        options.notificationMemberService,
+        options.alertService,
         options.environment
       )
     );

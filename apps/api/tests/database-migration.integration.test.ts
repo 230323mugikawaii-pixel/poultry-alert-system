@@ -73,13 +73,21 @@ const notificationMemberMigration = readFileSync(
   ),
   "utf8"
 );
+const alertMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260828000300_alert_fanout/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 const migration =
   baseMigration +
   gmailMigration +
   mailProviderMigration +
   primaryProviderMigration +
   multipleMailConnectionsMigration +
-  notificationMemberMigration;
+  notificationMemberMigration +
+  alertMigration;
 
 const databases: PGlite[] = [];
 
@@ -207,6 +215,18 @@ describe("PostgreSQL migrations", () => {
     expect(memberTables.rows).toEqual([
       { table_name: "notification_member_sessions" },
       { table_name: "notification_members" }
+    ]);
+
+    const alertTables = await database.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN ('alerts', 'alert_recipients')
+      ORDER BY table_name;
+    `);
+    expect(alertTables.rows).toEqual([
+      { table_name: "alert_recipients" },
+      { table_name: "alerts" }
     ]);
 
     await database.exec(`

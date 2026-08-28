@@ -14,7 +14,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=19">
+    <link rel="stylesheet" href="css/style.css?v=20">
 </head>
 
 <body>
@@ -97,8 +97,26 @@
         <p>
           この画面では重要メールの通知確認と停止を行えます。メール本文やアカウント設定は表示されません。
         </p>
-        <p class="input-help">通知一覧と確認操作は次の開発段階で接続します。</p>
       </article>
+      <article class="card member-alert-card">
+          <div class="alert-card-heading">
+            <div>
+              <h2>重要通知</h2>
+              <p>新しい通知は、この画面を開いている間に自動で更新されます。</p>
+            </div>
+            <span
+              id="notificationMemberAlertStreamStatus"
+              class="alert-stream-status"
+            >
+              接続中
+            </span>
+          </div>
+          <div
+            id="notificationMemberAlertList"
+            class="alert-list"
+            aria-live="polite"
+          ></div>
+        </article>
     </main>
   </section>
 
@@ -815,6 +833,23 @@
             <h2>はじめに設定してください</h2>
             <div id="homeSetupNotices"></div>
           </article>
+
+          <article class="card alert-card">
+              <div class="alert-card-heading">
+                <div>
+                  <h2>重要通知</h2>
+                  <p>監視中のメールで検知した通知を表示します。</p>
+                </div>
+                <span id="ownerAlertStreamStatus" class="alert-stream-status">
+                  接続中
+                </span>
+              </div>
+              <div
+                id="ownerAlertList"
+                class="alert-list"
+                aria-live="polite"
+              ></div>
+            </article>
 
           <article class="card">
 
