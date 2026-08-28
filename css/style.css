@@ -1929,3 +1929,169 @@ body.app-dialog-open {
       40px 1fr 43px;
   }
 }
+.guest-home-screen {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #f4f7fb;
+}
+
+.guest-home-card {
+  width: min(100%, 520px);
+  padding: 32px;
+  border: 1px solid #d8e2ef;
+  border-radius: 24px;
+  background: #fff;
+  box-shadow: 0 18px 45px rgb(25 64 112 / 10%);
+}
+
+.guest-home-logo {
+  margin-bottom: 32px;
+  color: #0862c7;
+  font-size: 1.4rem;
+  font-weight: 800;
+}
+
+.guest-home-status {
+  padding: 12px 14px;
+  border-radius: 12px;
+  color: #8a5a00;
+  background: #fff4d6;
+  font-weight: 800;
+}
+
+.guest-home-card .btn + .btn {
+  margin-top: 12px;
+}
+
+.member-login-container {
+  max-width: 560px;
+}
+
+.member-login-field {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+  font-weight: 700;
+}
+
+.member-login-field input {
+  width: 100%;
+  min-height: 52px;
+  padding: 12px 14px;
+  border: 1px solid #bfd0e6;
+  border-radius: 12px;
+  font: inherit;
+}
+
+.member-app-main {
+  width: min(100% - 32px, 760px);
+  margin: 0 auto;
+  padding: 48px 0 100px;
+}
+
+.member-status-card {
+  margin-top: 24px;
+}
+
+.member-management-card {
+  margin-top: 24px;
+}
+
+.member-management-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.member-management-heading p {
+  margin-bottom: 0;
+}
+
+.member-seat-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 22px 0;
+}
+
+.member-seat-item {
+  padding: 14px;
+  border-radius: 12px;
+  background: #f2f7fd;
+}
+
+.member-seat-item strong,
+.member-seat-item span {
+  display: block;
+}
+
+.member-seat-item strong {
+  margin-top: 4px;
+  color: #0862c7;
+  font-size: 1.2rem;
+}
+
+.notification-member-list {
+  display: grid;
+  gap: 12px;
+}
+
+.notification-member-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid #d8e2ef;
+  border-radius: 14px;
+}
+
+.notification-member-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.member-create-controls {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.member-create-controls input {
+  min-width: 180px;
+  padding: 10px 12px;
+  border: 1px solid #bfd0e6;
+  border-radius: 12px;
+}
+
+.notification-member-id {
+  color: #53657c;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@media (max-width: 600px) {
+  .guest-home-card {
+    padding: 24px 20px;
+  }
+
+  .member-management-heading,
+  .notification-member-item {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .member-seat-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .notification-member-actions {
+    flex-wrap: wrap;
+  }
+
+  .member-create-controls {
+    display: grid;
+  }
+}

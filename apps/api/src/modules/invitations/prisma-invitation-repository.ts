@@ -2,6 +2,7 @@ import type { DatabaseClient } from "../../db/client.js";
 import { retrySerializableTransaction } from "../../db/transaction-retry.js";
 import { Prisma } from "../../generated/prisma/client.js";
 import { AppError } from "../../lib/app-error.js";
+import { countOccupiedAdditionalSeats } from "../notification-members/prisma-notification-member-repository.js";
 import { calculateSeatSummary } from "../teams/seat-policy.js";
 import type {
   AuditEventRecord,
@@ -111,9 +112,10 @@ export class PrismaInvitationRepository implements InvitationRepository {
     if (!team?.subscription || !invitation || team.status !== "ACTIVE") {
       return null;
     }
-    const activeMemberCount = await this.database.teamMembership.count({
-      where: { teamId: team.id, role: "MEMBER", status: "ACTIVE" }
-    });
+    const activeMemberCount = await countOccupiedAdditionalSeats(
+      this.database,
+      team.id
+    );
     return mapInvitation({
       invitation,
       teamCode: team.publicCode,
@@ -239,13 +241,10 @@ export class PrismaInvitationRepository implements InvitationRepository {
     if (!link?.invitation.team.subscription) {
       return null;
     }
-    const activeMemberCount = await this.database.teamMembership.count({
-      where: {
-        teamId: link.invitation.teamId,
-        role: "MEMBER",
-        status: "ACTIVE"
-      }
-    });
+    const activeMemberCount = await countOccupiedAdditionalSeats(
+      this.database,
+      link.invitation.teamId
+    );
     return {
       id: link.id,
       invitationId: link.invitationId,
@@ -833,9 +832,7 @@ async function countActiveMembers(
   transaction: Prisma.TransactionClient,
   teamId: string
 ): Promise<number> {
-  return transaction.teamMembership.count({
-    where: { teamId, role: "MEMBER", status: "ACTIVE" }
-  });
+  return countOccupiedAdditionalSeats(transaction, teamId);
 }
 
 async function expireJoinGrantInvitation(

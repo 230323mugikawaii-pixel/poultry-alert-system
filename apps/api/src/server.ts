@@ -17,6 +17,8 @@ import { GoogleMailProvider } from "./modules/mail/providers/google-mail-provide
 import { MicrosoftMailProvider } from "./modules/mail/providers/microsoft-mail-provider.js";
 import { createTokenEncryptionProvider } from "./modules/mail/token-encryption.js";
 import { InvitationService } from "./modules/invitations/invitation-service.js";
+import { NotificationMemberService } from "./modules/notification-members/notification-member-service.js";
+import { PrismaNotificationMemberRepository } from "./modules/notification-members/prisma-notification-member-repository.js";
 import { PrismaInvitationRepository } from "./modules/invitations/prisma-invitation-repository.js";
 import { PrismaTeamRepository } from "./modules/teams/prisma-team-repository.js";
 import { TeamService } from "./modules/teams/team-service.js";
@@ -143,6 +145,14 @@ const invitationService = new InvitationService({
   lineLinkTtlHours: environment.LINE_LINK_TTL_HOURS,
   securityThrottle: securityThrottleService
 });
+const notificationMemberService = new NotificationMemberService({
+  repository: new PrismaNotificationMemberRepository(database),
+  securityThrottle: securityThrottleService,
+  tokenPepper: environment.AUTH_TOKEN_PEPPER,
+  sessionIdleDays: environment.SESSION_IDLE_DAYS,
+  sessionAbsoluteDays: environment.SESSION_ABSOLUTE_DAYS,
+  maxActiveSessions: environment.MAX_ACTIVE_SESSIONS
+});
 const app = await buildApp({
   environment,
   authService,
@@ -150,6 +160,7 @@ const app = await buildApp({
   mailConnectionService,
   teamService,
   invitationService,
+  notificationMemberService,
   securityThrottleService,
   readinessCheck: async () => {
     await database.$queryRaw`SELECT 1`;

@@ -52,7 +52,34 @@ const mailProviderMigration = readFileSync(
   ),
   "utf8"
 );
-const migration = baseMigration + gmailMigration + mailProviderMigration;
+const primaryProviderMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260827000100_multi_provider_primary_auth/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const multipleMailConnectionsMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260828000100_multiple_mail_connections/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const notificationMemberMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260828000200_notification_members/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const migration =
+  baseMigration +
+  gmailMigration +
+  mailProviderMigration +
+  primaryProviderMigration +
+  multipleMailConnectionsMigration +
+  notificationMemberMigration;
 
 const databases: PGlite[] = [];
 
@@ -125,7 +152,11 @@ describe("PostgreSQL migrations", () => {
       WHERE pg_type.typname = 'IdentityProvider'
       ORDER BY enumsortorder;
     `);
-    expect(identityProviders.rows).toEqual([{ enumlabel: "GOOGLE" }]);
+    expect(identityProviders.rows).toEqual([
+      { enumlabel: "GOOGLE" },
+      { enumlabel: "MICROSOFT" },
+      { enumlabel: "APPLE" }
+    ]);
 
     const challengeKinds = await database.query<{ enumlabel: string }>(`
       SELECT enumlabel
@@ -161,6 +192,21 @@ describe("PostgreSQL migrations", () => {
     expect(mailProviders.rows).toEqual([
       { enumlabel: "GOOGLE" },
       { enumlabel: "MICROSOFT" }
+    ]);
+
+    const memberTables = await database.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN (
+          'notification_members',
+          'notification_member_sessions'
+        )
+      ORDER BY table_name;
+    `);
+    expect(memberTables.rows).toEqual([
+      { table_name: "notification_member_sessions" },
+      { table_name: "notification_members" }
     ]);
 
     await database.exec(`

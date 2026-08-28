@@ -2,6 +2,7 @@ import type { DatabaseClient } from "../../db/client.js";
 import { retrySerializableTransaction } from "../../db/transaction-retry.js";
 import { Prisma } from "../../generated/prisma/client.js";
 import { AppError } from "../../lib/app-error.js";
+import { countOccupiedAdditionalSeats } from "../notification-members/prisma-notification-member-repository.js";
 import {
   calculateAnnualPriceYen,
   calculateSeatSummary
@@ -125,9 +126,10 @@ export class PrismaTeamRepository implements TeamRepository {
       return null;
     }
 
-    const activeMemberCount = await this.database.teamMembership.count({
-      where: { teamId, role: "MEMBER", status: "ACTIVE" }
-    });
+    const activeMemberCount = await countOccupiedAdditionalSeats(
+      this.database,
+      teamId
+    );
     return mapTeamContext({
       team: membership.team,
       membership,
@@ -198,13 +200,10 @@ export class PrismaTeamRepository implements TeamRepository {
         const subscription = await transaction.subscription.findUniqueOrThrow({
           where: { id: existingSubscription.id }
         });
-        const activeMemberCount = await transaction.teamMembership.count({
-          where: {
-            teamId: input.teamId,
-            role: "MEMBER",
-            status: "ACTIVE"
-          }
-        });
+        const activeMemberCount = await countOccupiedAdditionalSeats(
+          transaction,
+          input.teamId
+        );
 
         if (
           input.requestedSeatLimit === subscription.seatLimit &&
@@ -355,13 +354,10 @@ export class PrismaTeamRepository implements TeamRepository {
                   }
                 });
               const subscription = change.subscription;
-              const activeMemberCount = await transaction.teamMembership.count({
-                where: {
-                  teamId: subscription.teamId,
-                  role: "MEMBER",
-                  status: "ACTIVE"
-                }
-              });
+              const activeMemberCount = await countOccupiedAdditionalSeats(
+                transaction,
+                subscription.teamId
+              );
 
               if (change.status === "APPLIED") {
                 if (
@@ -523,13 +519,10 @@ async function findCurrentTeam(
     return null;
   }
 
-  const activeMemberCount = await database.teamMembership.count({
-    where: {
-      teamId: membership.teamId,
-      role: "MEMBER",
-      status: "ACTIVE"
-    }
-  });
+  const activeMemberCount = await countOccupiedAdditionalSeats(
+    database,
+    membership.teamId
+  );
 
   return mapTeamContext({
     team: membership.team,

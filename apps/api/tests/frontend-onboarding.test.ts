@@ -11,14 +11,26 @@ const script = readFileSync(
 );
 
 describe("frontend onboarding order", () => {
-  it("starts with provider selection and no marketing hero", () => {
+  it("starts with a simple guest home and no marketing hero", () => {
     expect(html).not.toContain("今すぐ始める");
     expect(html).not.toContain('id="landingScreen"');
     expect(html).not.toContain('class="hero"');
+    expect(html).toContain('id="guestHomeScreen"');
+    expect(html).toContain("Call Nowを設定する");
+    expect(html).toContain("通知グループに参加");
     expect(html).toContain("Call Nowに登録・ログイン");
     expect(html).toContain("Googleで続ける");
     expect(html).toContain("Microsoftで続ける");
     expect(html).toContain("Appleで続ける");
+  });
+
+  it("keeps owner and notification-member sessions separate", () => {
+    expect(script).toContain("/api/v1/notification-members/me");
+    expect(script).toContain("/api/v1/notification-members/login");
+    expect(script).toContain("/api/v1/notification-members/logout");
+    expect(script).toContain("notificationMemberSession");
+    expect(html).toContain('id="notificationMemberAppScreen"');
+    expect(html).not.toContain("メール本文を表示");
   });
 
   it("opens home from an authenticated session without forcing a contract", () => {

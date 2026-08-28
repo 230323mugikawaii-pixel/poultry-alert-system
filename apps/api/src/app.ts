@@ -16,6 +16,8 @@ import type { PrimaryAuthService } from "./modules/auth/primary-auth-service.js"
 import type { MailConnectionService } from "./modules/mail/mail-connection-service.js";
 import { createMailConnectionRoutes } from "./modules/mail/mail-connection-routes.js";
 import type { InvitationService } from "./modules/invitations/invitation-service.js";
+import type { NotificationMemberService } from "./modules/notification-members/notification-member-service.js";
+import { createNotificationMemberRoutes } from "./modules/notification-members/notification-member-routes.js";
 import type { SecurityThrottleService } from "./modules/security/security-throttle-service.js";
 import { createInvitationRoutes } from "./modules/invitations/invitation-routes.js";
 import type { TeamService } from "./modules/teams/team-service.js";
@@ -31,6 +33,7 @@ export interface BuildAppOptions {
   readonly mailConnectionService?: MailConnectionService;
   readonly teamService?: TeamService;
   readonly invitationService?: InvitationService;
+  readonly notificationMemberService?: NotificationMemberService;
   readonly securityThrottleService?: SecurityThrottleService;
   readonly readinessCheck?: () => Promise<void>;
 }
@@ -231,6 +234,21 @@ export async function buildApp(
         options.authService,
         options.invitationService,
         options.securityThrottleService,
+        options.environment
+      )
+    );
+  }
+
+  if (
+    options.authService &&
+    options.teamService &&
+    options.notificationMemberService
+  ) {
+    await app.register(
+      createNotificationMemberRoutes(
+        options.authService,
+        options.teamService,
+        options.notificationMemberService,
         options.environment
       )
     );
