@@ -21,6 +21,8 @@ import type {
 } from "../src/modules/mail/mail-provider.js";
 import { GMAIL_READONLY_SCOPE } from "../src/modules/mail/providers/google-mail-provider.js";
 import { PrismaMailConnectionRepository } from "../src/modules/mail/prisma-mail-connection-repository.js";
+import { NotificationMemberService } from "../src/modules/notification-members/notification-member-service.js";
+import { PrismaNotificationMemberRepository } from "../src/modules/notification-members/prisma-notification-member-repository.js";
 import { LocalAesGcmTokenEncryptionProvider } from "../src/modules/mail/token-encryption.js";
 import { InvitationService } from "../src/modules/invitations/invitation-service.js";
 import { prepareInvitationCredential } from "../src/modules/invitations/invitation-credential.js";
@@ -49,6 +51,8 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     await database.$executeRawUnsafe(`
       TRUNCATE TABLE
         audit_events,
+        notification_member_sessions,
+        notification_members,
         external_identities,
         invitation_redemptions,
         invitation_links,
@@ -1201,6 +1205,173 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       })
     ).rejects.toMatchObject({ code: "P2002" });
     expect(first.team.teamId).not.toBe(second.team.teamId);
+  });
+
+  it("admits one notification member to the final seat and revokes sessions on reset and disable", async () => {
+    const clock = { value: new Date("2026-08-28T05:00:00.000Z") };
+    const owner = await createUser("notification-owner@example.com");
+    const services = createServices(clock, "482737");
+    const invitation = await prepareInvitationCredential({
+      now: clock.value,
+      ttlDays: 30
+    });
+    const team = await services.teamService.createTeam(
+      { ownerUserId: owner.id, seatLimit: 1 },
+      invitation
+    );
+    const repository = new PrismaNotificationMemberRepository(database);
+    const memberServices = ["CN-00000001", "CN-00000002"].map(
+      (callNowId) =>
+        new NotificationMemberService({
+          repository,
+          securityThrottle: new SecurityThrottleService(
+            new PrismaSecurityThrottleRepository(database),
+            testPepper,
+            () => clock.value
+          ),
+          tokenPepper: testPepper,
+          sessionIdleDays: 30,
+          sessionAbsoluteDays: 90,
+          maxActiveSessions: 5,
+          now: () => clock.value,
+          callNowIdGenerator: () => callNowId
+        })
+    );
+    const attempts = await Promise.allSettled(
+      memberServices.map((service, index) =>
+        service.create({
+          teamId: team.team.teamId,
+          actorUserId: owner.id,
+          displayName: `通知メンバー${index + 1}`
+        })
+      )
+    );
+    const created = attempts.find(
+      (
+        attempt
+      ): attempt is PromiseFulfilledResult<
+        Awaited<ReturnType<NotificationMemberService["create"]>>
+      > => attempt.status === "fulfilled"
+    );
+    expect(created).toBeDefined();
+    expect(
+      attempts.filter(({ status }) => status === "fulfilled")
+    ).toHaveLength(1);
+    const rejected = attempts.find(
+      (attempt): attempt is PromiseRejectedResult =>
+        attempt.status === "rejected"
+    );
+    if (!rejected) throw new Error("notification_member_conflict_missing");
+    const conflict = rejected.reason as AppError;
+    expect(conflict.code).toMatch(/MEMBER_CAPACITY/u);
+    expect(conflict.statusCode).toBe(409);
+    if (!created) throw new Error("notification_member_not_created");
+    const service = memberServices[0];
+    if (!service) throw new Error("notification_member_service_missing");
+    const login = await service.login({
+      callNowId: created.value.member.callNowId,
+      password: created.value.initialPassword,
+      ipAddress: "198.51.100.70",
+      userAgent: "PostgreSQL acceptance"
+    });
+    await expect(
+      service.authenticate(login.sessionToken)
+    ).resolves.toMatchObject({
+      member: { id: created.value.member.id }
+    });
+    const reset = await service.resetPassword({
+      teamId: team.team.teamId,
+      memberId: created.value.member.id,
+      actorUserId: owner.id
+    });
+    await expect(
+      service.authenticate(login.sessionToken)
+    ).rejects.toMatchObject({
+      code: "UNAUTHENTICATED"
+    });
+    const replacementLogin = await service.login({
+      callNowId: created.value.member.callNowId,
+      password: reset.initialPassword,
+      ipAddress: "198.51.100.70"
+    });
+    const disabled = await service.disable({
+      teamId: team.team.teamId,
+      memberId: created.value.member.id,
+      actorUserId: owner.id
+    });
+    expect(disabled.seats).toMatchObject({
+      seatCount: 2,
+      occupiedAdditionalSeats: 0,
+      availableSeats: 1
+    });
+    await expect(
+      service.authenticate(replacementLogin.sessionToken)
+    ).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+    const storedMember = await database.notificationMember.findUnique({
+      where: { id: created.value.member.id },
+      select: { passwordHash: true }
+    });
+    expect(storedMember?.passwordHash).toMatch(/^\$argon2id\$/u);
+  });
+
+  it("applies a pending seat decrease after a notification member is disabled", async () => {
+    const clock = { value: new Date("2026-08-28T06:00:00.000Z") };
+    const owner = await createUser("notification-reduction@example.com");
+    const services = createServices(clock, "482738");
+    const invitation = await prepareInvitationCredential({
+      now: clock.value,
+      ttlDays: 30
+    });
+    const team = await services.teamService.createTeam(
+      { ownerUserId: owner.id, seatLimit: 2 },
+      invitation
+    );
+    const repository = new PrismaNotificationMemberRepository(database);
+    let generated = 0;
+    const service = new NotificationMemberService({
+      repository,
+      securityThrottle: new SecurityThrottleService(
+        new PrismaSecurityThrottleRepository(database),
+        testPepper,
+        () => clock.value
+      ),
+      tokenPepper: testPepper,
+      sessionIdleDays: 30,
+      sessionAbsoluteDays: 90,
+      maxActiveSessions: 5,
+      now: () => clock.value,
+      callNowIdGenerator: () => `CN-${String(++generated).padStart(8, "0")}`
+    });
+    const first = await service.create({
+      teamId: team.team.teamId,
+      actorUserId: owner.id
+    });
+    await service.create({
+      teamId: team.team.teamId,
+      actorUserId: owner.id
+    });
+    const change = await services.teamService.requestSeatLimitChange(
+      owner.id,
+      1
+    );
+    expect(change.status).toBe("PENDING_CAPACITY");
+    const result = await service.disable({
+      teamId: team.team.teamId,
+      memberId: first.member.id,
+      actorUserId: owner.id
+    });
+    expect(result.seats).toMatchObject({
+      seatCount: 2,
+      additionalSeatLimit: 1,
+      occupiedAdditionalSeats: 1,
+      pendingSeatCount: null
+    });
+    await expect(
+      database.subscription.findUniqueOrThrow({
+        where: { teamId: team.team.teamId },
+        select: { seatLimit: true, pendingSeatLimit: true }
+      })
+    ).resolves.toEqual({ seatLimit: 1, pendingSeatLimit: null });
   });
 });
 
