@@ -13,10 +13,11 @@
     "test": "pnpm --filter @call-now/api test",
     "test:frontend-alerts": "node --test tests/frontend-alerts.test.mjs",
     "test:frontend-auth": "node --test tests/frontend-auth-foundation.test.mjs",
+    "test:frontend-onboarding": "node --test tests/frontend-owner-onboarding.test.mjs",
     "test:keywords": "node --test tests/keyword-policy.test.mjs",
     "test:postgres": "pnpm --filter @call-now/api test:postgres",
     "test:coverage": "pnpm --filter @call-now/api test:coverage",
     "typecheck": "pnpm --filter @call-now/api typecheck",
-    "verify": "pnpm test:keywords && pnpm test:frontend-auth && pnpm test:frontend-alerts && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "verify": "pnpm test:keywords && pnpm test:frontend-auth && pnpm test:frontend-onboarding && pnpm test:frontend-alerts && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   }
 }

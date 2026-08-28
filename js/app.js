@@ -164,6 +164,7 @@ const INCLUDED_KEYWORD_LIMIT =
   keywordPolicy.INCLUDED_KEYWORD_LIMIT;
 const EXTRA_KEYWORD_PRICE =
   keywordPolicy.EXTRA_KEYWORD_PRICE_YEN;
+const EXTRA_USER_PRICE = 100;
 const STORAGE_VERSION = 2;
 const STORAGE_KEY = "callNowContract";
 const LEGACY_GOOGLE_ACCOUNTS_BACKUP_KEY =
@@ -178,7 +179,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-28.2";
+  "2026-08-29.1";
 
 /*
   正式なURLが決まった場合だけ設定する公開リンク。
@@ -218,6 +219,13 @@ let mailProviderAvailability = {
   GOOGLE: "UNKNOWN",
   MICROSOFT: "UNKNOWN"
 };
+let ownerMonitoringProviderAvailability = {
+  GOOGLE: "UNKNOWN",
+  MICROSOFT: "UNKNOWN"
+};
+let ownerOnboarding = null;
+let ownerSetupSeatCount = 1;
+const ownerSetupLocalSkips = new Set();
 let notificationMemberManagement = null;
 let ownerAlerts = [];
 let notificationMemberAlerts = [];
@@ -276,11 +284,15 @@ async function initializeApplication() {
 
   loginProviderAvailability =
     await fetchLoginProviderAvailability();
+  ownerMonitoringProviderAvailability =
+    await fetchOwnerMonitoringProviderAvailability();
 
   googleEmail =
     authenticatedUser?.email || "";
 
   if (authenticatedUser) {
+    ownerOnboarding =
+      await fetchOwnerOnboarding();
     loginIdentities =
       await fetchLoginIdentities();
     currentTeam =
@@ -317,6 +329,15 @@ async function initializeApplication() {
     readMailAuthResult();
   const mailAuthProvider =
     readMailAuthProvider();
+  const ownerOnboardingResult =
+    readOwnerOnboardingResult();
+  const ownerOnboardingProvider =
+    readOwnerOnboardingProvider();
+
+  if (ownerOnboardingResult) {
+    clearAuthResultFromUrl("ownerOnboarding");
+    clearAuthResultFromUrl("mailProvider");
+  }
 
   if (mailAuthResult) {
     clearAuthResultFromUrl("mailAuth");
@@ -331,7 +352,15 @@ async function initializeApplication() {
       primaryAuthResult === "success" &&
       authenticatedUser
     ) {
-      openApp();
+      if (currentTeam) {
+        if (ownerOnboarding?.status === "PURCHASED") {
+          openMonitoringConfirmation();
+        } else {
+          openApp();
+        }
+      } else {
+        openOwnerSetup();
+      }
       return;
     }
 
@@ -365,7 +394,53 @@ async function initializeApplication() {
     return;
   }
 
+  if (ownerOnboardingResult) {
+    if (
+      ownerOnboardingResult === "success" &&
+      authenticatedUser
+    ) {
+      ownerOnboarding =
+        await fetchOwnerOnboarding();
+      currentTeam =
+        await fetchCurrentTeamContext();
+      if (
+        currentTeam &&
+        ownerOnboarding?.status === "PURCHASED"
+      ) {
+        openMonitoringConfirmation();
+      } else if (currentTeam) {
+        openApp();
+      } else {
+        openOwnerSetup();
+      }
+      return;
+    }
+
+    openOwnerSetup();
+    setText(
+      "ownerMonitoringSetupError",
+      ownerOnboardingResult === "unavailable"
+        ? `${mailProviderLabel(ownerOnboardingProvider)}は現在準備中です。別のアカウントを設定するか、時間をおいてお試しください。`
+        : `${mailProviderLabel(ownerOnboardingProvider)}を設定できませんでした。もう一度お試しください。`
+    );
+    return;
+  }
+
   if (authenticatedUser) {
+    if (
+      !currentTeam &&
+      ownerOnboarding?.status === "PENDING"
+    ) {
+      openOwnerSetup();
+      return;
+    }
+    if (
+      currentTeam &&
+      ownerOnboarding?.status === "PURCHASED"
+    ) {
+      openMonitoringConfirmation();
+      return;
+    }
     openApp();
     if (mailAuthResult) {
       await showAppAlert(
@@ -549,6 +624,96 @@ async function fetchLoginProviderAvailability() {
     );
     return unknown;
   }
+}
+
+
+async function fetchOwnerMonitoringProviderAvailability() {
+  const unknown = {
+    GOOGLE: "UNKNOWN",
+    MICROSOFT: "UNKNOWN"
+  };
+  try {
+    const response = await fetch(
+      apiUrl("/api/v1/owner-onboarding/providers"),
+      {
+        method: "GET",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+        cache: "no-store"
+      }
+    );
+    if (!response.ok) return unknown;
+    const providers =
+      (await response.json())?.providers;
+    if (!Array.isArray(providers)) return unknown;
+    const result = { ...unknown };
+    providers.forEach((entry) => {
+      if (
+        (entry?.provider === "GOOGLE" ||
+          entry?.provider === "MICROSOFT") &&
+        (entry.status === "AVAILABLE" ||
+          entry.status === "NOT_CONFIGURED")
+      ) {
+        result[entry.provider] = entry.status;
+      }
+    });
+    return result;
+  } catch (error) {
+    console.warn(
+      "監視アカウント設定の準備状況を確認できませんでした。",
+      error
+    );
+    return unknown;
+  }
+}
+
+
+async function fetchOwnerOnboarding() {
+  if (!authenticatedUser) return null;
+  try {
+    const response = await fetch(
+      apiUrl("/api/v1/owner-onboarding/current"),
+      {
+        method: "GET",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+        cache: "no-store"
+      }
+    );
+    if (response.status === 401) return null;
+    if (!response.ok) {
+      throw new Error(
+        `owner_onboarding_${response.status}`
+      );
+    }
+    const onboarding =
+      (await response.json())?.onboarding;
+    return isOwnerOnboarding(onboarding)
+      ? onboarding
+      : null;
+  } catch (error) {
+    console.warn(
+      "初回設定の状態を確認できませんでした。",
+      error
+    );
+    return null;
+  }
+}
+
+
+function isOwnerOnboarding(value) {
+  return Boolean(
+    value &&
+      typeof value.id === "string" &&
+      [
+        "PENDING",
+        "PURCHASED",
+        "COMPLETED",
+        "EXPIRED",
+        "ABANDONED"
+      ].includes(value.status) &&
+      Array.isArray(value.choices)
+  );
 }
 
 
@@ -980,6 +1145,30 @@ function readMailAuthResult() {
 }
 
 
+function readOwnerOnboardingResult() {
+  const result =
+    new URL(window.location.href)
+      .searchParams
+      .get("ownerOnboarding");
+  return result === "success" ||
+    result === "error" ||
+    result === "unavailable"
+    ? result
+    : null;
+}
+
+
+function readOwnerOnboardingProvider() {
+  const provider =
+    new URL(window.location.href)
+      .searchParams
+      .get("mailProvider");
+  return provider === "MICROSOFT"
+    ? "MICROSOFT"
+    : "GOOGLE";
+}
+
+
 function clearAuthResultFromUrl(parameterName) {
   const url = new URL(window.location.href);
   url.searchParams.delete(parameterName);
@@ -1000,6 +1189,178 @@ function openGuestHome() {
 
 function openOwnerLogin() {
   openGoogleScreen("login");
+}
+
+
+function openOwnerSetup() {
+  setText("ownerMonitoringSetupError", "");
+  showOnlyScreen("ownerMonitoringSetupScreen");
+  renderOwnerMonitoringSetup();
+  window.scrollTo({ top: 0 });
+}
+
+
+function renderOwnerMonitoringSetup() {
+  renderOwnerMonitoringProvider("GOOGLE");
+  renderOwnerMonitoringProvider("MICROSOFT");
+}
+
+
+function renderOwnerMonitoringProvider(provider) {
+  const prefix =
+    provider === "GOOGLE"
+      ? "ownerGoogle"
+      : "ownerMicrosoft";
+  const status =
+    document.getElementById(`${prefix}SetupStatus`);
+  const setupButton =
+    document.getElementById(`${prefix}SetupButton`);
+  const skipButton =
+    document.getElementById(`${prefix}SkipButton`);
+  if (!status || !setupButton || !skipButton) return;
+
+  const choice = ownerOnboarding?.choices?.find(
+    (candidate) => candidate.provider === provider
+  );
+  const isAuthorized = Boolean(
+    choice?.email &&
+      ["AUTHORIZED", "ACTIVATED", "DEFERRED"].includes(
+        choice.status
+      )
+  );
+  const isSkipped =
+    ownerSetupLocalSkips.has(provider) ||
+    choice?.status === "SKIPPED";
+  const isAvailable =
+    ownerMonitoringProviderAvailability[provider] ===
+    "AVAILABLE";
+
+  setupButton.disabled = !isAvailable;
+  skipButton.classList.toggle("hidden", isAuthorized);
+
+  if (isAuthorized) {
+    status.innerHTML = `
+      <strong>設定済み</strong>
+      <span>${escapeHtml(choice.email)}</span>
+    `;
+    setupButton.textContent =
+      provider === "GOOGLE"
+        ? "別のGoogleアカウントを設定する"
+        : "別のMicrosoftアカウントを設定する";
+    return;
+  }
+
+  setupButton.textContent =
+    provider === "GOOGLE"
+      ? "Googleを設定する"
+      : "Microsoftを設定する";
+  if (isSkipped) {
+    status.textContent =
+      `${provider === "GOOGLE" ? "Google" : "Microsoft"}アカウントは今回は設定しません。あとからいつでも設定できます。`;
+    return;
+  }
+
+  status.textContent = isAvailable
+    ? "未設定"
+    : "現在準備中です。別のアカウントを設定してください。";
+}
+
+
+function startOwnerMonitoringOAuth(provider) {
+  if (
+    provider !== "GOOGLE" &&
+    provider !== "MICROSOFT"
+  ) {
+    return;
+  }
+  if (
+    ownerMonitoringProviderAvailability[provider] !==
+    "AVAILABLE"
+  ) {
+    setText(
+      "ownerMonitoringSetupError",
+      `${mailProviderLabel(provider)}は現在準備中です。`
+    );
+    return;
+  }
+  ownerSetupLocalSkips.delete(provider);
+  setText("ownerMonitoringSetupError", "");
+  const form = document.createElement("form");
+  form.method = "post";
+  form.action = apiUrl(
+    `/api/v1/owner-onboarding/oauth/${provider.toLowerCase()}/start`
+  );
+  form.hidden = true;
+  document.body.appendChild(form);
+  form.submit();
+}
+
+
+async function skipOwnerMonitoringProvider(provider) {
+  if (
+    provider !== "GOOGLE" &&
+    provider !== "MICROSOFT"
+  ) {
+    return;
+  }
+  setText("ownerMonitoringSetupError", "");
+  if (authenticatedUser && ownerOnboarding?.status === "PENDING") {
+    try {
+      const response = await fetch(
+        apiUrl(
+          `/api/v1/owner-onboarding/providers/${provider.toLowerCase()}/skip`
+        ),
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { Accept: "application/json" }
+        }
+      );
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !isOwnerOnboarding(result)) {
+        throw new Error(
+          result?.error?.message ||
+            `owner_onboarding_skip_${response.status}`
+        );
+      }
+      ownerOnboarding = result;
+    } catch (error) {
+      setText(
+        "ownerMonitoringSetupError",
+        error instanceof Error
+          ? error.message
+          : "設定状態を保存できませんでした。"
+      );
+      return;
+    }
+  } else {
+    ownerSetupLocalSkips.add(provider);
+  }
+  renderOwnerMonitoringSetup();
+}
+
+
+function continueFromOwnerMonitoringSetup() {
+  const authorized = ownerOnboarding?.choices?.some(
+    (choice) =>
+      choice.email &&
+      ["AUTHORIZED", "ACTIVATED", "DEFERRED"].includes(
+        choice.status
+      )
+  );
+  if (!authenticatedUser || !authorized) {
+    setText(
+      "ownerMonitoringSetupError",
+      "Call Nowを利用するには、少なくとも1つの監視アカウントを設定してください。"
+    );
+    return;
+  }
+  setupMode = "signup";
+  showOnlyScreen("setupScreen");
+  renderKeywordInputs();
+  updateSetupScreenText();
+  updatePrice();
+  window.scrollTo({ top: 0 });
 }
 
 
@@ -1368,7 +1729,12 @@ async function resolveAlert(alertId) {
 
 function openSetupForAuthenticatedUser() {
   if (!authenticatedUser) {
-    openOwnerLogin();
+    openOwnerSetup();
+    return;
+  }
+
+  if (!currentTeam && ownerOnboarding?.status === "PENDING") {
+    openOwnerSetup();
     return;
   }
 
@@ -1385,7 +1751,11 @@ function openSetupForAuthenticatedUser() {
 
 
 function handleSetupBack() {
-  openApp();
+  if (setupMode === "signup") {
+    openOwnerSetup();
+  } else {
+    openApp();
+  }
 
   window.scrollTo({
     top: 0,
@@ -1396,7 +1766,7 @@ function handleSetupBack() {
 
 function backToSetup() {
   if (!authenticatedUser) {
-    openGoogleScreen("login");
+    openOwnerSetup();
     return;
   }
 
@@ -1758,10 +2128,20 @@ function updatePrice() {
     extraKeywordCount *
     EXTRA_KEYWORD_PRICE;
 
+  const additionalSeatCount =
+    setupMode === "signup"
+      ? Math.max(ownerSetupSeatCount - 1, 0)
+      : Math.max(
+          currentTeam?.seats?.additionalSeatLimit ?? 0,
+          0
+        );
+  const seatPrice =
+    additionalSeatCount * EXTRA_USER_PRICE;
+
   totalPrice =
     keywordPolicy.calculateAnnualPriceYen(
       keywordCount
-    );
+    ) + seatPrice;
 
   setText(
     "keywordCount",
@@ -1771,6 +2151,11 @@ function updatePrice() {
   setText(
     "extraPrice",
     formatYen(extraPrice)
+  );
+
+  setText(
+    "ownerSeatPrice",
+    formatYen(seatPrice)
   );
 
   setText(
@@ -1784,6 +2169,18 @@ function updatePrice() {
       .ceil(totalPrice / 12)
       .toLocaleString("ja-JP")
   );
+}
+
+
+function updateOwnerSeatCount() {
+  const value = Number(
+    document.getElementById("ownerSeatCount")?.value
+  );
+  ownerSetupSeatCount =
+    Number.isInteger(value) && value >= 1 && value <= 10
+      ? value
+      : 1;
+  updatePrice();
 }
 
 
@@ -1809,6 +2206,15 @@ function updateSetupScreenText() {
   }
 
   if (setupMode === "edit") {
+    document
+      .getElementById("setupProgress")
+      ?.classList.add("hidden");
+    document
+      .getElementById("ownerSeatSection")
+      ?.classList.add("hidden");
+    document
+      .getElementById("ownerSeatPriceRow")
+      ?.classList.add("hidden");
     setText(
       "setupStepLabel",
       "設定変更"
@@ -1830,9 +2236,24 @@ function updateSetupScreenText() {
     return;
   }
 
+  document
+    .getElementById("setupProgress")
+    ?.classList.remove("hidden");
+  document
+    .getElementById("ownerSeatSection")
+    ?.classList.remove("hidden");
+  document
+    .getElementById("ownerSeatPriceRow")
+    ?.classList.remove("hidden");
+  const seatSelect =
+    document.getElementById("ownerSeatCount");
+  if (seatSelect) {
+    seatSelect.value = String(ownerSetupSeatCount);
+  }
+
   setText(
     "setupStepLabel",
-    "STEP 1 / 2"
+    "利用設定"
   );
 
   setText(
@@ -1852,7 +2273,23 @@ function updateSetupScreenText() {
 
 async function continueFromSetup() {
   if (!authenticatedUser) {
-    openGoogleScreen("login");
+    openOwnerSetup();
+    return;
+  }
+
+  if (
+    setupMode === "signup" &&
+    (!ownerOnboarding ||
+      ownerOnboarding.status !== "PENDING" ||
+      !ownerOnboarding.choices.some(
+        (choice) => choice.status === "AUTHORIZED" && choice.email
+      ))
+  ) {
+    openOwnerSetup();
+    setText(
+      "ownerMonitoringSetupError",
+      "Call Nowを利用するには、少なくとも1つの監視アカウントを設定してください。"
+    );
     return;
   }
 
@@ -1916,18 +2353,41 @@ ${formatYen(totalPrice)}
 
 function openPayment() {
   if (!authenticatedUser) {
-    openGoogleScreen("login");
+    openOwnerSetup();
+    return;
+  }
+
+  if (
+    paymentMode === "signup" &&
+    (!ownerOnboarding ||
+      ownerOnboarding.status !== "PENDING" ||
+      !ownerOnboarding.choices.some(
+        (choice) =>
+          choice.status === "AUTHORIZED" && choice.email
+      ))
+  ) {
+    openOwnerSetup();
+    setText(
+      "ownerMonitoringSetupError",
+      "購入前の設定を確認できませんでした。監視アカウントを設定してください。"
+    );
     return;
   }
 
   const renewalMode =
     paymentMode === "renewal";
+  const signupMode =
+    paymentMode === "signup";
+
+  document
+    .getElementById("paymentProgress")
+    ?.classList.toggle("hidden", renewalMode);
 
   setText(
     "paymentStepLabel",
     renewalMode
       ? "契約更新"
-      : "STEP 2 / 2"
+      : "購入内容の確認"
   );
 
   setText(
@@ -1960,6 +2420,23 @@ function openPayment() {
     "paymentTotal",
     formatYen(paymentAmount)
   );
+
+  setText(
+    "paymentSeatCount",
+    `${ownerSetupSeatCount}人`
+  );
+  setText(
+    "paymentMailAccountCount",
+    `${ownerOnboarding?.choices?.filter(
+      (choice) => choice.status === "AUTHORIZED" && choice.email
+    ).length ?? 0}件`
+  );
+  document
+    .getElementById("paymentSeatDetail")
+    ?.classList.toggle("hidden", !signupMode);
+  document
+    .getElementById("paymentMailAccountDetail")
+    ?.classList.toggle("hidden", !signupMode);
 
   const container =
     document.getElementById(
@@ -2000,7 +2477,7 @@ function openPayment() {
 
 async function completeDemoPayment() {
   if (!authenticatedUser) {
-    openGoogleScreen("login");
+    openOwnerSetup();
     return;
   }
 
@@ -2066,34 +2543,215 @@ ${formatYen(totalPrice)}
   ) {
     createContractDates();
   }
-
-  paidAnnualPrice =
-    totalPrice;
-
-  saveData();
-  currentTeam =
-    (await fetchCurrentTeamContext()) ||
-    (await bootstrapInitialTeamContext());
-
-  if (!currentTeam ||
-      !hasActiveSubscription()) {
-    await showAppAlert(
-      "契約情報を保存できませんでした。通信状態を確認して、もう一度お試しください。",
-      {
-        title: "契約処理のエラー"
-      }
+  if (
+    !ownerOnboarding ||
+    ownerOnboarding.status !== "PENDING"
+  ) {
+    openOwnerSetup();
+    setText(
+      "ownerMonitoringSetupError",
+      "購入前の設定を確認できませんでした。初期設定をもう一度お試しください。"
     );
     return;
   }
 
-  synchronizeContractFromCurrentTeam();
+  const button =
+    document.getElementById("paymentCompleteButton");
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch(
+      apiUrl("/api/v1/owner-onboarding/demo-purchase"),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          onboardingId: ownerOnboarding.id,
+          keywords: [...keywords],
+          seatCount: ownerSetupSeatCount
+        })
+      }
+    );
+    const result = await response.json().catch(() => null);
+    if (
+      !response.ok ||
+      !isOwnerOnboarding(result?.onboarding)
+    ) {
+      throw new Error(
+        result?.error?.message ||
+          "契約情報を保存できませんでした。"
+      );
+    }
+    ownerOnboarding = result.onboarding;
+    totalPrice = result.amountYen;
+    paidAnnualPrice = result.amountYen;
+    currentTeam = await fetchCurrentTeamContext();
+    if (!currentTeam || !hasActiveSubscription()) {
+      throw new Error(
+        "契約情報を確認できませんでした。"
+      );
+    }
+    synchronizeContractFromCurrentTeam();
+    saveData();
+    openMonitoringConfirmation();
+  } catch (error) {
+    await showAppAlert(
+      error instanceof Error
+        ? error.message
+        : "契約情報を保存できませんでした。通信状態を確認して、もう一度お試しください。",
+      { title: "契約処理のエラー" }
+    );
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+
+function openMonitoringConfirmation() {
+  if (
+    !authenticatedUser ||
+    !currentTeam ||
+    !ownerOnboarding ||
+    !["PURCHASED", "COMPLETED"].includes(
+      ownerOnboarding.status
+    )
+  ) {
+    if (authenticatedUser && currentTeam) {
+      openApp();
+    } else {
+      openOwnerSetup();
+    }
+    return;
+  }
+  showOnlyScreen("monitoringConfirmationScreen");
+  setText("monitoringConfirmationError", "");
+  renderMonitoringConfirmation();
+  window.scrollTo({ top: 0 });
+}
+
+
+function renderMonitoringConfirmation() {
+  const container =
+    document.getElementById("monitoringConfirmationList");
+  const finishButton =
+    document.getElementById(
+      "finishMonitoringConfirmationButton"
+    );
+  if (!container || !finishButton) return;
+  const choices =
+    ownerOnboarding?.choices?.filter(
+      (choice) => choice.email && choice.status !== "SKIPPED"
+    ) ?? [];
+  container.innerHTML = choices
+    .map((choice) => {
+      const isActivated = choice.status === "ACTIVATED";
+      const isDeferred = choice.status === "DEFERRED";
+      const question =
+        choice.provider === "MICROSOFT"
+          ? "このMicrosoft 365アカウントを監視しますか？"
+          : "このGmailアカウントを監視しますか？";
+      return `
+        <article class="monitoring-confirmation-card">
+          <p class="small-label">${escapeHtml(mailProviderLabel(choice.provider))}</p>
+          <h2>${question}</h2>
+          <p class="confirmation-email">${escapeHtml(choice.email)}</p>
+          <p class="input-help">設定完了後も変更できます。</p>
+          <div class="monitoring-provider-actions">
+            <button
+              type="button"
+              class="btn primary"
+              onclick="activateOwnerMonitoringChoice('${choice.id}')"
+              ${isActivated ? "disabled" : ""}
+            >${isActivated ? "監視設定済み" : "このアカウントを監視する"}</button>
+            <button
+              type="button"
+              class="btn outline"
+              onclick="deferOwnerMonitoringChoice('${choice.id}')"
+              ${isActivated || isDeferred ? "disabled" : ""}
+            >${isDeferred ? "あとで変更を選択済み" : "あとで変更"}</button>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+  finishButton.disabled = choices.some(
+    (choice) => choice.status === "AUTHORIZED"
+  );
+}
+
+
+async function updateOwnerMonitoringChoice(choiceId, action) {
+  if (
+    !ownerOnboarding ||
+    !["activate", "defer"].includes(action)
+  ) {
+    return;
+  }
+  setText("monitoringConfirmationError", "");
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/owner-onboarding/choices/${encodeURIComponent(choiceId)}/${action}`
+      ),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { Accept: "application/json" }
+      }
+    );
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !isOwnerOnboarding(result)) {
+      throw new Error(
+        result?.error?.message ||
+          "監視アカウントの設定を保存できませんでした。"
+      );
+    }
+    ownerOnboarding = result;
+    renderMonitoringConfirmation();
+  } catch (error) {
+    setText(
+      "monitoringConfirmationError",
+      error instanceof Error
+        ? error.message
+        : "監視アカウントの設定を保存できませんでした。"
+    );
+  }
+}
+
+
+function activateOwnerMonitoringChoice(choiceId) {
+  return updateOwnerMonitoringChoice(choiceId, "activate");
+}
+
+
+function deferOwnerMonitoringChoice(choiceId) {
+  return updateOwnerMonitoringChoice(choiceId, "defer");
+}
+
+
+async function finishOwnerOnboarding() {
+  if (
+    ownerOnboarding?.choices?.some(
+      (choice) => choice.status === "AUTHORIZED"
+    )
+  ) {
+    setText(
+      "monitoringConfirmationError",
+      "各アカウントで、監視を始めるかあとで変更するかを選んでください。"
+    );
+    return;
+  }
   mailProviderAvailability =
     await fetchMailProviderAvailability();
   mailConnections =
     await fetchMailConnections();
   notificationMemberManagement =
     await fetchNotificationMembers();
-  openGoogleScreen("manage");
+  ownerAlerts = await fetchOwnerAlerts();
+  openApp();
 }
 
 
@@ -2482,10 +3140,18 @@ function renderMailMonitoringAccount() {
       "AVAILABLE";
 
   if (mailConnections.length === 0) {
+    const deferredChoices =
+      ownerOnboarding?.choices?.filter(
+        (choice) =>
+          choice.status === "DEFERRED" && choice.email
+      ) ?? [];
     status.innerHTML = `
       <p class="connected-account-empty">
-        メール監視アカウントは接続されていません。
+        ${deferredChoices.length > 0
+          ? "監視開始を保留しているアカウントがあります。"
+          : "メール監視アカウントは接続されていません。"}
       </p>
+      ${deferredChoices.map(renderDeferredMailChoice).join("")}
       ${mailProviderAvailabilityNotice()}
     `;
     return;
@@ -2497,6 +3163,13 @@ function renderMailMonitoringAccount() {
     </p>
     <div class="mail-connection-list">
       ${mailConnections.map(renderMailConnectionItem).join("")}
+      ${(ownerOnboarding?.choices ?? [])
+        .filter(
+          (choice) =>
+            choice.status === "DEFERRED" && choice.email
+        )
+        .map(renderDeferredMailChoice)
+        .join("")}
     </div>
     ${mailProviderAvailabilityNotice()}
   `;
@@ -2515,6 +3188,8 @@ function renderMailConnectionItem(connection) {
     mailProviderAvailability[
       connection.provider
     ] !== "AVAILABLE";
+  const isPaused =
+    connection.connectionStatus === "PAUSED";
   return `
     <article class="mail-connection-item">
       <div>
@@ -2525,7 +3200,11 @@ function renderMailConnectionItem(connection) {
           ${escapeHtml(connection.email)}
         </p>
         <p class="connected-account-empty">
-          ${requiresReauthorization ? "再認証が必要です" : "監視接続中"}
+          ${requiresReauthorization
+            ? "再認証が必要です"
+            : isPaused
+              ? "監視停止中"
+              : "監視接続中"}
         </p>
       </div>
       <div class="mail-account-actions">
@@ -2537,6 +3216,13 @@ function renderMailConnectionItem(connection) {
             onclick="reauthorizeMailConnection('${connection.id}', '${connection.provider}')"
           >再認証</button>
         ` : ""}
+        ${!requiresReauthorization ? `
+          <button
+            type="button"
+            class="btn outline"
+            onclick="setMailMonitoringState('${connection.id}', '${isPaused ? "resume" : "pause"}')"
+          >${isPaused ? "監視を開始" : "監視を停止"}</button>
+        ` : ""}
         <button
           type="button"
           class="account-remove-button"
@@ -2545,6 +3231,79 @@ function renderMailConnectionItem(connection) {
       </div>
     </article>
   `;
+}
+
+
+function renderDeferredMailChoice(choice) {
+  return `
+    <article class="mail-connection-item deferred">
+      <div>
+        <p class="connected-account-provider">
+          ${escapeHtml(mailProviderLabel(choice.provider))}
+        </p>
+        <p class="connected-account-email">
+          ${escapeHtml(choice.email)}
+        </p>
+        <p class="connected-account-empty">監視開始を保留中</p>
+      </div>
+      <div class="mail-account-actions">
+        <button
+          type="button"
+          class="btn outline"
+          onclick="activateDeferredOwnerMonitoring('${choice.id}')"
+        >監視を開始</button>
+      </div>
+    </article>
+  `;
+}
+
+
+async function activateDeferredOwnerMonitoring(choiceId) {
+  await updateOwnerMonitoringChoice(choiceId, "activate");
+  mailConnections = await fetchMailConnections();
+  renderMailMonitoringAccount();
+  renderConnectedGoogleAccounts();
+  renderHomeSetupNotices();
+}
+
+
+async function setMailMonitoringState(connectionId, action) {
+  if (
+    currentTeam?.role !== "OWNER" ||
+    !["pause", "resume"].includes(action)
+  ) {
+    return;
+  }
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/mail-connections/${encodeURIComponent(connectionId)}/${action}`
+      ),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { Accept: "application/json" }
+      }
+    );
+    const result = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(
+        result?.error?.message ||
+          "監視状態を変更できませんでした。"
+      );
+    }
+    mailConnections = await fetchMailConnections();
+    renderMailMonitoringAccount();
+    renderConnectedGoogleAccounts();
+    renderHomeSetupNotices();
+  } catch (error) {
+    await showAppAlert(
+      error instanceof Error
+        ? error.message
+        : "監視状態を変更できませんでした。",
+      { title: "監視設定のエラー" }
+    );
+  }
 }
 
 
@@ -3526,15 +4285,31 @@ function renderConnectedGoogleAccounts() {
   const requiresMailReauthorization =
     mailConnections.some(
       (connection) =>
-        connection.connectionStatus !== "ACTIVE" ||
+        ["REAUTH_REQUIRED", "ERROR"].includes(
+          connection.connectionStatus
+        ) ||
         connection.authorizationStatus !== "ACTIVE"
     );
+  const pausedMailConnections =
+    mailConnections.filter(
+      (connection) =>
+        connection.connectionStatus === "PAUSED"
+    );
+  const deferredMailChoices =
+    ownerOnboarding?.choices?.filter(
+      (choice) =>
+        choice.status === "DEFERRED" && choice.email
+    ) ?? [];
   const monitoringStatus =
     mailConnections.length > 0
       ? requiresMailReauthorization
         ? `${mailConnections.length}件中、再認証が必要な接続があります`
-        : `${mailConnections.length}件接続中`
-      : "未接続";
+        : pausedMailConnections.length > 0
+          ? `${activeMailConnections.length}件監視中・${pausedMailConnections.length}件停止中`
+          : `${mailConnections.length}件接続中`
+      : deferredMailChoices.length > 0
+        ? `${deferredMailChoices.length}件設定保留`
+        : "未接続";
   const monitoringDetail =
     mailConnections.length > 0
       ? mailConnections
@@ -3542,8 +4317,14 @@ function renderConnectedGoogleAccounts() {
             escapeHtml(connection.email)
           )
           .join("<br>")
-      : currentTeam?.role === "OWNER"
-        ? "重要メールの監視用アカウントを接続できます"
+      : deferredMailChoices.length > 0
+        ? deferredMailChoices
+            .map((choice) =>
+              `${escapeHtml(choice.email)}（設定保留）`
+            )
+            .join("<br>")
+        : currentTeam?.role === "OWNER"
+          ? "重要メールの監視用アカウントを接続できます"
         : currentTeam
           ? "メール監視アカウントの変更は管理者のみ行えます"
           : "契約後にメール監視アカウントを設定できます";
@@ -3605,10 +4386,27 @@ function renderHomeSetupNotices() {
     monitoringActive ? "監視中" : "未設定"
   );
   if (!monitoringActive) {
+    const monitoringPaused =
+      mailConnections.some(
+        (connection) =>
+          connection.connectionStatus === "PAUSED"
+      );
+    const monitoringDeferred =
+      ownerOnboarding?.choices?.some(
+        (choice) => choice.status === "DEFERRED"
+      );
     notices.push({
-      title: "メール監視アカウントが未接続です",
+      title: monitoringPaused
+        ? "メール監視が停止中です"
+        : monitoringDeferred
+          ? "監視開始を保留しています"
+          : "メール監視アカウントが未接続です",
       message: currentTeam
-        ? "GmailまたはMicrosoft 365の監視用アカウントを接続してください。"
+        ? monitoringPaused
+          ? "アカウント設定から監視を再開できます。"
+          : monitoringDeferred
+            ? "アカウント設定から監視を開始できます。"
+            : "GmailまたはMicrosoft 365の監視用アカウントを接続してください。"
         : "契約完了後に、監視用アカウントを設定できます。",
       action: currentTeam
         ? "openGoogleAccountManager()"
@@ -5129,6 +5927,7 @@ function showOnlyScreen(screenId) {
   const authenticatedScreens = new Set([
     "setupScreen",
     "paymentScreen",
+    "monitoringConfirmationScreen",
     "renewalCompleteScreen",
     "appScreen"
   ]);
@@ -5146,7 +5945,7 @@ function showOnlyScreen(screenId) {
     authenticatedScreens.has(screenId) &&
     !authenticatedUser
   ) {
-    openGoogleScreen("login");
+    openOwnerSetup();
     return;
   }
 
@@ -5160,10 +5959,12 @@ function showOnlyScreen(screenId) {
 
   const screenIds = [
     "guestHomeScreen",
+    "ownerMonitoringSetupScreen",
     "notificationMemberLoginScreen",
     "notificationMemberAppScreen",
     "setupScreen",
     "paymentScreen",
+    "monitoringConfirmationScreen",
     "renewalCompleteScreen",
     "googleScreen",
     "appScreen"

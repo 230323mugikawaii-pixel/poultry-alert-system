@@ -2155,6 +2155,122 @@ body.app-dialog-open {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+.setup-progress {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 22px 0 30px;
+  color: #7b8ba1;
+  font-size: 0.86rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.setup-progress .active {
+  color: #0862c7;
+}
+
+.monitoring-setup-container,
+.monitoring-confirmation-container {
+  width: min(100%, 840px);
+}
+
+.monitoring-provider-grid,
+.monitoring-confirmation-list {
+  display: grid;
+  gap: 18px;
+  margin: 28px 0;
+}
+
+.monitoring-provider-card,
+.monitoring-confirmation-card,
+.seat-setup-card {
+  padding: 24px;
+  border: 1px solid #d8e2ef;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 12px 30px rgb(25 72 120 / 7%);
+}
+
+.monitoring-provider-card h2,
+.monitoring-confirmation-card h2,
+.seat-setup-card h2 {
+  margin: 4px 0 10px;
+}
+
+.monitoring-provider-status {
+  min-height: 28px;
+  margin: 16px 0;
+  color: #53657c;
+}
+
+.monitoring-provider-status strong,
+.monitoring-provider-status span {
+  display: block;
+}
+
+.monitoring-provider-status strong,
+.completion-mark {
+  color: #087a42;
+  font-weight: 800;
+}
+
+.monitoring-provider-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.monitoring-provider-actions .btn {
+  flex: 1 1 0;
+}
+
+.center-text {
+  text-align: center;
+}
+
+.seat-setup-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+  margin: 24px 0;
+}
+
+.seat-count-field {
+  display: grid;
+  gap: 8px;
+  color: #53657c;
+  font-weight: 800;
+}
+
+.seat-count-field select {
+  min-width: 130px;
+  min-height: 48px;
+  padding: 10px 38px 10px 14px;
+  border: 1px solid #b9cbe2;
+  border-radius: 12px;
+  color: #111827;
+  background: #fff;
+  font: inherit;
+}
+
+.completion-mark {
+  margin: 22px 0 8px;
+}
+
+.confirmation-email {
+  overflow-wrap: anywhere;
+  color: #0862c7;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.mail-connection-item.deferred {
+  background: #f7f9fc;
+}
+
 @media (max-width: 600px) {
   .guest-home-card {
     padding: 24px 20px;
@@ -2185,5 +2301,26 @@ body.app-dialog-open {
 
   .member-create-controls {
     display: grid;
+  }
+
+  .setup-progress {
+    gap: 5px;
+    font-size: 0.72rem;
+  }
+
+  .monitoring-provider-card,
+  .monitoring-confirmation-card,
+  .seat-setup-card {
+    padding: 20px;
+  }
+
+  .monitoring-provider-actions,
+  .seat-setup-card {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .seat-count-field select {
+    width: 100%;
   }
 }
