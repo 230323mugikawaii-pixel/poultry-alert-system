@@ -38,6 +38,91 @@ export class PrismaTeamRepository implements TeamRepository {
     }
   }
 
+  public async completeOwnerOnboardingPurchase(
+    input: CreateTeamInput & { readonly onboardingId: string }
+  ): Promise<TeamCreationResult> {
+    try {
+      return await retrySerializableTransaction(
+        () =>
+          this.database.$transaction(
+            async (transaction) => {
+              const onboarding = await transaction.ownerOnboarding.findFirst({
+                where: { id: input.onboardingId, userId: input.ownerUserId },
+                include: { choices: true }
+              });
+              if (!onboarding) throw onboardingNotAvailableError();
+              await transaction.$queryRaw(
+                Prisma.sql`SELECT id FROM owner_onboardings WHERE id = ${onboarding.id}::uuid FOR UPDATE`
+              );
+              const locked =
+                await transaction.ownerOnboarding.findUniqueOrThrow({
+                  where: { id: onboarding.id },
+                  include: { choices: true }
+                });
+              if (
+                (locked.status === "PURCHASED" ||
+                  locked.status === "COMPLETED") &&
+                locked.teamId
+              ) {
+                const existing = await findCurrentTeam(
+                  transaction,
+                  input.ownerUserId
+                );
+                if (!existing || existing.teamId !== locked.teamId) {
+                  throw onboardingNotAvailableError();
+                }
+                return { team: existing, invitation: null };
+              }
+              if (
+                locked.status !== "PENDING" ||
+                locked.expiresAt <= input.currentTermStartedAt ||
+                !locked.choices.some(
+                  (choice) =>
+                    choice.status === "AUTHORIZED" && choice.mailAuthorizationId
+                )
+              ) {
+                throw onboardingNotAvailableError();
+              }
+              const memberships = await transaction.teamMembership.count({
+                where: { userId: input.ownerUserId }
+              });
+              if (memberships > 0) {
+                throw new AppError(
+                  "OWNER_ONBOARDING_TEAM_ALREADY_EXISTS",
+                  "すでに利用中の契約があります。",
+                  409
+                );
+              }
+              const created = await createTeamInTransaction(transaction, input);
+              await transaction.ownerOnboarding.update({
+                where: { id: locked.id },
+                data: {
+                  teamId: created.team.teamId,
+                  status: "PURCHASED",
+                  seatCount: 1 + input.seatLimit,
+                  keywords: [...input.keywords],
+                  purchasedAt: input.currentTermStartedAt
+                }
+              });
+              return created;
+            },
+            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+          ),
+        () =>
+          new AppError(
+            "OWNER_ONBOARDING_PURCHASE_CONFLICT",
+            "購入手続きが競合しました。もう一度お試しください。",
+            409
+          )
+      );
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new AppError("TEAM_CODE_CONFLICT", "Team code collision.", 409);
+      }
+      throw error;
+    }
+  }
+
   public async ensureInitialTeam(
     input: CreateTeamInput
   ): Promise<TeamContextRecord> {
@@ -662,6 +747,14 @@ function isUniqueConstraintError(error: unknown): boolean {
   return JSON.stringify(
     (error as { readonly meta?: unknown }).meta ?? {}
   ).includes("publicCode");
+}
+
+function onboardingNotAvailableError(): AppError {
+  return new AppError(
+    "OWNER_ONBOARDING_NOT_AVAILABLE",
+    "購入前の設定を確認できませんでした。初期設定をもう一度お試しください。",
+    409
+  );
 }
 
 function isPaymentEventUniqueConstraintError(error: unknown): boolean {

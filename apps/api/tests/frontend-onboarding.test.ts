@@ -51,11 +51,11 @@ describe("frontend onboarding order", () => {
     expect(script).toContain('screenId === "googleScreen"');
     expect(script).toContain('googleScreenMode === "manage"');
     expect(script).toContain("if (!authenticatedUser)");
-    expect(script).toContain('openGoogleScreen("login")');
+    expect(script).toContain("openOwnerSetup()");
     expect(script).not.toContain('"landingScreen",\n    "setupScreen"');
   });
 
-  it("opens monitoring account setup only after payment bootstrap", () => {
+  it("authorizes monitoring before purchase and activates it only after purchase", () => {
     const paymentStart = script.indexOf("async function completeDemoPayment()");
     const paymentEnd = script.indexOf(
       "/* ========================================\n   Googleアカウント選択",
@@ -63,12 +63,12 @@ describe("frontend onboarding order", () => {
     );
     const paymentFlow = script.slice(paymentStart, paymentEnd);
 
-    expect(paymentFlow).toContain("bootstrapInitialTeamContext()");
-    expect(paymentFlow).toContain('openGoogleScreen("manage")');
-    expect(paymentFlow.indexOf("bootstrapInitialTeamContext()")).toBeLessThan(
-      paymentFlow.indexOf('openGoogleScreen("manage")')
-    );
-    expect(html).toContain("メール監視アカウント");
+    expect(paymentFlow).toContain("/api/v1/owner-onboarding/demo-purchase");
+    expect(paymentFlow).toContain("openMonitoringConfirmation()");
+    expect(paymentFlow).not.toContain("bootstrapInitialTeamContext()");
+    expect(paymentFlow).not.toContain('openGoogleScreen("manage")');
+    expect(script).toContain("/api/v1/owner-onboarding/choices/");
+    expect(html).toContain("監視アカウント確認");
   });
 
   it("keeps login OAuth separate from monitoring OAuth", () => {

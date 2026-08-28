@@ -273,6 +273,37 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
     return { tokenToRevoke };
   }
 
+  public async setMonitoringState(input: {
+    readonly teamId: string;
+    readonly ownerUserId: string;
+    readonly connectionId: string;
+    readonly status: "ACTIVE" | "PAUSED";
+    readonly requestId: string | null;
+    readonly now: Date;
+  }): Promise<MailConnectionRecord> {
+    void input.ownerUserId;
+    void input.requestId;
+    void input.now;
+    const connection = this.connections.get(input.connectionId);
+    if (!connection || connection.teamId !== input.teamId) {
+      throw new AppError("MAIL_CONNECTION_NOT_FOUND", "missing", 404);
+    }
+    if (
+      !["ACTIVE", "PAUSED"].includes(connection.connectionStatus) ||
+      (input.status === "ACTIVE" && connection.authorizationStatus !== "ACTIVE")
+    ) {
+      throw new AppError("MAIL_CONNECTION_STATE_INVALID", "invalid", 409);
+    }
+    const updated = { ...connection, connectionStatus: input.status };
+    this.connections.set(connection.id, updated);
+    this.auditActions.push(
+      input.status === "ACTIVE"
+        ? "MAIL_MONITORING_RESUMED"
+        : "MAIL_MONITORING_PAUSED"
+    );
+    return updated;
+  }
+
   public async markAuthorizationFailure(input: {
     readonly authorizationId: string;
     readonly status: "REAUTH_REQUIRED" | "ERROR";

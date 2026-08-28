@@ -20,6 +20,8 @@ import { createMailConnectionRoutes } from "./modules/mail/mail-connection-route
 import type { InvitationService } from "./modules/invitations/invitation-service.js";
 import type { NotificationMemberService } from "./modules/notification-members/notification-member-service.js";
 import { createNotificationMemberRoutes } from "./modules/notification-members/notification-member-routes.js";
+import type { OwnerOnboardingService } from "./modules/onboarding/owner-onboarding-service.js";
+import { createOwnerOnboardingRoutes } from "./modules/onboarding/owner-onboarding-routes.js";
 import type { SecurityThrottleService } from "./modules/security/security-throttle-service.js";
 import { createInvitationRoutes } from "./modules/invitations/invitation-routes.js";
 import type { TeamService } from "./modules/teams/team-service.js";
@@ -36,6 +38,7 @@ export interface BuildAppOptions {
   readonly teamService?: TeamService;
   readonly invitationService?: InvitationService;
   readonly notificationMemberService?: NotificationMemberService;
+  readonly ownerOnboardingService?: OwnerOnboardingService;
   readonly alertService?: AlertService;
   readonly securityThrottleService?: SecurityThrottleService;
   readonly readinessCheck?: () => Promise<void>;
@@ -209,6 +212,22 @@ export async function buildApp(
     );
   }
 
+  if (options.authService && options.ownerOnboardingService) {
+    if (!options.securityThrottleService) {
+      throw new Error(
+        "securityThrottleService is required for owner onboarding"
+      );
+    }
+    await app.register(
+      createOwnerOnboardingRoutes(
+        options.authService,
+        options.ownerOnboardingService,
+        options.securityThrottleService,
+        options.environment
+      )
+    );
+  }
+
   if (
     options.authService &&
     options.teamService &&
@@ -223,7 +242,8 @@ export async function buildApp(
         options.teamService,
         options.mailConnectionService,
         options.securityThrottleService,
-        options.environment
+        options.environment,
+        options.ownerOnboardingService
       )
     );
   }

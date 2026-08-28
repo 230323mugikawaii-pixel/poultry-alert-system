@@ -14,7 +14,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=20">
+    <link rel="stylesheet" href="css/style.css?v=21">
 </head>
 
 <body>
@@ -28,7 +28,7 @@
       <button
         type="button"
         class="btn primary full-width"
-        onclick="openOwnerLogin()"
+        onclick="openOwnerSetup()"
       >
         Call Nowを設定する
       </button>
@@ -39,6 +39,85 @@
       >
         通知グループに参加
       </button>
+    </div>
+  </section>
+
+  <section id="ownerMonitoringSetupScreen" class="flow-screen hidden">
+    <div class="flow-container monitoring-setup-container">
+      <button type="button" class="back-button" onclick="openGuestHome()">
+        ← ホームへ戻る
+      </button>
+
+      <nav class="setup-progress" aria-label="セットアップの進み具合">
+        <span class="active" aria-current="step">1 監視アカウント</span>
+        <span aria-hidden="true">→</span>
+        <span>2 利用設定</span>
+        <span aria-hidden="true">→</span>
+        <span>3 購入</span>
+      </nav>
+
+      <h1>監視アカウント設定</h1>
+      <p class="description">
+        重要なメールを監視するアカウントを設定してください。
+      </p>
+
+      <div class="monitoring-provider-grid">
+        <article class="monitoring-provider-card">
+          <div>
+            <p class="small-label">Google</p>
+            <h2>Gmail / Google Workspace</h2>
+            <p>Gmailで受信する重要メールを監視します。</p>
+          </div>
+          <div id="ownerGoogleSetupStatus" class="monitoring-provider-status" aria-live="polite"></div>
+          <div class="monitoring-provider-actions">
+            <button
+              id="ownerGoogleSetupButton"
+              type="button"
+              class="btn primary"
+              onclick="startOwnerMonitoringOAuth('GOOGLE')"
+            >Googleを設定する</button>
+            <button
+              id="ownerGoogleSkipButton"
+              type="button"
+              class="btn outline"
+              onclick="skipOwnerMonitoringProvider('GOOGLE')"
+            >今回は設定しない</button>
+          </div>
+        </article>
+
+        <article class="monitoring-provider-card">
+          <div>
+            <p class="small-label">Microsoft</p>
+            <h2>Microsoft 365 / Outlook</h2>
+            <p>Microsoft 365 / Outlookで受信する重要メールを監視します。</p>
+          </div>
+          <div id="ownerMicrosoftSetupStatus" class="monitoring-provider-status" aria-live="polite"></div>
+          <div class="monitoring-provider-actions">
+            <button
+              id="ownerMicrosoftSetupButton"
+              type="button"
+              class="btn primary"
+              onclick="startOwnerMonitoringOAuth('MICROSOFT')"
+            >Microsoftを設定する</button>
+            <button
+              id="ownerMicrosoftSkipButton"
+              type="button"
+              class="btn outline"
+              onclick="skipOwnerMonitoringProvider('MICROSOFT')"
+            >今回は設定しない</button>
+          </div>
+        </article>
+      </div>
+
+      <p id="ownerMonitoringSetupError" class="error-message" aria-live="polite"></p>
+      <button
+        type="button"
+        class="btn primary full-width"
+        onclick="continueFromOwnerMonitoringSetup()"
+      >利用設定へ進む</button>
+      <p class="input-help center-text">
+        今回設定しないアカウントも、あとからいつでも追加できます。
+      </p>
     </div>
   </section>
 
@@ -140,12 +219,15 @@
       </button>
 
 
-      <p
-        id="setupStepLabel"
-        class="step-label"
-      >
-        STEP 1 / 2
-      </p>
+      <nav id="setupProgress" class="setup-progress" aria-label="セットアップの進み具合">
+        <span>1 監視アカウント</span>
+        <span aria-hidden="true">→</span>
+        <span class="active" aria-current="step">2 利用設定</span>
+        <span aria-hidden="true">→</span>
+        <span>3 購入</span>
+      </nav>
+
+      <p id="setupStepLabel" class="step-label">利用設定</p>
 
 
       <h1 id="setupTitle">
@@ -191,9 +273,33 @@
         <p>
           3キーワードまで基本料金に含まれます。<br>
           4個目以降は、1個につき年額100円追加されます。<br>
-          監視用メールアカウント1件が基本料金に含まれます。
+          監視アカウントの追加料金はありません。
         </p>
 
+      </div>
+
+      <div id="ownerSeatSection" class="seat-setup-card">
+        <div>
+          <h2>利用人数</h2>
+          <p class="input-help">
+            管理者1人を含む合計利用人数です。2人目から1人につき年額100円です。
+          </p>
+        </div>
+        <label class="seat-count-field">
+          <span>合計利用人数</span>
+          <select id="ownerSeatCount" onchange="updateOwnerSeatCount()">
+            <option value="1">1人</option>
+            <option value="2">2人</option>
+            <option value="3">3人</option>
+            <option value="4">4人</option>
+            <option value="5">5人</option>
+            <option value="6">6人</option>
+            <option value="7">7人</option>
+            <option value="8">8人</option>
+            <option value="9">9人</option>
+            <option value="10">10人</option>
+          </select>
+        </label>
       </div>
 
 
@@ -242,7 +348,8 @@
         </strong>
 
         <p class="input-help">
-          GmailまたはMicrosoft 365を1件連携します。追加料金はありません。
+          購入前に設定したGmailまたはMicrosoft 365を監視対象として確認します。
+          監視アカウントの追加料金はありません。
         </p>
 
       </div>
@@ -262,6 +369,11 @@
             6,000円
           </strong>
 
+        </div>
+
+        <div id="ownerSeatPriceRow" class="price-row">
+          <span>追加利用者</span>
+          <strong id="ownerSeatPrice">0円</strong>
         </div>
 
 
@@ -433,12 +545,15 @@
       </button>
 
 
-      <p
-        id="paymentStepLabel"
-        class="step-label"
-      >
-        STEP 2 / 2
-      </p>
+      <nav id="paymentProgress" class="setup-progress" aria-label="セットアップの進み具合">
+        <span>1 監視アカウント</span>
+        <span aria-hidden="true">→</span>
+        <span>2 利用設定</span>
+        <span aria-hidden="true">→</span>
+        <span class="active" aria-current="step">3 購入</span>
+      </nav>
+
+      <p id="paymentStepLabel" class="step-label">購入内容の確認</p>
 
 
       <h1 id="paymentTitle">
@@ -465,6 +580,11 @@
 
         </div>
 
+        <div id="paymentSeatDetail" class="payment-detail">
+          <span>合計利用人数</span>
+          <strong id="paymentSeatCount">1人</strong>
+        </div>
+
 
         <div
           id="paymentKeywords"
@@ -472,13 +592,13 @@
         ></div>
 
 
-        <div class="payment-detail">
+        <div id="paymentMailAccountDetail" class="payment-detail">
 
           <span>
             メール監視アカウント
           </span>
 
-          <strong>
+          <strong id="paymentMailAccountCount">
             1件（基本料金に含む）
           </strong>
 
@@ -538,6 +658,25 @@
 
     </div>
 
+  </section>
+
+  <section id="monitoringConfirmationScreen" class="flow-screen hidden">
+    <div class="flow-container monitoring-confirmation-container">
+      <p class="completion-mark">✓ 購入手続き完了</p>
+      <h1>監視アカウント確認</h1>
+      <p class="description">
+        監視を開始するアカウントを確認してください。
+      </p>
+      <div id="monitoringConfirmationList" class="monitoring-confirmation-list"></div>
+      <p id="monitoringConfirmationError" class="error-message" aria-live="polite"></p>
+      <button
+        id="finishMonitoringConfirmationButton"
+        type="button"
+        class="btn primary full-width"
+        onclick="finishOwnerOnboarding()"
+        disabled
+      >ホームへ進む</button>
+    </div>
   </section>
 
 

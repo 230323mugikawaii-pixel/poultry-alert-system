@@ -4,7 +4,7 @@ import type { MailProviderId } from "./mail-provider.js";
 export type MailOAuthIntent = "CONNECT" | "REAUTHORIZE";
 export type MailAuthorizationState =
   "ACTIVE" | "REAUTH_REQUIRED" | "REVOKED" | "ERROR";
-export type MailConnectionState = MailAuthorizationState;
+export type MailConnectionState = MailAuthorizationState | "PAUSED";
 
 export interface MailOAuthChallengeRecord {
   readonly userId: string;
@@ -91,6 +91,14 @@ export interface MailConnectionRepository {
     readonly requestId: string | null;
     readonly now: Date;
   }): Promise<MailDisconnectResult>;
+  setMonitoringState(input: {
+    readonly teamId: string;
+    readonly ownerUserId: string;
+    readonly connectionId: string;
+    readonly status: "ACTIVE" | "PAUSED";
+    readonly requestId: string | null;
+    readonly now: Date;
+  }): Promise<MailConnectionRecord>;
   markAuthorizationFailure(input: {
     readonly authorizationId: string;
     readonly status: "REAUTH_REQUIRED" | "ERROR";

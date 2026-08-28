@@ -13,7 +13,11 @@ import type { PrimaryAuthProviderAdapter } from "./modules/auth/primary-auth-pro
 import { PrimaryAuthService } from "./modules/auth/primary-auth-service.js";
 import { PrismaAuthRepository } from "./modules/auth/prisma-auth-repository.js";
 import { MailConnectionService } from "./modules/mail/mail-connection-service.js";
-import { getMailProviderStatuses } from "./modules/mail/mail-provider-configuration.js";
+import {
+  getMailProviderAvailability,
+  getMailProviderStatuses
+} from "./modules/mail/mail-provider-configuration.js";
+import type { MailProviderAdapter } from "./modules/mail/mail-provider.js";
 import { PrismaMailConnectionRepository } from "./modules/mail/prisma-mail-connection-repository.js";
 import { GoogleMailProvider } from "./modules/mail/providers/google-mail-provider.js";
 import { MicrosoftMailProvider } from "./modules/mail/providers/microsoft-mail-provider.js";
@@ -26,6 +30,8 @@ import { PrismaTeamRepository } from "./modules/teams/prisma-team-repository.js"
 import { TeamService } from "./modules/teams/team-service.js";
 import { PrismaSecurityThrottleRepository } from "./modules/security/prisma-security-throttle-repository.js";
 import { SecurityThrottleService } from "./modules/security/security-throttle-service.js";
+import { OwnerOnboardingService } from "./modules/onboarding/owner-onboarding-service.js";
+import { PrismaOwnerOnboardingRepository } from "./modules/onboarding/prisma-owner-onboarding-repository.js";
 
 loadDotenv({
   path: new URL("../../../.env", import.meta.url),
@@ -110,32 +116,52 @@ const primaryAuthService = new PrimaryAuthService({
 const teamService = new TeamService({
   repository: new PrismaTeamRepository(database)
 });
+const mailProviderAdapters: MailProviderAdapter[] = [
+  new GoogleMailProvider({
+    clientId: environment.GMAIL_OAUTH_CLIENT_ID,
+    clientSecret: environment.GMAIL_OAUTH_CLIENT_SECRET,
+    redirectUri: environment.GMAIL_OAUTH_REDIRECT_URI
+  }),
+  new MicrosoftMailProvider({
+    clientId: environment.MICROSOFT_OAUTH_CLIENT_ID,
+    clientSecret: environment.MICROSOFT_OAUTH_CLIENT_SECRET,
+    redirectUri: environment.MICROSOFT_OAUTH_REDIRECT_URI,
+    tenant: environment.MICROSOFT_OAUTH_TENANT
+  })
+];
+const tokenEncryption = createTokenEncryptionProvider({
+  provider: environment.MAIL_TOKEN_ENCRYPTION_PROVIDER,
+  localKey: environment.MAIL_TOKEN_ENCRYPTION_KEY,
+  localKeyVersion: environment.MAIL_TOKEN_ENCRYPTION_KEY_VERSION,
+  kmsKeyName: environment.MAIL_KMS_KEY_NAME
+});
 const mailConnectionService = new MailConnectionService({
   repository: new PrismaMailConnectionRepository(database),
-  providerAdapters: [
-    new GoogleMailProvider({
-      clientId: environment.GMAIL_OAUTH_CLIENT_ID,
-      clientSecret: environment.GMAIL_OAUTH_CLIENT_SECRET,
-      redirectUri: environment.GMAIL_OAUTH_REDIRECT_URI
-    }),
-    new MicrosoftMailProvider({
-      clientId: environment.MICROSOFT_OAUTH_CLIENT_ID,
-      clientSecret: environment.MICROSOFT_OAUTH_CLIENT_SECRET,
-      redirectUri: environment.MICROSOFT_OAUTH_REDIRECT_URI,
-      tenant: environment.MICROSOFT_OAUTH_TENANT
-    })
-  ],
-  tokenEncryption: createTokenEncryptionProvider({
-    provider: environment.MAIL_TOKEN_ENCRYPTION_PROVIDER,
-    localKey: environment.MAIL_TOKEN_ENCRYPTION_KEY,
-    localKeyVersion: environment.MAIL_TOKEN_ENCRYPTION_KEY_VERSION,
-    kmsKeyName: environment.MAIL_KMS_KEY_NAME
-  }),
+  providerAdapters: mailProviderAdapters,
+  tokenEncryption,
   tokenPepper: environment.AUTH_TOKEN_PEPPER,
   stateTtlMinutes: {
     GOOGLE: environment.GMAIL_OAUTH_STATE_TTL_MINUTES,
     MICROSOFT: environment.MICROSOFT_OAUTH_STATE_TTL_MINUTES
   }
+});
+const ownerOnboardingService = new OwnerOnboardingService({
+  repository: new PrismaOwnerOnboardingRepository(database),
+  authRepository,
+  authService,
+  teamService,
+  providerAdapters: mailProviderAdapters.filter(
+    (provider) =>
+      getMailProviderAvailability(environment, provider.provider) ===
+      "AVAILABLE"
+  ),
+  tokenEncryption,
+  tokenPepper: environment.AUTH_TOKEN_PEPPER,
+  stateTtlMinutes: {
+    GOOGLE: environment.GMAIL_OAUTH_STATE_TTL_MINUTES,
+    MICROSOFT: environment.MICROSOFT_OAUTH_STATE_TTL_MINUTES
+  },
+  onboardingTtlHours: environment.OWNER_ONBOARDING_TTL_HOURS ?? 168
 });
 const invitationService = new InvitationService({
   repository: new PrismaInvitationRepository(database),
@@ -167,6 +193,7 @@ const app = await buildApp({
   invitationService,
   notificationMemberService,
   alertService,
+  ownerOnboardingService,
   securityThrottleService,
   readinessCheck: async () => {
     await database.$queryRaw`SELECT 1`;
@@ -187,6 +214,19 @@ app.log.info(
   "Primary login provider configuration status"
 );
 app.addHook("onClose", async () => database.$disconnect());
+const onboardingCleanupTimer = setInterval(
+  () => {
+    void ownerOnboardingService.cleanupExpired().catch((error: unknown) => {
+      app.log.warn(
+        { code: error instanceof Error ? error.name : "UNKNOWN" },
+        "Owner onboarding cleanup failed"
+      );
+    });
+  },
+  60 * 60 * 1000
+);
+onboardingCleanupTimer.unref();
+app.addHook("onClose", async () => clearInterval(onboardingCleanupTimer));
 
 const shutdown = async (signal: string): Promise<void> => {
   app.log.info({ signal }, "Shutting down");
