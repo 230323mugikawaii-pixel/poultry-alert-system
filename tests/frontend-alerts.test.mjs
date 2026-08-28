@@ -26,6 +26,8 @@ test("in-app alert updates use credentialed SSE and explicit acknowledgement", (
   assert.match(appSource, /void acknowledgeAlert\(/);
   assert.match(appSource, /acknowledgedByName/);
   assert.match(appSource, /すでに\$\{acknowledgedByName\}さんが対応を開始しています/);
+  assert.match(appSource, />対応を開始<\/button>/);
+  assert.match(appSource, /対応を開始して通知音を停止/);
   assert.doesNotMatch(appSource, /serviceWorker\.register/);
 });
 

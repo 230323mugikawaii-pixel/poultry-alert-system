@@ -1281,12 +1281,12 @@ function renderAlertList(containerId, alerts, audience) {
         alert.acknowledgedByName ||
         (alert.acknowledgedBy === "OWNER" ? "代表者" : "通知メンバー");
       const statusText = active
-        ? "未確認"
+        ? "未対応"
         : acknowledged
-          ? `確認済み（${acknowledgedByName}さんが対応中）`
+          ? `${acknowledgedByName}さんが対応中`
           : "対応完了";
       const actions = active
-        ? `<button type="button" class="btn primary" onclick="acknowledgeAlert('${escapeHtml(alert.id)}', '${audience}')">確認する</button>`
+        ? `<button type="button" class="btn primary" onclick="acknowledgeAlert('${escapeHtml(alert.id)}', '${audience}')">対応を開始</button>`
         : audience === "OWNER" && acknowledged
           ? `<button type="button" class="btn outline" onclick="resolveAlert('${escapeHtml(alert.id)}')">対応完了にする</button>`
           : "";
@@ -1336,8 +1336,8 @@ async function acknowledgeAlert(alertId, audience) {
     }
   } catch {
     await showAppAlert(
-      "通知を確認済みにできませんでした。通信状態を確認して、もう一度お試しください。",
-      { title: "通知の確認エラー" },
+      "対応開始を記録できませんでした。通信状態を確認して、もう一度お試しください。",
+      { title: "対応開始エラー" },
     );
   }
 }
@@ -4633,6 +4633,9 @@ function showAlarmNotification(
   );
 
   if (stopButton) {
+    stopButton.textContent = alertContext
+      ? "対応を開始して通知音を停止"
+      : "通知音を停止";
     stopButton.focus();
   }
 
