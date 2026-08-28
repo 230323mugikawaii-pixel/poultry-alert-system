@@ -20,3 +20,10 @@ GmailやMicrosoft 365へ届く大切なメールを、停止するまで繰り�
 - Microsoft 365 / Outlookは別のOAuthで delegated `Mail.Read`だけを要求します。
 - 監視用refresh tokenはブラウザへ返さず、サーバー側で暗号化して保存します。
 - 旧形式のlocalStorageメールアドレスは本人確認に使用しません。
+
+## 通知メンバーとAlert
+
+- 通知メンバーはOAuthを使わず、個別のCall Now IDと一度だけ表示されるパスワードでログインします。
+- AlertはOWNERとACTIVEな通知メンバーへ同じトランザクションで割り当てます。
+- 同時に確認しても最初の1人だけを確認者として記録します。
+- アプリを開いている間はSSEで更新します。バックグラウンド通知は今後APNs、FCM、Web Pushで実装します。
