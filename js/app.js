@@ -205,6 +205,7 @@ let contractStartDate = null;
 let contractEndDate = null;
 let googleEmail = "";
 let authenticatedUser = null;
+let notificationMemberSession = null;
 let loginIdentities = [];
 let loginProviderAvailability = {
   GOOGLE: "UNKNOWN",
@@ -217,6 +218,7 @@ let mailProviderAvailability = {
   GOOGLE: "UNKNOWN",
   MICROSOFT: "UNKNOWN"
 };
+let notificationMemberManagement = null;
 let legacyGoogleAccountsFallbackBackup =
   [];
 let contractStorageMigrationPending =
@@ -262,6 +264,11 @@ async function initializeApplication() {
   authenticatedUser =
     await fetchCurrentUser();
 
+  if (!authenticatedUser) {
+    notificationMemberSession =
+      await fetchNotificationMemberSession();
+  }
+
   loginProviderAvailability =
     await fetchLoginProviderAvailability();
 
@@ -280,6 +287,10 @@ async function initializeApplication() {
         await fetchMailProviderAvailability();
       mailConnections =
         await fetchMailConnections();
+      if (currentTeam?.role === "OWNER") {
+        notificationMemberManagement =
+          await fetchNotificationMembers();
+      }
     }
   }
 
@@ -364,8 +375,10 @@ async function initializeApplication() {
         }
       );
     }
+  } else if (notificationMemberSession) {
+    openNotificationMemberApp();
   } else {
-    openGoogleScreen("login");
+    openGuestHome();
   }
 }
 
@@ -445,6 +458,42 @@ async function fetchCurrentUser() {
   } catch (error) {
     console.warn(
       "ログイン状態を確認できませんでした。",
+      error
+    );
+    return null;
+  }
+}
+
+
+async function fetchNotificationMemberSession() {
+  try {
+    const response = await fetch(
+      apiUrl("/api/v1/notification-members/me"),
+      {
+        method: "GET",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+        cache: "no-store"
+      }
+    );
+    if (response.status === 401) return null;
+    if (!response.ok) {
+      throw new Error(
+        `notification_member_me_${response.status}`
+      );
+    }
+    const result = await response.json();
+    if (
+      typeof result?.member?.id !== "string" ||
+      typeof result?.member?.callNowId !== "string" ||
+      typeof result?.team?.id !== "string"
+    ) {
+      throw new Error("notification_member_me_invalid");
+    }
+    return result;
+  } catch (error) {
+    console.warn(
+      "通知メンバーのログイン状態を確認できませんでした。",
       error
     );
     return null;
@@ -635,6 +684,10 @@ function parseTeamContext(team) {
     (team.role !== "OWNER" &&
       team.role !== "MEMBER") ||
     !subscription ||
+    typeof team?.seats?.seatLimit !== "number" ||
+    typeof team?.seats?.activeMemberCount !== "number" ||
+    typeof team?.seats?.availableSeats !== "number" ||
+    typeof team?.seats?.totalUserLimit !== "number" ||
     ![
       "ACTIVE",
       "PAST_DUE",
@@ -650,6 +703,24 @@ function parseTeamContext(team) {
   return {
     id: team.id,
     role: team.role,
+    teamCode:
+      typeof team.teamCode === "string"
+        ? team.teamCode
+        : "",
+    seats: {
+      additionalSeatLimit:
+        team.seats.seatLimit,
+      activeMemberCount:
+        team.seats.activeMemberCount,
+      availableSeats:
+        team.seats.availableSeats,
+      seatCount:
+        team.seats.totalUserLimit
+    },
+    pendingSeatCount:
+      typeof team.pendingSeatLimit === "number"
+        ? 1 + team.pendingSeatLimit
+        : null,
     subscription: {
       status: subscription.status,
       currentTermAmountYen:
@@ -660,6 +731,42 @@ function parseTeamContext(team) {
         termEndsAt
     }
   };
+}
+
+
+async function fetchNotificationMembers() {
+  if (currentTeam?.role !== "OWNER") return null;
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/notification-members`
+      ),
+      {
+        method: "GET",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+        cache: "no-store"
+      }
+    );
+    if (response.status === 401 || response.status === 403) {
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error(
+        `notification_members_${response.status}`
+      );
+    }
+    const result = await response.json();
+    return Array.isArray(result?.members) && result?.seats
+      ? result
+      : null;
+  } catch (error) {
+    console.warn(
+      "通知メンバー情報を確認できませんでした。",
+      error
+    );
+    return null;
+  }
 }
 
 
@@ -877,9 +984,125 @@ function clearAuthResultFromUrl(parameterName) {
 }
 
 
+function openGuestHome() {
+  showOnlyScreen("guestHomeScreen");
+  setText("notificationMemberLoginError", "");
+  window.scrollTo({ top: 0 });
+}
+
+
+function openOwnerLogin() {
+  openGoogleScreen("login");
+}
+
+
+function openNotificationMemberLogin() {
+  showOnlyScreen("notificationMemberLoginScreen");
+  setText("notificationMemberLoginError", "");
+  document
+    .getElementById("notificationMemberCallNowId")
+    ?.focus();
+  window.scrollTo({ top: 0 });
+}
+
+
+async function loginNotificationMember(event) {
+  event?.preventDefault();
+  const callNowId = document
+    .getElementById("notificationMemberCallNowId")
+    ?.value?.trim();
+  const password = document
+    .getElementById("notificationMemberPassword")
+    ?.value;
+  setText("notificationMemberLoginError", "");
+  if (!callNowId || !password) {
+    setText(
+      "notificationMemberLoginError",
+      "Call Now IDとパスワードを入力してください。"
+    );
+    return;
+  }
+  try {
+    const response = await fetch(
+      apiUrl("/api/v1/notification-members/login"),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ callNowId, password })
+      }
+    );
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new Error(
+        payload?.error?.message ||
+          "Call Now IDまたはパスワードを確認してください。"
+      );
+    }
+    notificationMemberSession = await response.json();
+    const passwordInput = document.getElementById(
+      "notificationMemberPassword"
+    );
+    if (passwordInput) passwordInput.value = "";
+    openNotificationMemberApp();
+  } catch (error) {
+    setText(
+      "notificationMemberLoginError",
+      error instanceof Error
+        ? error.message
+        : "ログインできませんでした。もう一度お試しください。"
+    );
+  }
+}
+
+
+function openNotificationMemberApp() {
+  if (!notificationMemberSession) {
+    openNotificationMemberLogin();
+    return;
+  }
+  showOnlyScreen("notificationMemberAppScreen");
+  setText(
+    "notificationMemberWelcome",
+    notificationMemberSession.member.displayName ||
+      "通知メンバー"
+  );
+  setText(
+    "notificationMemberTeamName",
+    notificationMemberSession.team.name ||
+      `通知グループ ${notificationMemberSession.team.teamCode}`
+  );
+  window.scrollTo({ top: 0 });
+}
+
+
+async function logoutNotificationMember() {
+  try {
+    await fetch(
+      apiUrl("/api/v1/notification-members/logout"),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { Accept: "application/json" }
+      }
+    );
+  } catch (error) {
+    console.warn(
+      "通知メンバーのログアウト状態を確認できませんでした。",
+      error
+    );
+  }
+  notificationMemberSession = null;
+  openGuestHome();
+}
+
+
 function openSetupForAuthenticatedUser() {
   if (!authenticatedUser) {
-    openGoogleScreen("login");
+    openOwnerLogin();
     return;
   }
 
@@ -1602,6 +1825,8 @@ ${formatYen(totalPrice)}
     await fetchMailProviderAvailability();
   mailConnections =
     await fetchMailConnections();
+  notificationMemberManagement =
+    await fetchNotificationMembers();
   openGoogleScreen("manage");
 }
 
@@ -1633,8 +1858,15 @@ function openGoogleScreen(
     .getElementById("googleBackButton")
     ?.classList.toggle(
       "hidden",
-      isAuthenticationMode
+      false
     );
+
+  setText(
+    "googleBackButton",
+    isAuthenticationMode
+      ? "← ホームへ戻る"
+      : "← ホームへ戻る"
+  );
 
   setText(
     "googleScreenTitle",
@@ -2219,6 +2451,8 @@ function mailProviderLabel(provider) {
 function backFromGoogle() {
   if (googleScreenMode === "manage") {
     openApp();
+  } else {
+    openGuestHome();
   }
 }
 
@@ -2268,6 +2502,7 @@ function renderContractInformation() {
     setText("contractKeywordCount", `${keywords.length}個`);
     setText("contractPrice", formatYen(totalPrice));
     updateContractStatusUI();
+    renderNotificationMemberManagement();
     return;
   }
 
@@ -2307,6 +2542,230 @@ function renderContractInformation() {
   );
 
   updateContractStatusUI();
+  renderNotificationMemberManagement();
+}
+
+
+function renderNotificationMemberManagement() {
+  const card = document.getElementById(
+    "notificationMemberManagementCard"
+  );
+  const summary = document.getElementById(
+    "notificationMemberSeatSummary"
+  );
+  const list = document.getElementById(
+    "notificationMemberList"
+  );
+  const createButton = document.getElementById(
+    "createNotificationMemberButton"
+  );
+  if (!card || !summary || !list || !createButton) return;
+  const canManage =
+    currentTeam?.role === "OWNER" &&
+    hasActiveSubscription();
+  card.classList.toggle("hidden", !canManage);
+  if (!canManage) return;
+
+  const seats = notificationMemberManagement?.seats;
+  const members = notificationMemberManagement?.members ?? [];
+  if (!seats) {
+    summary.textContent =
+      "通知メンバー情報を読み込めませんでした。";
+    list.replaceChildren();
+    createButton.disabled = true;
+    return;
+  }
+  summary.innerHTML = `
+    <div class="member-seat-item">
+      <span>契約利用人数</span>
+      <strong>${seats.seatCount}人</strong>
+    </div>
+    <div class="member-seat-item">
+      <span>通知メンバー</span>
+      <strong>${seats.activeNotificationMemberCount}人</strong>
+    </div>
+    <div class="member-seat-item">
+      <span>空き人数</span>
+      <strong>${seats.availableSeats}人</strong>
+    </div>
+  `;
+  if (seats.pendingSeatCount !== null) {
+    summary.insertAdjacentHTML(
+      "beforeend",
+      `<p class="error-message">${seats.pendingSeatCount}人への変更は、利用人数が上限以下になるまで保留中です。</p>`
+    );
+  }
+  createButton.disabled =
+    seats.availableSeats <= 0 ||
+    seats.pendingSeatCount !== null;
+  list.replaceChildren();
+  if (members.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "input-help";
+    empty.textContent = "通知メンバーはまだ登録されていません。";
+    list.appendChild(empty);
+    return;
+  }
+  members.forEach((member) => {
+    const item = document.createElement("div");
+    item.className = "notification-member-item";
+    const active = member.status === "ACTIVE";
+    item.innerHTML = `
+      <div>
+        <strong>${escapeHtml(member.displayName || "通知メンバー")}</strong>
+        <div class="notification-member-id">${escapeHtml(member.callNowId)}</div>
+        <small>${active ? "利用中" : "無効"}</small>
+      </div>
+      <div class="notification-member-actions">
+        ${active ? `
+          <button type="button" class="btn outline" onclick="resetNotificationMemberPassword('${member.id}')">
+            パスワード再発行
+          </button>
+          <button type="button" class="btn outline" onclick="disableNotificationMember('${member.id}')">
+            利用停止
+          </button>
+        ` : ""}
+      </div>
+    `;
+    list.appendChild(item);
+  });
+}
+
+
+async function createNotificationMember() {
+  if (currentTeam?.role !== "OWNER") return;
+  const input = document.getElementById(
+    "notificationMemberNameInput"
+  );
+  const displayName = input?.value?.trim();
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/notification-members`
+      ),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(
+          displayName ? { displayName } : {}
+        )
+      }
+    );
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(
+        payload?.error?.message ||
+          "通知メンバーを追加できませんでした。"
+      );
+    }
+    if (input) input.value = "";
+    notificationMemberManagement =
+      await fetchNotificationMembers();
+    renderNotificationMemberManagement();
+    await showNotificationMemberCredential(payload);
+  } catch (error) {
+    await showAppAlert(
+      error instanceof Error
+        ? error.message
+        : "通知メンバーを追加できませんでした。",
+      { title: "通知メンバーの追加エラー" }
+    );
+  }
+}
+
+
+async function resetNotificationMemberPassword(memberId) {
+  const confirmed = await showAppConfirm(
+    "新しいパスワードを発行すると、現在のログインはすべて解除されます。続けますか？",
+    {
+      title: "パスワードの再発行",
+      confirmText: "再発行する",
+      tone: "warning"
+    }
+  );
+  if (!confirmed || currentTeam?.role !== "OWNER") return;
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/notification-members/${encodeURIComponent(memberId)}/password-reset`
+      ),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { Accept: "application/json" }
+      }
+    );
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(
+        payload?.error?.message ||
+          "パスワードを再発行できませんでした。"
+      );
+    }
+    await showNotificationMemberCredential(payload);
+  } catch (error) {
+    await showAppAlert(
+      error instanceof Error
+        ? error.message
+        : "パスワードを再発行できませんでした。",
+      { title: "パスワード再発行エラー" }
+    );
+  }
+}
+
+
+async function disableNotificationMember(memberId) {
+  const confirmed = await showAppConfirm(
+    "この通知メンバーを利用停止にしますか？ログイン中の端末も直ちにログアウトされます。",
+    {
+      title: "通知メンバーの利用停止",
+      confirmText: "利用停止にする",
+      tone: "danger"
+    }
+  );
+  if (!confirmed || currentTeam?.role !== "OWNER") return;
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/notification-members/${encodeURIComponent(memberId)}`
+      ),
+      {
+        method: "DELETE",
+        credentials: "include",
+        headers: { Accept: "application/json" }
+      }
+    );
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(
+        payload?.error?.message ||
+          "通知メンバーを利用停止にできませんでした。"
+      );
+    }
+    notificationMemberManagement = payload;
+    currentTeam =
+      (await fetchCurrentTeamContext()) || currentTeam;
+    renderNotificationMemberManagement();
+  } catch (error) {
+    await showAppAlert(
+      error instanceof Error
+        ? error.message
+        : "通知メンバーを利用停止にできませんでした。",
+      { title: "通知メンバーの利用停止エラー" }
+    );
+  }
+}
+
+
+function showNotificationMemberCredential(payload) {
+  return showAppAlert(
+    `Call Now ID：${payload.member.callNowId}\n初期パスワード：${payload.initialPassword}\n\nこのパスワードは再表示できません。安全な方法で本人へお伝えください。`,
+    { title: "通知メンバーを登録しました" }
+  );
 }
 
 
@@ -2719,7 +3178,7 @@ function renderHelpExternalLinks() {
 
 function openApp() {
   if (!authenticatedUser) {
-    openGoogleScreen("login");
+    openGuestHome();
     return;
   }
 
@@ -3051,11 +3510,12 @@ async function performLogout() {
     GOOGLE: "UNKNOWN",
     MICROSOFT: "UNKNOWN"
   };
+  notificationMemberManagement = null;
 
   setupMode =
     "signup";
 
-  openGoogleScreen("login");
+  openGuestHome();
 
   window.scrollTo({
     top: 0,
@@ -4398,7 +4858,18 @@ function showOnlyScreen(screenId) {
     return;
   }
 
+  if (
+    screenId === "notificationMemberAppScreen" &&
+    !notificationMemberSession
+  ) {
+    openNotificationMemberLogin();
+    return;
+  }
+
   const screenIds = [
+    "guestHomeScreen",
+    "notificationMemberLoginScreen",
+    "notificationMemberAppScreen",
     "setupScreen",
     "paymentScreen",
     "renewalCompleteScreen",

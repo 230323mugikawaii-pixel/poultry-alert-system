@@ -14,10 +14,92 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=18">
+    <link rel="stylesheet" href="css/style.css?v=19">
 </head>
 
 <body>
+
+  <section id="guestHomeScreen" class="guest-home-screen hidden">
+    <div class="guest-home-card">
+      <div class="guest-home-logo">🔔 Call Now</div>
+      <h1>ホーム</h1>
+      <p>利用方法を選んでください。</p>
+      <button
+        type="button"
+        class="btn primary full-width"
+        onclick="openOwnerLogin()"
+      >
+        Call Nowを設定する
+      </button>
+      <button
+        type="button"
+        class="btn outline full-width"
+        onclick="openNotificationMemberLogin()"
+      >
+        通知グループに参加
+      </button>
+    </div>
+  </section>
+
+  <section id="notificationMemberLoginScreen" class="flow-screen hidden">
+    <div class="flow-container member-login-container">
+      <button type="button" class="back-button" onclick="openGuestHome()">
+        ← ホームへ戻る
+      </button>
+      <p class="step-label">通知メンバー</p>
+      <h1>通知グループに参加</h1>
+      <p class="description">
+        代表者から受け取ったCall Now IDとパスワードを入力してください。
+      </p>
+      <form id="notificationMemberLoginForm" onsubmit="loginNotificationMember(event)">
+        <label class="member-login-field">
+          <span>Call Now ID</span>
+          <input
+            id="notificationMemberCallNowId"
+            type="text"
+            maxlength="16"
+            autocomplete="username"
+            placeholder="CN-XXXXXXXX"
+            required
+          >
+        </label>
+        <label class="member-login-field">
+          <span>パスワード</span>
+          <input
+            id="notificationMemberPassword"
+            type="password"
+            maxlength="128"
+            autocomplete="current-password"
+            required
+          >
+        </label>
+        <p id="notificationMemberLoginError" class="error-message" aria-live="polite"></p>
+        <button type="submit" class="btn primary full-width">
+          通知メンバーとしてログイン
+        </button>
+      </form>
+    </div>
+  </section>
+
+  <section id="notificationMemberAppScreen" class="app-screen hidden">
+    <header class="app-header">
+      <div class="app-logo">🔔 Call Now</div>
+      <button type="button" class="logout-button" onclick="logoutNotificationMember()">
+        ログアウト
+      </button>
+    </header>
+    <main class="member-app-main">
+      <h1>通知ホーム</h1>
+      <article class="card member-status-card">
+        <h2 id="notificationMemberWelcome">通知メンバー</h2>
+        <p id="notificationMemberTeamName"></p>
+        <p>
+          この画面では重要メールの通知確認と停止を行えます。メール本文やアカウント設定は表示されません。
+        </p>
+        <p class="input-help">通知一覧と確認操作は次の開発段階で接続します。</p>
+      </article>
+    </main>
+  </section>
 
   <!-- ========================================
        キーワード設定画面
@@ -935,6 +1017,34 @@
 
         </article>
 
+        <article id="notificationMemberManagementCard" class="card member-management-card hidden">
+          <div class="member-management-heading">
+            <div>
+              <h2>通知メンバー</h2>
+              <p>重要メールの通知だけを受け取る利用者を管理します。</p>
+            </div>
+            <div class="member-create-controls">
+              <input
+                id="notificationMemberNameInput"
+                type="text"
+                maxlength="120"
+                placeholder="表示名（任意）"
+                aria-label="通知メンバーの表示名"
+              >
+              <button
+                id="createNotificationMemberButton"
+                type="button"
+                class="btn outline"
+                onclick="createNotificationMember()"
+              >
+                通知メンバーを追加
+              </button>
+            </div>
+          </div>
+          <div id="notificationMemberSeatSummary" class="member-seat-summary"></div>
+          <div id="notificationMemberList" class="notification-member-list"></div>
+        </article>
+
       </section>
 
 
@@ -1218,7 +1328,7 @@
   <!-- 動作用JavaScript -->
 
     <script src="js/keyword-policy.js?v=2"></script>
-    <script src="js/app.js?v=22"></script>
+    <script src="js/app.js?v=23"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";
