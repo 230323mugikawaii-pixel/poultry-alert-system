@@ -212,7 +212,7 @@ let loginProviderAvailability = {
   APPLE: "UNKNOWN"
 };
 let currentTeam = null;
-let mailConnection = null;
+let mailConnections = [];
 let mailProviderAvailability = {
   GOOGLE: "UNKNOWN",
   MICROSOFT: "UNKNOWN"
@@ -278,8 +278,8 @@ async function initializeApplication() {
     if (hasActiveSubscription()) {
       mailProviderAvailability =
         await fetchMailProviderAvailability();
-      mailConnection =
-        await fetchMailConnection();
+      mailConnections =
+        await fetchMailConnections();
     }
   }
 
@@ -697,15 +697,15 @@ function synchronizeContractFromCurrentTeam() {
 }
 
 
-async function fetchMailConnection() {
+async function fetchMailConnections() {
   if (currentTeam?.role !== "OWNER") {
-    return null;
+    return [];
   }
 
   try {
     const response = await fetch(
       apiUrl(
-        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/mail-connection`
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/mail-connections`
       ),
       {
         method: "GET",
@@ -718,7 +718,7 @@ async function fetchMailConnection() {
     );
 
     if (response.status === 401) {
-      return null;
+      return [];
     }
 
     if (!response.ok) {
@@ -727,20 +727,23 @@ async function fetchMailConnection() {
       );
     }
 
-    const connection =
-      (await response.json())?.connection;
-    return connection &&
-      typeof connection.email === "string" &&
-      (connection.provider === "GOOGLE" ||
-        connection.provider === "MICROSOFT")
-      ? connection
-      : null;
+    const connections =
+      (await response.json())?.connections;
+    return Array.isArray(connections)
+      ? connections.filter(
+          (connection) =>
+            typeof connection?.id === "string" &&
+            typeof connection.email === "string" &&
+            (connection.provider === "GOOGLE" ||
+              connection.provider === "MICROSOFT")
+        )
+      : [];
   } catch (error) {
     console.warn(
       "メール監視アカウントの状態を確認できませんでした。",
       error
     );
-    return null;
+    return [];
   }
 }
 
@@ -1597,8 +1600,8 @@ ${formatYen(totalPrice)}
   synchronizeContractFromCurrentTeam();
   mailProviderAvailability =
     await fetchMailProviderAvailability();
-  mailConnection =
-    await fetchMailConnection();
+  mailConnections =
+    await fetchMailConnections();
   openGoogleScreen("manage");
 }
 
@@ -1927,36 +1930,16 @@ function renderMailMonitoringAccount() {
     document.getElementById(
       "microsoftMailProviderButton"
     );
-  const changeProviderButton =
-    document.getElementById(
-      "mailChangeProviderButton"
-    );
-  const reauthorizeButton =
-    document.getElementById(
-      "mailReauthorizeButton"
-    );
-  const disconnectButton =
-    document.getElementById(
-      "mailDisconnectButton"
-    );
-
   if (
     !status ||
     !providerChoices ||
     !googleProviderButton ||
-    !microsoftProviderButton ||
-    !changeProviderButton ||
-    !reauthorizeButton ||
-    !disconnectButton
+    !microsoftProviderButton
   ) {
     return;
   }
 
-  providerChoices.classList.add("hidden");
-  changeProviderButton.classList.add("hidden");
-  reauthorizeButton.classList.add("hidden");
-  disconnectButton.classList.add("hidden");
-  reauthorizeButton.disabled = false;
+  providerChoices.classList.remove("hidden");
   providerChoices
     .querySelectorAll("button")
     .forEach((button) => {
@@ -2000,57 +1983,70 @@ function renderMailMonitoringAccount() {
     mailProviderAvailability.MICROSOFT !==
       "AVAILABLE";
 
-  if (
-    !mailConnection ||
-    mailConnection.connectionStatus === "REVOKED"
-  ) {
+  if (mailConnections.length === 0) {
     status.innerHTML = `
       <p class="connected-account-empty">
         メール監視アカウントは接続されていません。
       </p>
       ${mailProviderAvailabilityNotice()}
     `;
-    providerChoices.classList.remove("hidden");
     return;
   }
 
-  const requiresReauthorization =
-    mailConnection.connectionStatus ===
-      "REAUTH_REQUIRED" ||
-    mailConnection.authorizationStatus ===
-      "REAUTH_REQUIRED" ||
-    mailConnection.connectionStatus === "ERROR" ||
-    mailConnection.authorizationStatus === "ERROR";
-
   status.innerHTML = `
     <p class="connected-account-summary">
-      ${requiresReauthorization ? "再認証が必要です" : "1件接続中"}
+      ${mailConnections.length}件接続中
     </p>
-    <p class="connected-account-provider">
-      ${mailProviderLabel(mailConnection.provider)}
-    </p>
-    <p class="connected-account-email">
-      ${escapeHtml(mailConnection.email)}
-    </p>
+    <div class="mail-connection-list">
+      ${mailConnections.map(renderMailConnectionItem).join("")}
+    </div>
     ${mailProviderAvailabilityNotice()}
   `;
-  if (
-    mailProviderAvailability.GOOGLE ===
-      "AVAILABLE" ||
-    mailProviderAvailability.MICROSOFT ===
-      "AVAILABLE"
-  ) {
-    changeProviderButton.classList.remove("hidden");
-  }
-  disconnectButton.classList.remove("hidden");
+}
 
-  if (requiresReauthorization) {
-    reauthorizeButton.classList.remove("hidden");
-    reauthorizeButton.disabled =
-      mailProviderAvailability[
-        mailConnection.provider
-      ] !== "AVAILABLE";
-  }
+
+function renderMailConnectionItem(connection) {
+  const requiresReauthorization =
+    connection.connectionStatus ===
+      "REAUTH_REQUIRED" ||
+    connection.authorizationStatus ===
+      "REAUTH_REQUIRED" ||
+    connection.connectionStatus === "ERROR" ||
+    connection.authorizationStatus === "ERROR";
+  const reauthorizeDisabled =
+    mailProviderAvailability[
+      connection.provider
+    ] !== "AVAILABLE";
+  return `
+    <article class="mail-connection-item">
+      <div>
+        <p class="connected-account-provider">
+          ${mailProviderLabel(connection.provider)}
+        </p>
+        <p class="connected-account-email">
+          ${escapeHtml(connection.email)}
+        </p>
+        <p class="connected-account-empty">
+          ${requiresReauthorization ? "再認証が必要です" : "監視接続中"}
+        </p>
+      </div>
+      <div class="mail-account-actions">
+        ${requiresReauthorization ? `
+          <button
+            type="button"
+            class="btn outline"
+            ${reauthorizeDisabled ? "disabled" : ""}
+            onclick="reauthorizeMailConnection('${connection.id}', '${connection.provider}')"
+          >再認証</button>
+        ` : ""}
+        <button
+          type="button"
+          class="account-remove-button"
+          onclick="disconnectMailConnection('${connection.id}')"
+        >接続を解除</button>
+      </div>
+    </article>
+  `;
 }
 
 
@@ -2089,42 +2085,27 @@ async function startMailConnection(provider) {
     return;
   }
 
-  if (
-    mailConnection &&
-    mailConnection.connectionStatus !== "REVOKED" &&
-    mailConnection.provider !== provider
-  ) {
-    const confirmed = await showAppConfirm(
-      `${mailProviderLabel(provider)}へ接続先を変更しますか？
-
-現在の監視接続は、新しい認証が成功するまで維持されます。認証成功後は新しい接続先だけが有効になります。`,
-      {
-        title: "メール監視の接続先変更",
-        confirmText: "認証を続ける"
-      }
-    );
-    if (!confirmed) {
-      return;
-    }
-  }
-
-  await beginMailOAuth("oauth/start", provider);
+  await beginMailOAuth("oauth/start", provider, null);
 }
 
 
-async function reauthorizeMailConnection() {
-  if (!mailConnection?.provider) {
-    showMailProviderChoices();
-    return;
-  }
+async function reauthorizeMailConnection(
+  connectionId,
+  provider
+) {
   await beginMailOAuth(
     "reauthorize",
-    mailConnection.provider
+    provider,
+    connectionId
   );
 }
 
 
-async function beginMailOAuth(action, provider) {
+async function beginMailOAuth(
+  action,
+  provider,
+  connectionId
+) {
   if (!authenticatedUser) {
     await showAppAlert(
       "先にCall Nowへログインしてください。"
@@ -2153,8 +2134,11 @@ async function beginMailOAuth(action, provider) {
 
   const form = document.createElement("form");
   form.method = "post";
+  const path = connectionId
+    ? `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/mail-connections/${encodeURIComponent(connectionId)}/${action}`
+    : `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/mail-connection/${action}`;
   form.action = apiUrl(
-    `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/mail-connection/${action}?provider=${encodeURIComponent(provider)}`
+    `${path}?provider=${encodeURIComponent(provider)}`
   );
   form.hidden = true;
   document.body.appendChild(form);
@@ -2162,9 +2146,14 @@ async function beginMailOAuth(action, provider) {
 }
 
 
-async function disconnectMailConnection() {
+async function disconnectMailConnection(
+  connectionId
+) {
   if (currentTeam?.role !== "OWNER" ||
-      !mailConnection) {
+      !mailConnections.some(
+        (connection) =>
+          connection.id === connectionId
+      )) {
     return;
   }
 
@@ -2184,7 +2173,7 @@ async function disconnectMailConnection() {
   try {
     const response = await fetch(
       apiUrl(
-        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/mail-connection`
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/mail-connections/${encodeURIComponent(connectionId)}`
       ),
       {
         method: "DELETE",
@@ -2201,7 +2190,8 @@ async function disconnectMailConnection() {
       );
     }
 
-    mailConnection = null;
+    mailConnections =
+      await fetchMailConnections();
     renderMailMonitoringAccount();
     renderConnectedGoogleAccounts();
     await showAppAlert(
@@ -2794,28 +2784,43 @@ function renderConnectedGoogleAccounts() {
     document.createElement("div");
   monitoringAccount.className =
     "google-account-role";
+  const activeMailConnections =
+    mailConnections.filter(
+      (connection) =>
+        connection.connectionStatus === "ACTIVE" &&
+        connection.authorizationStatus === "ACTIVE"
+    );
+  const requiresMailReauthorization =
+    mailConnections.some(
+      (connection) =>
+        connection.connectionStatus !== "ACTIVE" ||
+        connection.authorizationStatus !== "ACTIVE"
+    );
   const monitoringStatus =
-    mailConnection &&
-    mailConnection.connectionStatus === "ACTIVE" &&
-    mailConnection.authorizationStatus === "ACTIVE"
-      ? "1件接続中"
-      : mailConnection &&
-          mailConnection.connectionStatus !== "REVOKED"
-        ? "再認証が必要です"
-        : "未接続";
+    mailConnections.length > 0
+      ? requiresMailReauthorization
+        ? `${mailConnections.length}件中、再認証が必要な接続があります`
+        : `${mailConnections.length}件接続中`
+      : "未接続";
   const monitoringDetail =
-    mailConnection &&
-    mailConnection.connectionStatus !== "REVOKED"
-      ? escapeHtml(mailConnection.email)
+    mailConnections.length > 0
+      ? mailConnections
+          .map((connection) =>
+            escapeHtml(connection.email)
+          )
+          .join("<br>")
       : currentTeam?.role === "OWNER"
         ? "重要メールの監視用アカウントを接続できます"
         : currentTeam
           ? "メール監視アカウントの変更は管理者のみ行えます"
           : "契約後にメール監視アカウントを設定できます";
   const monitoringProvider =
-    mailConnection &&
-    mailConnection.connectionStatus !== "REVOKED"
-      ? mailProviderLabel(mailConnection.provider)
+    mailConnections.length > 0
+      ? [...new Set(
+          mailConnections.map((connection) =>
+            mailProviderLabel(connection.provider)
+          )
+        )].join("・")
       : "Gmail / Microsoft 365";
   monitoringAccount.innerHTML = `
     <strong>メール監視アカウント</strong>
@@ -2857,8 +2862,11 @@ function renderHomeSetupNotices() {
     });
   }
   const monitoringActive =
-    mailConnection?.connectionStatus === "ACTIVE" &&
-    mailConnection?.authorizationStatus === "ACTIVE";
+    mailConnections.some(
+      (connection) =>
+        connection.connectionStatus === "ACTIVE" &&
+        connection.authorizationStatus === "ACTIVE"
+    );
   setText(
     "appMonitoringStatus",
     monitoringActive ? "監視中" : "未設定"
@@ -2867,7 +2875,7 @@ function renderHomeSetupNotices() {
     notices.push({
       title: "メール監視アカウントが未接続です",
       message: currentTeam
-        ? "GmailまたはMicrosoft 365の監視用アカウントを1件接続してください。"
+        ? "GmailまたはMicrosoft 365の監視用アカウントを接続してください。"
         : "契約完了後に、監視用アカウントを設定できます。",
       action: currentTeam
         ? "openGoogleAccountManager()"
@@ -3038,7 +3046,7 @@ async function performLogout() {
   googleEmail = "";
   loginIdentities = [];
   currentTeam = null;
-  mailConnection = null;
+  mailConnections = [];
   mailProviderAvailability = {
     GOOGLE: "UNKNOWN",
     MICROSOFT: "UNKNOWN"
