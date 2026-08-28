@@ -123,6 +123,59 @@ describe("owner monitoring onboarding routes", () => {
         ]
       }
     });
+    const currentBody = current.json<{
+      onboarding: { id: string; choices: Array<{ id: string }> };
+    }>();
+    const choiceId = currentBody.onboarding.choices[0]?.id;
+    if (!choiceId) throw new Error("onboarding_choice_missing");
+    const onboardingId = currentBody.onboarding.id;
+    const decided = await app.inject({
+      method: "POST",
+      url: `/api/v1/owner-onboarding/choices/${choiceId}/keywords`,
+      headers: {
+        cookie: sessionCookie.split(";")[0],
+        origin: environment.PUBLIC_ORIGIN,
+        "content-type": "application/json"
+      },
+      payload: {
+        keywords: ["博衣こより", "Call Now", "停電のお知らせ"]
+      }
+    });
+    expect(decided.statusCode, decided.body).toBe(200);
+    const decidedBody = decided.json<{
+      choices: Array<{
+        id: string;
+        keywords: string[];
+        keywordsConfirmedAt: string | null;
+      }>;
+    }>();
+    expect(decidedBody).toMatchObject({
+      choices: [
+        {
+          id: choiceId,
+          keywords: ["博衣こより", "Call Now", "停電のお知らせ"]
+        }
+      ]
+    });
+    expect(decidedBody.choices[0]?.keywordsConfirmedAt).toBeTypeOf("string");
+
+    const purchased = await app.inject({
+      method: "POST",
+      url: "/api/v1/owner-onboarding/demo-purchase",
+      headers: {
+        cookie: sessionCookie.split(";")[0],
+        origin: environment.PUBLIC_ORIGIN,
+        "content-type": "application/json"
+      },
+      payload: { onboardingId, seatCount: 1 }
+    });
+    expect(purchased.statusCode, purchased.body).toBe(200);
+    expect(
+      purchased.json<{ demoPurchase: boolean; amountYen: number }>()
+    ).toMatchObject({
+      demoPurchase: true,
+      amountYen: 6000
+    });
 
     const replayed = await app.inject({
       method: "GET",

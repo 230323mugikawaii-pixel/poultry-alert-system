@@ -14,6 +14,8 @@ export interface OwnerOnboardingChoiceRecord {
   readonly status: OnboardingMailChoiceStatus;
   readonly authorizationId: string | null;
   readonly email: string | null;
+  readonly keywords: readonly string[];
+  readonly keywordsConfirmedAt: Date | null;
 }
 
 export interface OwnerOnboardingRecord {
@@ -70,6 +72,12 @@ export interface OwnerOnboardingRepository {
   skipProvider(input: {
     readonly userId: string;
     readonly provider: MailProviderId;
+    readonly now: Date;
+  }): Promise<OwnerOnboardingRecord>;
+  setChoiceKeywords(input: {
+    readonly userId: string;
+    readonly choiceId: string;
+    readonly keywords: readonly string[];
     readonly now: Date;
   }): Promise<OwnerOnboardingRecord>;
   activateChoice(input: {

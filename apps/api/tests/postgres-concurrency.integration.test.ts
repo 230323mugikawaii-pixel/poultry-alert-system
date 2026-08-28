@@ -741,10 +741,26 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     ).resolves.toBe(2);
     await expect(database.user.count()).resolves.toBe(1);
 
+    const pendingGoogleChoice = second.onboarding?.choices.find(
+      ({ provider }) => provider === "GOOGLE"
+    );
+    const pendingMicrosoftChoice = second.onboarding?.choices.find(
+      ({ provider }) => provider === "MICROSOFT"
+    );
+    await service.setChoiceKeywords({
+      userId,
+      choiceId: pendingGoogleChoice?.id ?? "",
+      keywords: ["停電のお知らせ", "Call Now"]
+    });
+    await service.setChoiceKeywords({
+      userId,
+      choiceId: pendingMicrosoftChoice?.id ?? "",
+      keywords: ["Call Now"]
+    });
+
     const purchased = await service.completeDemoPurchase({
       userId,
       onboardingId: second.onboarding?.id ?? "",
-      keywords: ["停電のお知らせ", "Call Now"],
       seatCount: 3
     });
     expect(purchased.team).toMatchObject({
@@ -779,15 +795,16 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     expect(completed.status).toBe("COMPLETED");
     await expect(
       database.mailConnection.findMany({
-        select: { status: true },
+        select: { status: true, keywords: true },
         orderBy: { createdAt: "asc" }
       })
-    ).resolves.toEqual([{ status: "ACTIVE" }]);
+    ).resolves.toEqual([
+      { status: "ACTIVE", keywords: ["停電のお知らせ", "Call Now"] }
+    ]);
     await expect(
       service.completeDemoPurchase({
         userId,
         onboardingId: completed.id,
-        keywords: ["ignored"],
         seatCount: 9
       })
     ).resolves.toMatchObject({

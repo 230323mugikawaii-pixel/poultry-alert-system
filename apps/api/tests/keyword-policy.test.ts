@@ -1,10 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+  mergeTeamKeywordSets,
   normalizeTeamKeyword,
   normalizeTeamKeywords
 } from "../src/modules/teams/keyword-policy.js";
 
 describe("team keyword policy", () => {
+  it("merges provider keyword sets without counting normalized duplicates twice", () => {
+    expect(
+      mergeTeamKeywordSets([
+        ["博衣こより", "Call Now"],
+        ["Ｃａｌｌ　Ｎｏｗ", "東京 電力"]
+      ])
+    ).toEqual(["博衣こより", "Call Now", "東京 電力"]);
+  });
+
   it.each([
     "博衣こより",
     "山田太郎",

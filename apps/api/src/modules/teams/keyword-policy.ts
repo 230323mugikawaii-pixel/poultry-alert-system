@@ -56,6 +56,24 @@ export function normalizeTeamKeyword(value: string): string {
   return value.trim().replace(/[ \u00a0\u3000]+/gu, " ");
 }
 
+export function mergeTeamKeywordSets(
+  sets: readonly (readonly string[])[]
+): string[] {
+  const merged: string[] = [];
+  const normalizedValues = new Set<string>();
+
+  for (const set of sets) {
+    for (const keyword of normalizeTeamKeywords(set)) {
+      const normalized = keyword.normalize("NFKC").toLocaleLowerCase("ja-JP");
+      if (normalizedValues.has(normalized)) continue;
+      normalizedValues.add(normalized);
+      merged.push(keyword);
+    }
+  }
+
+  return merged;
+}
+
 function hasForbiddenKeywordCharacters(value: string): boolean {
   return Array.from(value).some((character) => {
     const codePoint = character.codePointAt(0) ?? 0;
