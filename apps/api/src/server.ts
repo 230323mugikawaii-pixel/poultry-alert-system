@@ -32,6 +32,8 @@ import { PrismaSecurityThrottleRepository } from "./modules/security/prisma-secu
 import { SecurityThrottleService } from "./modules/security/security-throttle-service.js";
 import { OwnerOnboardingService } from "./modules/onboarding/owner-onboarding-service.js";
 import { PrismaOwnerOnboardingRepository } from "./modules/onboarding/prisma-owner-onboarding-repository.js";
+import { PrismaUserCommunicationRepository } from "./modules/user-communications/prisma-user-communication-repository.js";
+import { UserCommunicationService } from "./modules/user-communications/user-communication-service.js";
 
 loadDotenv({
   path: new URL("../../../.env", import.meta.url),
@@ -184,6 +186,9 @@ const notificationMemberService = new NotificationMemberService({
 const alertService = new AlertService({
   repository: new PrismaAlertRepository(database)
 });
+const userCommunicationService = new UserCommunicationService(
+  new PrismaUserCommunicationRepository(database)
+);
 const app = await buildApp({
   environment,
   authService,
@@ -193,6 +198,7 @@ const app = await buildApp({
   invitationService,
   notificationMemberService,
   alertService,
+  userCommunicationService,
   ownerOnboardingService,
   securityThrottleService,
   readinessCheck: async () => {
