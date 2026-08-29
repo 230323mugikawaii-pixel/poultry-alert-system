@@ -14,7 +14,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=22">
+    <link rel="stylesheet" href="css/style.css?v=23">
 </head>
 
 <body>
@@ -111,6 +111,7 @@
 
       <p id="ownerMonitoringSetupError" class="error-message" aria-live="polite"></p>
       <button
+        id="ownerMonitoringContinueButton"
         type="button"
         class="btn primary full-width"
         onclick="continueFromOwnerMonitoringSetup()"
@@ -952,20 +953,20 @@
 
 
       <div class="app-actions">
-
         <button
+          id="notificationCenterButton"
           type="button"
-          class="logout-button"
-          onclick="logout()"
+          class="notification-bell-button"
+          aria-label="通知を開く"
+          onclick="openNotificationCenter()"
         >
-          ログアウト
+          <span aria-hidden="true">🔔</span>
+          <span
+            id="notificationUnreadBadge"
+            class="notification-unread-badge hidden"
+            aria-label="未読通知"
+          ></span>
         </button>
-
-
-        <div id="appMonitoringStatus" class="app-status">
-          監視中
-        </div>
-
       </div>
 
     </header>
@@ -987,47 +988,10 @@
 
 
         <div class="dashboard-grid">
-
-          <article class="card alert-card">
-              <div class="alert-card-heading">
-                <div>
-                  <h2>重要通知</h2>
-                  <p>監視中のメールで検知した通知を表示します。</p>
-                </div>
-                <span id="ownerAlertStreamStatus" class="alert-stream-status">
-                  接続中
-                </span>
-              </div>
-              <div
-                id="ownerAlertList"
-                class="alert-list"
-                aria-live="polite"
-              ></div>
-            </article>
-
           <article class="card">
 
             <h2>
-              サービス状況
-            </h2>
-
-
-            <div class="status-display">
-              ✅ 正常
-            </div>
-
-
-            <p id="serviceStatusDescription">
-              すべてのシステムは正常に稼働しています。
-            </p>
-
-          </article>
-
-
-          <article class="card">
-
-            <h2>
-              アカウント
+              監視アカウント
             </h2>
 
 
@@ -1042,24 +1006,8 @@
               class="btn outline full-width account-manage-button"
               onclick="openGoogleAccountManager()"
             >
-              アカウント設定を開く
+              監視アカウント設定を開く
             </button>
-
-          </article>
-
-
-          <article class="card">
-
-            <h2>
-              お知らせ
-            </h2>
-
-
-            <ul
-              id="announcementList"
-              class="announcement-list"
-              aria-label="お知らせ一覧"
-            ></ul>
 
           </article>
 
@@ -1275,7 +1223,7 @@
 
 
 
-      <!-- ヘルプ・フィードバック -->
+      <!-- ご意見・フィードバック -->
 
       <section
         id="helpFeedbackPage"
@@ -1283,173 +1231,46 @@
       >
 
         <h1>
-          ヘルプ・フィードバック
+          ご意見・フィードバック
         </h1>
 
 
         <p class="help-intro">
-          困ったときの確認方法と、不具合を報告する前に必要な情報をご案内します。
+          Call Nowへのご意見・ご要望・不具合などをお送りください。
         </p>
 
 
         <div class="help-grid">
 
-          <article class="card help-card">
-
-            <h2>
-              よくある質問
-            </h2>
-
-            <details class="help-item">
-              <summary>
-                通知テストにはどのくらい時間がかかりますか？
-              </summary>
-
-              <p>
-                Gmailへの到着とCall Now側の検知を含め、最大3分ほどかかる場合があります。
-                結果が表示されるまでは、テストメールを削除・移動しないでください。
-              </p>
-            </details>
-
-            <details class="help-item">
-              <summary>
-                キーワードはどこで変更できますか？
-              </summary>
-
-              <p>
-                下部の「キーワード」から現在の登録内容を確認し、
-                「キーワードを編集」を選んで変更できます。
-              </p>
-            </details>
-
-            <details class="help-item">
-              <summary>
-                契約期間や料金はどこで確認できますか？
-              </summary>
-
-              <p>
-                下部の「契約」に、契約期間、登録数、更新料金が表示されます。
-              </p>
-            </details>
-
-          </article>
-
-
-          <article class="card help-card">
-
-            <h2>
-              通知が鳴らない場合
-            </h2>
-
-            <ol class="help-check-list">
-              <li>端末の音量と消音モードを確認します。</li>
-              <li>ブラウザでCall Nowを開いたままにします。</li>
-              <li>登録キーワードと受信メールの件名・本文を確認します。</li>
-              <li>通知テストを実行し、最大3分待ちます。</li>
-            </ol>
-
-            <button
-              type="button"
-              class="btn outline full-width"
-              onclick="showAppPage('testPage')"
-            >
-              通知テストを開く
+          <form class="card feedback-form" onsubmit="submitFeedback(event)">
+            <label for="feedbackContent">ご意見・フィードバック</label>
+            <textarea
+              id="feedbackContent"
+              maxlength="2000"
+              rows="8"
+              placeholder="内容を入力"
+              required
+            ></textarea>
+            <p id="feedbackStatus" class="feedback-status" aria-live="polite"></p>
+            <button id="feedbackSubmitButton" type="submit" class="btn primary full-width">
+              送信する
             </button>
-
-          </article>
-
-
-          <article class="card help-card">
-
-            <h2>
-              Gmail連携・ログインで困った場合
-            </h2>
-
-            <ul class="help-check-list">
-              <li>利用するGoogleアカウントが正しいか確認します。</li>
-              <li>Googleの連携画面を途中で閉じず、最後まで完了します。</li>
-              <li>再ログイン後も改善しない場合は、連携状態を確認します。</li>
-            </ul>
-
-            <button
-              type="button"
-              class="btn outline full-width"
-              onclick="openGoogleAccountManager()"
-            >
-              Googleアカウント設定を開く
-            </button>
-
-          </article>
-
-
-          <article class="card help-card support-card">
-
-            <h2>
-              解決しない場合
-            </h2>
-
-            <p>
-              個別の不具合、アカウント、契約の問題は個別サポートで確認します。
-              ご連絡の際は、次の情報をご用意ください。
-            </p>
-
-            <ul class="help-check-list">
-              <li>不具合が起きた日時</li>
-              <li>操作していた画面と手順</li>
-              <li>表示されたメッセージ</li>
-              <li>端末とブラウザの種類</li>
-            </ul>
-
-            <p id="supportStatus" class="help-note" aria-live="polite">
-              個別サポート窓口は準備中です。
-            </p>
-
-            <a
-              id="supportLink"
-              class="btn outline full-width hidden"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              個別サポートを開く
-            </a>
-
-          </article>
-
-
-          <article class="card help-card feedback-card">
-
-            <h2>
-              ご意見・評価
-            </h2>
-
-            <p id="storeReviewStatus" aria-live="polite">
-              正式公開後は、App StoreまたはGoogle Playのレビューで受け付ける予定です。
-              現在はストアページ未公開のため、レビューリンクは掲載していません。
-            </p>
-
-            <div id="storeReviewLinks" class="store-review-links hidden">
-              <a
-                id="appStoreReviewLink"
-                class="btn outline"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                App Storeで評価
-              </a>
-              <a
-                id="googlePlayReviewLink"
-                class="btn outline"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Google Playで評価
-              </a>
-            </div>
-
-          </article>
+          </form>
 
         </div>
 
+      </section>
+
+      <section id="notificationCenterPage" class="app-page">
+        <button type="button" class="back-button" onclick="showAppPage('homePage')">
+          ← ホームへ戻る
+        </button>
+        <h1>通知</h1>
+        <div
+          id="userNotificationList"
+          class="user-notification-list"
+          aria-live="polite"
+        ></div>
       </section>
 
     </main>
@@ -1505,8 +1326,8 @@
         class="tab-button"
         onclick="showAppPage('helpFeedbackPage', this)"
       >
-        <span>❓</span>
-        <small>ヘルプ</small>
+        <span>💬</span>
+        <small>ご意見</small>
       </button>
 
     </nav>
@@ -1519,7 +1340,7 @@
 
     <script src="js/keyword-policy.js?v=2"></script>
     <script src="js/owner-onboarding-routing.js?v=1"></script>
-    <script src="js/app.js?v=24"></script>
+    <script src="js/app.js?v=25"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";

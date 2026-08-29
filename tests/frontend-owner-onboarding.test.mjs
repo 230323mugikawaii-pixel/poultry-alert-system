@@ -150,6 +150,21 @@ test("both skipped providers are rejected inline and demo purchase is explicit",
   assert.match(htmlSource, /実際の料金は発生しません/);
 });
 
+test("an authorized provider enables usage setup and clears the missing-account warning", () => {
+  assert.match(
+    appSource,
+    /function getOwnerAuthorizedChoices\(\)[\s\S]*?choice\.status === "AUTHORIZED"/
+  );
+  assert.match(
+    appSource,
+    /continueButton\.disabled\s*=\s*authorizedChoices\.length === 0/
+  );
+  assert.match(
+    appSource,
+    /authorizedChoices\.length === 0 &&[\s\S]*?skippedProviders\.length === 2/
+  );
+});
+
 test("owner pricing counts each input as one keyword and additional users separately", () => {
   assert.match(appSource, /const EXTRA_USER_PRICE = 100/);
   assert.match(appSource, /Math\.max\(ownerSetupSeatCount - 1, 0\)/);

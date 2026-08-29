@@ -189,16 +189,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-29.3";
-
-/*
-  正式なURLが決まった場合だけ設定する公開リンク。
-  お知らせは将来APIから同じtitle/url形式で取得できる。
-*/
-const announcements = Object.freeze([]);
-const supportUrl = "";
-const appStoreUrl = "";
-const googlePlayUrl = "";
+  "2026-08-29.4";
 
 let alarmAudioContext = null;
 let alarmRepeatTimer = null;
@@ -247,6 +238,8 @@ const ownerSetupKeywordDirty = {
 };
 let notificationMemberManagement = null;
 let ownerAlerts = [];
+let userNotifications = [];
+let notificationUnreadCount = 0;
 let notificationMemberAlerts = [];
 let alertEventSource = null;
 let currentAlarmAlertContext = null;
@@ -315,8 +308,6 @@ async function initializeApplication() {
   initializeAlarmNotification();
   normalizeKeywords();
   updatePrice();
-  renderAnnouncements();
-  renderHelpExternalLinks();
 
   authenticatedUser =
     await fetchCurrentUser();
@@ -341,6 +332,7 @@ async function initializeApplication() {
       await fetchLoginIdentities();
     currentTeam =
       await fetchCurrentTeamContext();
+    await refreshUserNotifications();
     synchronizeContractFromCurrentTeam();
 
     if (hasActiveSubscription()) {
@@ -1223,6 +1215,36 @@ function openOwnerSetup() {
 function renderOwnerMonitoringSetup() {
   renderOwnerMonitoringProvider("GOOGLE");
   renderOwnerMonitoringProvider("MICROSOFT");
+  const authorizedChoices =
+    getOwnerAuthorizedChoices();
+  const continueButton =
+    document.getElementById(
+      "ownerMonitoringContinueButton"
+    );
+  if (continueButton) {
+    continueButton.disabled =
+      authorizedChoices.length === 0;
+  }
+
+  const choices =
+    ownerOnboarding?.choices ?? [];
+  const skippedProviders =
+    ["GOOGLE", "MICROSOFT"].filter(
+      (provider) =>
+        ownerSetupLocalSkips.has(provider) ||
+        choices.some(
+          (choice) =>
+            choice.provider === provider &&
+            choice.status === "SKIPPED"
+        )
+    );
+  setText(
+    "ownerMonitoringSetupError",
+    authorizedChoices.length === 0 &&
+      skippedProviders.length === 2
+      ? "Call Nowを利用するには、少なくとも1つの監視アカウントを設定してください。"
+      : ""
+  );
 }
 
 
@@ -1283,7 +1305,7 @@ function renderOwnerMonitoringProvider(provider) {
   }
 
   status.textContent = isAvailable
-    ? "未設定"
+    ? ""
     : "現在準備中です。別のアカウントを設定してください。";
 }
 
@@ -3076,14 +3098,14 @@ function openGoogleScreen(
     "googleScreenTitle",
     isAuthenticationMode
       ? "Call Nowに登録・ログイン"
-      : "アカウント設定"
+      : "監視アカウント設定"
   );
 
   setText(
     "googleScreenDescription",
     isAuthenticationMode
       ? "利用するアカウントを選んでください。認証後はホームへ進みます。"
-      : "ログイン方法と、メール監視用アカウントを別々に管理できます。"
+      : "重要メールを監視するアカウントを追加・変更できます。"
   );
 
   setText(
@@ -3124,7 +3146,7 @@ function renderGoogleAccountOptions() {
     document.getElementById(
       "linkedGoogleAccountCard"
     );
-  const showAccountManagement =
+  const showMailManagement =
     googleScreenMode === "manage";
   const mailAccountCard =
     document.getElementById(
@@ -3132,64 +3154,19 @@ function renderGoogleAccountOptions() {
     );
 
   if (accountCard) {
-    accountCard.classList.toggle(
-      "hidden",
-      !showAccountManagement
-    );
+    accountCard.classList.add("hidden");
   }
 
   if (mailAccountCard) {
     mailAccountCard.classList.toggle(
       "hidden",
-      !showAccountManagement
+      !showMailManagement
     );
   }
 
   updateGoogleAuthActionText();
 
   accountList.innerHTML = "";
-
-  if (showAccountManagement && loginIdentities.length === 0) {
-    const emptyMessage =
-      document.createElement("p");
-
-    emptyMessage.className =
-      "google-account-empty";
-
-    emptyMessage.textContent =
-      "ログイン方法を確認できませんでした。";
-
-    accountList.appendChild(
-      emptyMessage
-    );
-  } else if (showAccountManagement) {
-    loginIdentities.forEach((identity) => {
-      const accountItem =
-        document.createElement("div");
-      accountItem.className =
-        "linked-google-account";
-      const canRemove =
-        loginIdentities.length > 1;
-      accountItem.innerHTML = `
-        <span class="account-avatar small-avatar">${loginProviderMark(identity.provider)}</span>
-        <span class="linked-google-email">
-          <strong>${loginProviderLabel(identity.provider)}</strong><br>
-          ${escapeHtml(identity.email)}
-        </span>
-        <span class="linked-google-actions">
-          <button
-            type="button"
-            class="account-remove-button"
-            ${canRemove ? "" : "disabled"}
-            onclick="unlinkLoginIdentity('${identity.provider}')"
-          >
-            ${canRemove ? "ログイン連携を解除" : "最後のログイン方法"}
-          </button>
-        </span>
-      `;
-      accountList.appendChild(accountItem);
-    });
-  }
 
   renderMailMonitoringAccount();
 }
@@ -3202,7 +3179,10 @@ function updateGoogleAuthActionText() {
     );
 
   if (authCard) {
-    authCard.classList.remove("hidden");
+    authCard.classList.toggle(
+      "hidden",
+      googleScreenMode === "manage"
+    );
   }
 
   if (googleScreenMode !== "manage") {
@@ -3543,7 +3523,6 @@ async function activateDeferredOwnerMonitoring(choiceId) {
   mailConnections = await fetchMailConnections();
   renderMailMonitoringAccount();
   renderConnectedGoogleAccounts();
-  renderHomeSetupNotices();
 }
 
 
@@ -3575,7 +3554,6 @@ async function setMailMonitoringState(connectionId, action) {
     mailConnections = await fetchMailConnections();
     renderMailMonitoringAccount();
     renderConnectedGoogleAccounts();
-    renderHomeSetupNotices();
   } catch (error) {
     await showAppAlert(
       error instanceof Error
@@ -4140,57 +4118,10 @@ function updateContractStatusUI() {
   const expired =
     activeSubscription && isContractExpired();
 
-  const statusDisplay =
-    document.querySelector(
-      ".status-display"
-    );
-
-  const appStatus =
-    document.querySelector(
-      ".app-status"
-    );
-
   const renewalButton =
     document.getElementById(
       "renewContractButton"
     );
-
-  if (statusDisplay) {
-    statusDisplay.textContent =
-      !activeSubscription
-        ? "⚠️ 初期設定が必要"
-        : expired
-          ? "⛔ 利用停止"
-          : "✅ 正常";
-
-    statusDisplay.classList.toggle(
-      "expired",
-      expired
-    );
-  }
-
-  setText(
-    "serviceStatusDescription",
-    !activeSubscription
-      ? "契約、キーワード、メール監視アカウントを設定すると通知を開始できます。"
-      : expired
-        ? "契約期限が切れているため、通知機能を利用できません。"
-        : "すべてのシステムは正常に稼働しています。"
-  );
-
-  if (appStatus) {
-    appStatus.textContent =
-      !activeSubscription
-        ? "未設定"
-        : expired
-          ? "停止中"
-          : "監視中";
-
-    appStatus.classList.toggle(
-      "expired",
-      expired
-    );
-  }
 
   document
     .querySelectorAll(
@@ -4277,203 +4208,227 @@ function formatDate(dateValue) {
 
 
 /* ========================================
-   お知らせ・外部リンク
+   利用者向け通知・フィードバック
 ======================================== */
 
-function getSafeHttpsUrl(rawUrl) {
-  if (
-    typeof rawUrl !== "string" ||
-    !rawUrl.trim()
-  ) {
-    return "";
+async function refreshUserNotifications() {
+  if (!authenticatedUser) {
+    userNotifications = [];
+    notificationUnreadCount = 0;
+    renderNotificationBadge();
+    return false;
   }
 
   try {
-    const parsedUrl =
-      new URL(rawUrl);
-
-    return parsedUrl.protocol ===
-        "https:" &&
-      !parsedUrl.username &&
-      !parsedUrl.password
-      ? parsedUrl.href
-      : "";
-  } catch {
-    return "";
-  }
-}
-
-
-function configureExternalLink(
-  elementId,
-  rawUrl
-) {
-  const link =
-    document.getElementById(
-      elementId
+    const response = await fetch(
+      apiUrl("/api/v1/notifications"),
+      {
+        credentials: "include",
+        headers: { Accept: "application/json" }
+      }
     );
-
-  if (!link) {
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !Array.isArray(payload?.notifications)) {
+      return false;
+    }
+    userNotifications = payload.notifications;
+    notificationUnreadCount =
+      Number.isInteger(payload.unreadCount) &&
+      payload.unreadCount >= 0
+        ? payload.unreadCount
+        : userNotifications.filter(
+            (notification) => !notification.readAt
+          ).length;
+    renderNotificationBadge();
+    renderUserNotifications();
+    return true;
+  } catch {
     return false;
   }
-
-  const safeUrl =
-    getSafeHttpsUrl(rawUrl);
-
-  link.classList.toggle(
-    "hidden",
-    !safeUrl
-  );
-
-  if (!safeUrl) {
-    link.removeAttribute("href");
-    return false;
-  }
-
-  link.setAttribute("href", safeUrl);
-  link.setAttribute(
-    "target",
-    "_blank"
-  );
-  link.setAttribute(
-    "rel",
-    "noopener noreferrer"
-  );
-
-  return true;
 }
 
 
-function renderAnnouncements() {
+function renderNotificationBadge() {
+  const badge =
+    document.getElementById(
+      "notificationUnreadBadge"
+    );
+  const button =
+    document.getElementById(
+      "notificationCenterButton"
+    );
+  if (!badge || !button) return;
+
+  const hasUnread =
+    notificationUnreadCount > 0;
+  badge.classList.toggle("hidden", !hasUnread);
+  badge.textContent = hasUnread
+    ? String(Math.min(notificationUnreadCount, 99))
+    : "";
+  button.setAttribute(
+    "aria-label",
+    hasUnread
+      ? `通知を開く（未読${notificationUnreadCount}件）`
+      : "通知を開く"
+  );
+}
+
+
+async function openNotificationCenter() {
+  showAppPage("notificationCenterPage");
+  renderUserNotifications();
+  await refreshUserNotifications();
+}
+
+
+function renderUserNotifications() {
   const list =
     document.getElementById(
-      "announcementList"
+      "userNotificationList"
     );
+  if (!list) return;
+  list.replaceChildren();
 
-  if (!list) {
+  if (userNotifications.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "notification-empty";
+    empty.textContent = "新しい通知はありません。";
+    list.appendChild(empty);
     return;
   }
 
-  list.replaceChildren();
-  let renderedAnnouncementCount = 0;
+  userNotifications.forEach((notification) => {
+    const item = document.createElement("article");
+    item.className = `user-notification-item${notification.readAt ? "" : " unread"}`;
 
-  announcements.forEach(
-    (announcement) => {
-      const item =
-        document.createElement("li");
-      const safeUrl =
-        getSafeHttpsUrl(
-          announcement.url
-        );
-      const title = String(
-        announcement.title || ""
-      ).trim();
+    const title = document.createElement("h2");
+    title.textContent = String(notification.title || "通知");
+    const message = document.createElement("p");
+    message.textContent = String(notification.message || "");
+    const date = document.createElement("time");
+    date.dateTime = String(notification.createdAt || "");
+    date.textContent = formatNotificationDate(notification.createdAt);
+    item.append(title, message, date);
 
-      if (!title) {
-        return;
-      }
-
-      item.className =
-        "announcement-item";
-
-      if (!safeUrl) {
-        const text =
-          document.createElement(
-            "span"
-          );
-
-        text.textContent = title;
-        item.appendChild(text);
-      } else {
-        const link =
-          document.createElement("a");
-        const indicator =
-          document.createElement(
-            "span"
-          );
-
-        link.href = safeUrl;
-        link.target = "_blank";
-        link.rel =
-          "noopener noreferrer";
-        link.textContent = title;
-
-        indicator.className =
-          "announcement-link-indicator";
-        indicator.textContent = "↗";
-        indicator.setAttribute(
-          "aria-hidden",
-          "true"
-        );
-
-        link.appendChild(indicator);
-        item.appendChild(link);
-      }
-
-      list.appendChild(item);
-      renderedAnnouncementCount += 1;
+    if (!notification.readAt) {
+      const readButton = document.createElement("button");
+      readButton.type = "button";
+      readButton.className = "notification-read-button";
+      readButton.textContent = "既読にする";
+      readButton.addEventListener("click", () => {
+        void markUserNotificationRead(notification.id);
+      });
+      item.appendChild(readButton);
     }
-  );
+    list.appendChild(item);
+  });
+}
 
-  if (renderedAnnouncementCount === 0) {
-    const emptyMessage =
-      document.createElement("li");
 
-    emptyMessage.className =
-      "announcement-empty";
-    emptyMessage.textContent =
-      "お知らせは準備中です";
+async function markUserNotificationRead(notificationId) {
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/notifications/${encodeURIComponent(notificationId)}/read`
+      ),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { Accept: "application/json" }
+      }
+    );
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.id) return;
 
-    list.appendChild(emptyMessage);
+    const index = userNotifications.findIndex(
+      (notification) => notification.id === payload.id
+    );
+    if (index >= 0) {
+      userNotifications[index] = payload;
+    }
+    notificationUnreadCount = userNotifications.filter(
+      (notification) => !notification.readAt
+    ).length;
+    renderNotificationBadge();
+    renderUserNotifications();
+  } catch {
+    return;
   }
 }
 
 
-function renderHelpExternalLinks() {
-  const hasSupportLink =
-    configureExternalLink(
-      "supportLink",
-      supportUrl
-    );
-
-  setText(
-    "supportStatus",
-    hasSupportLink
-      ? "個別サポート窓口をご利用いただけます。"
-      : "個別サポート窓口は準備中です。"
-  );
-
-  const hasAppStoreLink =
-    configureExternalLink(
-      "appStoreReviewLink",
-      appStoreUrl
-    );
-  const hasGooglePlayLink =
-    configureExternalLink(
-      "googlePlayReviewLink",
-      googlePlayUrl
-    );
-  const storeLinks =
+async function submitFeedback(event) {
+  event.preventDefault();
+  const input =
+    document.getElementById("feedbackContent");
+  const button =
     document.getElementById(
-      "storeReviewLinks"
+      "feedbackSubmitButton"
     );
-  const hasStoreLink =
-    hasAppStoreLink ||
-    hasGooglePlayLink;
-
-  if (storeLinks) {
-    storeLinks.classList.toggle(
-      "hidden",
-      !hasStoreLink
+  const content = input?.value.trim() ?? "";
+  setText("feedbackStatus", "");
+  if (!content) {
+    setText(
+      "feedbackStatus",
+      "ご意見・フィードバックを入力してください。"
     );
+    return;
   }
 
-  setText(
-    "storeReviewStatus",
-    hasStoreLink
-      ? "正式ストアページから、ご意見・評価をお寄せいただけます。"
-      : "正式公開後は、App StoreまたはGoogle Playのレビューで受け付ける予定です。現在はストアページ未公開のため、レビューリンクは掲載していません。"
-  );
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch(
+      apiUrl("/api/v1/feedback"),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          content,
+          ...(currentTeam?.id
+            ? { teamId: currentTeam.id }
+            : {})
+        })
+      }
+    );
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(
+        payload?.error?.message ||
+          "送信できませんでした。時間をおいてお試しください。"
+      );
+    }
+    if (input) input.value = "";
+    setText(
+      "feedbackStatus",
+      "送信しました。返信がある場合は通知でお知らせします。"
+    );
+  } catch (error) {
+    setText(
+      "feedbackStatus",
+      error instanceof Error
+        ? error.message
+        : "送信できませんでした。時間をおいてお試しください。"
+    );
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+
+function formatNotificationDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
 }
 
 
@@ -4499,7 +4454,9 @@ function openApp() {
 
   renderConnectedGoogleAccounts();
 
-  renderHomeSetupNotices();
+  renderNotificationBadge();
+
+  renderUserNotifications();
 
   renderAlertList(
     "ownerAlertList",
@@ -4530,27 +4487,6 @@ function renderConnectedGoogleAccounts() {
   }
 
   container.replaceChildren();
-
-  const loginAccount =
-    document.createElement("div");
-  loginAccount.className =
-    "google-account-role";
-  const loginProviderNames =
-    loginIdentities.length > 0
-      ? loginIdentities
-          .map((identity) => loginProviderLabel(identity.provider))
-          .join("・")
-      : "ログイン方法を確認中";
-  loginAccount.innerHTML = `
-    <strong>Call Nowログイン</strong>
-    <span class="connected-account-summary">
-      ${loginIdentities.length > 0 ? `${loginIdentities.length}件設定済み` : "ログイン中"}
-    </span>
-    <span class="connected-account-email">
-      ${escapeHtml(loginProviderNames)}<br>
-      ${escapeHtml(googleEmail)}
-    </span>
-  `;
 
   const monitoringAccount =
     document.createElement("div");
@@ -4589,7 +4525,7 @@ function renderConnectedGoogleAccounts() {
           : `${mailConnections.length}件接続中`
       : deferredMailChoices.length > 0
         ? `${deferredMailChoices.length}件設定保留`
-        : "未接続";
+        : "接続されていません";
   const monitoringDetail =
     mailConnections.length > 0
       ? mailConnections
@@ -4627,26 +4563,11 @@ function renderConnectedGoogleAccounts() {
     </span>
   `;
 
-  container.appendChild(loginAccount);
   container.appendChild(monitoringAccount);
 
   setText(
     "homeGoogleAccountActionButton",
-    "アカウント設定を開く"
-  );
-}
-
-
-function renderHomeSetupNotices() {
-  const monitoringActive =
-    mailConnections.some(
-      (connection) =>
-        connection.connectionStatus === "ACTIVE" &&
-        connection.authorizationStatus === "ACTIVE"
-    );
-  setText(
-    "appMonitoringStatus",
-    monitoringActive ? "監視中" : "未設定"
+    "監視アカウント設定を開く"
   );
 }
 
@@ -4803,6 +4724,8 @@ async function performLogout() {
   resetOwnerOnboardingClientState();
   notificationMemberManagement = null;
   ownerAlerts = [];
+  userNotifications = [];
+  notificationUnreadCount = 0;
   stopAlertEventStream();
 
   setupMode =

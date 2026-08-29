@@ -12,7 +12,7 @@ const htmlSource = readFileSync(
 );
 
 test("owner and notification member alert views use authenticated APIs", () => {
-  assert.match(htmlSource, /id="ownerAlertList"/);
+  assert.doesNotMatch(htmlSource, /id="ownerAlertList"/);
   assert.match(htmlSource, /id="notificationMemberAlertList"/);
   assert.match(appSource, /\/api\/v1\/teams\/\$\{encodeURIComponent\(currentTeam\.id\)\}\/alerts/);
   assert.match(appSource, /\/api\/v1\/notification-members\/alerts/);
