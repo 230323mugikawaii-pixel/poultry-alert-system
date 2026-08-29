@@ -553,6 +553,8 @@ model OnboardingMailChoice {
   provider            MailProvider
   mailAuthorizationId String?                      @db.Uuid
   status              OnboardingMailChoiceStatus
+  keywords            String[]                     @default([])
+  keywordsConfirmedAt DateTime?                    @db.Timestamptz(3)
   createdAt           DateTime                     @default(now()) @db.Timestamptz(3)
   updatedAt           DateTime                     @updatedAt @db.Timestamptz(3)
   onboarding          OwnerOnboarding              @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
@@ -568,6 +570,7 @@ model MailConnection {
   teamId               String                @db.Uuid
   mailAuthorizationId  String                @db.Uuid
   status               MailConnectionStatus  @default(ACTIVE)
+  keywords             String[]              @default([])
   providerCursor       String?               @db.VarChar(2048)
   lastSyncAt           DateTime?             @db.Timestamptz(3)
   lastErrorCode        String?               @db.VarChar(100)

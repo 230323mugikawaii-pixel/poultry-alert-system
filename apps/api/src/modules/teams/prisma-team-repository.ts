@@ -3,6 +3,7 @@ import { retrySerializableTransaction } from "../../db/transaction-retry.js";
 import { Prisma } from "../../generated/prisma/client.js";
 import { AppError } from "../../lib/app-error.js";
 import { countOccupiedAdditionalSeats } from "../notification-members/prisma-notification-member-repository.js";
+import { mergeTeamKeywordSets } from "./keyword-policy.js";
 import {
   calculateAnnualPriceYen,
   calculateSeatSummary
@@ -83,6 +84,29 @@ export class PrismaTeamRepository implements TeamRepository {
               ) {
                 throw onboardingNotAvailableError();
               }
+              const authorizedChoices = locked.choices.filter(
+                (choice) =>
+                  choice.status === "AUTHORIZED" && choice.mailAuthorizationId
+              );
+              if (
+                authorizedChoices.some((choice) => !choice.keywordsConfirmedAt)
+              ) {
+                throw new AppError(
+                  "OWNER_ONBOARDING_KEYWORDS_INCOMPLETE",
+                  "設定したすべての監視アカウントで通知キーワードを決定してください。",
+                  409
+                );
+              }
+              const lockedKeywords = mergeTeamKeywordSets(
+                authorizedChoices.map((choice) => choice.keywords)
+              );
+              if (!sameKeywordSet(input.keywords, lockedKeywords)) {
+                throw new AppError(
+                  "OWNER_ONBOARDING_KEYWORDS_CHANGED",
+                  "通知キーワードが変更されました。内容を確認してください。",
+                  409
+                );
+              }
               const memberships = await transaction.teamMembership.count({
                 where: { userId: input.ownerUserId }
               });
@@ -93,14 +117,25 @@ export class PrismaTeamRepository implements TeamRepository {
                   409
                 );
               }
-              const created = await createTeamInTransaction(transaction, input);
+              const purchaseInput = {
+                ...input,
+                keywords: lockedKeywords,
+                currentTermAmountYen: calculateAnnualPriceYen(
+                  input.seatLimit,
+                  lockedKeywords.length
+                )
+              };
+              const created = await createTeamInTransaction(
+                transaction,
+                purchaseInput
+              );
               await transaction.ownerOnboarding.update({
                 where: { id: locked.id },
                 data: {
                   teamId: created.team.teamId,
                   status: "PURCHASED",
                   seatCount: 1 + input.seatLimit,
-                  keywords: [...input.keywords],
+                  keywords: lockedKeywords,
                   purchasedAt: input.currentTermStartedAt
                 }
               });
@@ -581,6 +616,20 @@ export class PrismaTeamRepository implements TeamRepository {
       throw error;
     }
   }
+}
+
+function sameKeywordSet(
+  left: readonly string[],
+  right: readonly string[]
+): boolean {
+  const normalize = (value: string) =>
+    value.normalize("NFKC").toLocaleLowerCase("ja-JP");
+  const leftValues = [...left].map(normalize).sort();
+  const rightValues = [...right].map(normalize).sort();
+  return (
+    leftValues.length === rightValues.length &&
+    leftValues.every((value, index) => value === rightValues[index])
+  );
 }
 
 type TeamDatabase = DatabaseClient | Prisma.TransactionClient;

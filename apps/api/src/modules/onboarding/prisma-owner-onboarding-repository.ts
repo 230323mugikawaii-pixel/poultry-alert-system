@@ -226,7 +226,9 @@ export class PrismaOwnerOnboardingRepository implements OwnerOnboardingRepositor
               },
               update: {
                 mailAuthorizationId: authorization.id,
-                status: "AUTHORIZED"
+                status: "AUTHORIZED",
+                keywords: [],
+                keywordsConfirmedAt: null
               }
             });
             return {
@@ -302,6 +304,42 @@ export class PrismaOwnerOnboardingRepository implements OwnerOnboardingRepositor
     );
   }
 
+  public setChoiceKeywords(input: {
+    readonly userId: string;
+    readonly choiceId: string;
+    readonly keywords: readonly string[];
+    readonly now: Date;
+  }): Promise<OwnerOnboardingRecord> {
+    return retrySerializableTransaction(
+      () =>
+        this.database.$transaction(
+          async (transaction) => {
+            const onboarding = await lockPendingOnboarding(
+              transaction,
+              input.userId,
+              input.now
+            );
+            const updated = await transaction.onboardingMailChoice.updateMany({
+              where: {
+                id: input.choiceId,
+                onboardingId: onboarding.id,
+                status: "AUTHORIZED",
+                mailAuthorizationId: { not: null }
+              },
+              data: {
+                keywords: [...input.keywords],
+                keywordsConfirmedAt: input.now
+              }
+            });
+            if (updated.count !== 1) throw invalidChoiceError();
+            return findOnboarding(transaction, onboarding.id);
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
+      () => conflictError()
+    );
+  }
+
   public activateChoice(input: {
     readonly userId: string;
     readonly choiceId: string;
@@ -346,10 +384,12 @@ export class PrismaOwnerOnboardingRepository implements OwnerOnboardingRepositor
               create: {
                 teamId: choice.onboarding.teamId,
                 mailAuthorizationId: choice.mailAuthorizationId,
-                status: "ACTIVE"
+                status: "ACTIVE",
+                keywords: [...choice.keywords]
               },
               update: {
                 status: "ACTIVE",
+                keywords: [...choice.keywords],
                 providerCursor: null,
                 lastErrorCode: null,
                 revokedAt: null
@@ -512,6 +552,8 @@ function mapOnboarding(input: {
     readonly status: OwnerOnboardingRecord["choices"][number]["status"];
     readonly mailAuthorizationId: string | null;
     readonly mailAuthorization: { readonly email: string } | null;
+    readonly keywords: readonly string[];
+    readonly keywordsConfirmedAt: Date | null;
   }[];
 }): OwnerOnboardingRecord {
   return {
@@ -529,7 +571,9 @@ function mapOnboarding(input: {
       provider: choice.provider,
       status: choice.status,
       authorizationId: choice.mailAuthorizationId,
-      email: choice.mailAuthorization?.email ?? null
+      email: choice.mailAuthorization?.email ?? null,
+      keywords: [...choice.keywords],
+      keywordsConfirmedAt: choice.keywordsConfirmedAt
     }))
   };
 }

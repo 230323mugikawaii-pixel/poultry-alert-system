@@ -13,6 +13,10 @@ import type {
 import { readMailOAuthFailureReason } from "../mail/mail-provider.js";
 import type { TokenEncryptionProvider } from "../mail/token-encryption.js";
 import type { TeamService } from "../teams/team-service.js";
+import {
+  mergeTeamKeywordSets,
+  normalizeTeamKeywords
+} from "../teams/keyword-policy.js";
 import type {
   OwnerOnboardingRecord,
   OwnerOnboardingRepository
@@ -201,10 +205,44 @@ export class OwnerOnboardingService {
   public async completeDemoPurchase(input: {
     readonly userId: string;
     readonly onboardingId: string;
-    readonly keywords: readonly string[];
     readonly seatCount: number;
   }) {
-    return this.options.teamService.completeOwnerOnboardingPurchase(input);
+    const onboarding = await this.options.repository.getCurrent(input.userId);
+    if (!onboarding || onboarding.id !== input.onboardingId) {
+      throw onboardingNotReadyError();
+    }
+    if (["PURCHASED", "COMPLETED"].includes(onboarding.status)) {
+      return this.options.teamService.completeOwnerOnboardingPurchase({
+        ...input,
+        keywords: [...onboarding.keywords]
+      });
+    }
+    if (onboarding.status !== "PENDING") throw onboardingNotReadyError();
+    const choices = onboarding.choices.filter(
+      (choice) => choice.status === "AUTHORIZED" && choice.authorizationId
+    );
+    if (
+      choices.length === 0 ||
+      choices.some((choice) => !choice.keywordsConfirmedAt)
+    ) {
+      throw onboardingNotReadyError();
+    }
+    return this.options.teamService.completeOwnerOnboardingPurchase({
+      ...input,
+      keywords: mergeTeamKeywordSets(choices.map((choice) => choice.keywords))
+    });
+  }
+
+  public setChoiceKeywords(input: {
+    readonly userId: string;
+    readonly choiceId: string;
+    readonly keywords: readonly string[];
+  }): Promise<OwnerOnboardingRecord> {
+    return this.options.repository.setChoiceKeywords({
+      ...input,
+      keywords: normalizeTeamKeywords(input.keywords),
+      now: this.now()
+    });
   }
 
   public activateChoice(input: {
@@ -311,6 +349,14 @@ function invalidOnboardingAuthorizationError(reasonCode?: string): AppError {
     "メールアカウントの設定が無効または期限切れです。もう一度お試しください。",
     401,
     reasonCode ? { reasonCode } : undefined
+  );
+}
+
+function onboardingNotReadyError(): AppError {
+  return new AppError(
+    "OWNER_ONBOARDING_KEYWORDS_INCOMPLETE",
+    "設定したすべての監視アカウントで通知キーワードを決定してください。",
+    409
   );
 }
 

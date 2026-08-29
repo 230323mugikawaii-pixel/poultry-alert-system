@@ -1,4 +1,14 @@
 "use strict";
+
+const ownerOnboardingRouting =
+  globalThis.CallNowOwnerOnboardingRouting;
+
+if (!ownerOnboardingRouting) {
+  throw new Error(
+    "Owner onboarding routing is unavailable."
+  );
+}
+
 /* ========================================
    契約データを保存
 ======================================== */
@@ -179,7 +189,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-29.1";
+  "2026-08-29.3";
 
 /*
   正式なURLが決まった場合だけ設定する公開リンク。
@@ -226,6 +236,15 @@ let ownerMonitoringProviderAvailability = {
 let ownerOnboarding = null;
 let ownerSetupSeatCount = 1;
 const ownerSetupLocalSkips = new Set();
+let ownerSetupKeywordProvider = null;
+const ownerSetupKeywordDrafts = {
+  GOOGLE: null,
+  MICROSOFT: null
+};
+const ownerSetupKeywordDirty = {
+  GOOGLE: false,
+  MICROSOFT: false
+};
 let notificationMemberManagement = null;
 let ownerAlerts = [];
 let notificationMemberAlerts = [];
@@ -254,6 +273,31 @@ let paymentMode = "signup";
   編集前の料金
 */
 let priceBeforeEditing = BASE_PRICE;
+
+
+function openAuthenticatedStartupDestination() {
+  const destination =
+    ownerOnboardingRouting.selectAuthenticatedDestination({
+      onboardingStatus: ownerOnboarding?.status ?? null,
+      hasCurrentTeam: Boolean(currentTeam)
+    });
+
+  if (
+    destination ===
+    ownerOnboardingRouting.destinations.OWNER_SETUP
+  ) {
+    openOwnerSetup();
+  } else if (
+    destination ===
+    ownerOnboardingRouting.destinations.MONITORING_CONFIRMATION
+  ) {
+    openMonitoringConfirmation();
+  } else {
+    openApp();
+  }
+
+  return destination;
+}
 
 window.addEventListener("DOMContentLoaded", () => {
   void initializeApplication();
@@ -352,15 +396,7 @@ async function initializeApplication() {
       primaryAuthResult === "success" &&
       authenticatedUser
     ) {
-      if (currentTeam) {
-        if (ownerOnboarding?.status === "PURCHASED") {
-          openMonitoringConfirmation();
-        } else {
-          openApp();
-        }
-      } else {
-        openOwnerSetup();
-      }
+      openAuthenticatedStartupDestination();
       return;
     }
 
@@ -403,16 +439,7 @@ async function initializeApplication() {
         await fetchOwnerOnboarding();
       currentTeam =
         await fetchCurrentTeamContext();
-      if (
-        currentTeam &&
-        ownerOnboarding?.status === "PURCHASED"
-      ) {
-        openMonitoringConfirmation();
-      } else if (currentTeam) {
-        openApp();
-      } else {
-        openOwnerSetup();
-      }
+      openAuthenticatedStartupDestination();
       return;
     }
 
@@ -427,21 +454,14 @@ async function initializeApplication() {
   }
 
   if (authenticatedUser) {
+    const destination =
+      openAuthenticatedStartupDestination();
     if (
-      !currentTeam &&
-      ownerOnboarding?.status === "PENDING"
+      destination !==
+      ownerOnboardingRouting.destinations.APP
     ) {
-      openOwnerSetup();
       return;
     }
-    if (
-      currentTeam &&
-      ownerOnboarding?.status === "PURCHASED"
-    ) {
-      openMonitoringConfirmation();
-      return;
-    }
-    openApp();
     if (mailAuthResult) {
       await showAppAlert(
         mailAuthResult === "success"
@@ -1237,16 +1257,18 @@ function renderOwnerMonitoringProvider(provider) {
 
   setupButton.disabled = !isAvailable;
   skipButton.classList.toggle("hidden", isAuthorized);
+  setupButton.classList.toggle("primary", !isAuthorized);
+  setupButton.classList.toggle("outline", isAuthorized);
 
   if (isAuthorized) {
     status.innerHTML = `
-      <strong>設定済み</strong>
+      <strong>✓ 設定しました</strong>
       <span>${escapeHtml(choice.email)}</span>
     `;
     setupButton.textContent =
       provider === "GOOGLE"
-        ? "別のGoogleアカウントを設定する"
-        : "別のMicrosoftアカウントを設定する";
+        ? "Googleアカウントを変更"
+        : "Microsoftアカウントを変更";
     return;
   }
 
@@ -1341,14 +1363,9 @@ async function skipOwnerMonitoringProvider(provider) {
 
 
 function continueFromOwnerMonitoringSetup() {
-  const authorized = ownerOnboarding?.choices?.some(
-    (choice) =>
-      choice.email &&
-      ["AUTHORIZED", "ACTIVATED", "DEFERRED"].includes(
-        choice.status
-      )
-  );
-  if (!authenticatedUser || !authorized) {
+  const authorizedChoices =
+    getOwnerAuthorizedChoices();
+  if (!authenticatedUser || authorizedChoices.length === 0) {
     setText(
       "ownerMonitoringSetupError",
       "Call Nowを利用するには、少なくとも1つの監視アカウントを設定してください。"
@@ -1356,11 +1373,164 @@ function continueFromOwnerMonitoringSetup() {
     return;
   }
   setupMode = "signup";
+  synchronizeOwnerKeywordDrafts();
+  const firstUndecided = authorizedChoices.find(
+    (choice) => !isOwnerKeywordChoiceDecided(choice)
+  );
+  openOwnerKeywordSetup(
+    firstUndecided?.provider ?? authorizedChoices[0].provider
+  );
+}
+
+
+function getOwnerAuthorizedChoices() {
+  return (ownerOnboarding?.choices ?? []).filter(
+    (choice) =>
+      choice.status === "AUTHORIZED" &&
+      choice.email &&
+      (choice.provider === "GOOGLE" ||
+        choice.provider === "MICROSOFT")
+  );
+}
+
+
+function synchronizeOwnerKeywordDrafts() {
+  getOwnerAuthorizedChoices().forEach((choice) => {
+    if (ownerSetupKeywordDrafts[choice.provider] !== null) {
+      return;
+    }
+    ownerSetupKeywordDrafts[choice.provider] =
+      Array.isArray(choice.keywords) && choice.keywords.length > 0
+        ? [...choice.keywords]
+        : ["停電", "通電", "警報"];
+    ownerSetupKeywordDirty[choice.provider] = false;
+  });
+}
+
+
+function saveCurrentOwnerKeywordDraft() {
+  if (
+    setupMode !== "signup" ||
+    !ownerSetupKeywordProvider
+  ) {
+    return;
+  }
+  ownerSetupKeywordDrafts[ownerSetupKeywordProvider] =
+    [...keywords];
+}
+
+
+function isOwnerKeywordChoiceDecided(choice) {
+  return Boolean(
+    choice?.keywordsConfirmedAt &&
+      !ownerSetupKeywordDirty[choice.provider]
+  );
+}
+
+
+function openOwnerKeywordSetup(provider) {
+  const choices = getOwnerAuthorizedChoices();
+  if (!choices.some((choice) => choice.provider === provider)) {
+    openOwnerSetup();
+    return;
+  }
+  saveCurrentOwnerKeywordDraft();
+  synchronizeOwnerKeywordDrafts();
+  ownerSetupKeywordProvider = provider;
+  keywords = [
+    ...(ownerSetupKeywordDrafts[provider] ??
+      ["停電", "通電", "警報"])
+  ];
   showOnlyScreen("setupScreen");
   renderKeywordInputs();
   updateSetupScreenText();
   updatePrice();
   window.scrollTo({ top: 0 });
+}
+
+
+function switchOwnerKeywordProvider(provider) {
+  if (provider === ownerSetupKeywordProvider) return;
+  openOwnerKeywordSetup(provider);
+}
+
+
+function renderOwnerKeywordProviderNavigation() {
+  const section = document.getElementById(
+    "ownerKeywordProviderSection"
+  );
+  const tabs = document.getElementById(
+    "ownerKeywordProviderTabs"
+  );
+  if (!section || !tabs) return;
+  const choices = getOwnerAuthorizedChoices();
+  section.classList.toggle(
+    "hidden",
+    setupMode !== "signup" || choices.length === 0
+  );
+  if (setupMode !== "signup" || choices.length === 0) {
+    return;
+  }
+  const choice = choices.find(
+    (candidate) =>
+      candidate.provider === ownerSetupKeywordProvider
+  ) ?? choices[0];
+  ownerSetupKeywordProvider = choice.provider;
+  tabs.classList.toggle("hidden", choices.length < 2);
+  tabs.innerHTML = choices.length < 2
+    ? ""
+    : choices.map((candidate) => `
+        <button
+          type="button"
+          class="owner-keyword-provider-tab ${candidate.provider === choice.provider ? "active" : ""}"
+          onclick="switchOwnerKeywordProvider('${candidate.provider}')"
+          ${candidate.provider === choice.provider ? 'aria-current="true"' : ""}
+        >
+          ${candidate.provider === "GOOGLE" ? "Google" : "Microsoft"}
+          ${isOwnerKeywordChoiceDecided(candidate) ? '<span class="tab-complete">✓</span>' : ""}
+        </button>
+      `).join("");
+  setText(
+    "ownerKeywordProviderLabel",
+    choice.provider === "GOOGLE" ? "Google" : "Microsoft"
+  );
+  setText(
+    "ownerKeywordProviderTitle",
+    choice.provider === "GOOGLE"
+      ? "Gmailの通知キーワード"
+      : "Microsoft 365の通知キーワード"
+  );
+  setText("ownerKeywordProviderEmail", choice.email);
+  setText(
+    "ownerKeywordDecisionStatus",
+    isOwnerKeywordChoiceDecided(choice)
+      ? "✓ 決定済み"
+      : choice.keywordsConfirmedAt
+        ? "変更あり・再決定が必要"
+        : "未決定"
+  );
+}
+
+
+function getOwnerSetupBillingKeywords() {
+  saveCurrentOwnerKeywordDraft();
+  const merged = [];
+  const seen = new Set();
+  getOwnerAuthorizedChoices().forEach((choice) => {
+    const values =
+      ownerSetupKeywordDrafts[choice.provider] ??
+      choice.keywords ?? [];
+    values.forEach((value) => {
+      const normalized = keywordPolicy.normalizeKeyword(value);
+      const key = normalized
+        .normalize("NFKC")
+        .toLocaleLowerCase("ja-JP");
+      if (!normalized || seen.has(key)) return;
+      seen.add(key);
+      merged.push(normalized);
+    });
+  });
+  return merged;
 }
 
 
@@ -1576,6 +1746,7 @@ function startAlertEventStream(path, audience) {
       openNotificationMemberLogin();
     } else {
       authenticatedUser = null;
+      resetOwnerOnboardingClientState();
       openGuestHome();
     }
   });
@@ -1752,6 +1923,7 @@ function openSetupForAuthenticatedUser() {
 
 function handleSetupBack() {
   if (setupMode === "signup") {
+    saveCurrentOwnerKeywordDraft();
     openOwnerSetup();
   } else {
     openApp();
@@ -1767,6 +1939,11 @@ function handleSetupBack() {
 function backToSetup() {
   if (!authenticatedUser) {
     openOwnerSetup();
+    return;
+  }
+
+  if (setupMode === "signup" && ownerSetupKeywordProvider) {
+    openOwnerKeywordSetup(ownerSetupKeywordProvider);
     return;
   }
 
@@ -1855,6 +2032,7 @@ function addKeyword() {
   }
 
   keywords.push("");
+  markOwnerKeywordDraftDirty();
 
   renderKeywordInputs();
 
@@ -1878,6 +2056,7 @@ function removeKeyword(index) {
   }
 
   keywords.splice(index, 1);
+  markOwnerKeywordDraftDirty();
 
   renderKeywordInputs();
 }
@@ -1889,6 +2068,7 @@ function changeKeyword(
   inputElement = null
 ) {
   keywords[index] = value;
+  markOwnerKeywordDraftDirty();
 
   const normalizedValue =
     keywordPolicy.normalizeKeyword(
@@ -1989,6 +2169,26 @@ function showSetupError(message) {
     "setupError",
     message
   );
+}
+
+
+function markOwnerKeywordDraftDirty() {
+  if (setupMode === "signup" && ownerSetupKeywordProvider) {
+    ownerSetupKeywordDirty[ownerSetupKeywordProvider] = true;
+    renderOwnerKeywordProviderNavigation();
+  }
+}
+
+
+function resetOwnerOnboardingClientState() {
+  ownerOnboarding = null;
+  ownerSetupKeywordProvider = null;
+  ownerSetupSeatCount = 1;
+  ownerSetupLocalSkips.clear();
+  ["GOOGLE", "MICROSOFT"].forEach((provider) => {
+    ownerSetupKeywordDrafts[provider] = null;
+    ownerSetupKeywordDirty[provider] = false;
+  });
 }
 
 
@@ -2114,8 +2314,13 @@ function resolveSavedGoogleEmail(data) {
 ======================================== */
 
 function updatePrice() {
-  const keywordCount =
+  const currentKeywordCount =
     getValidKeywords().length;
+  const billingKeywords =
+    setupMode === "signup"
+      ? getOwnerSetupBillingKeywords()
+      : getValidKeywords();
+  const keywordCount = billingKeywords.length;
 
   const extraKeywordCount =
     Math.max(
@@ -2145,7 +2350,7 @@ function updatePrice() {
 
   setText(
     "keywordCount",
-    `${keywordCount}個`
+    `${currentKeywordCount}個`
   );
 
   setText(
@@ -2233,6 +2438,10 @@ function updateSetupScreenText() {
     continueButton.textContent =
       "変更内容を保存";
 
+    document
+      .getElementById("ownerKeywordProviderSection")
+      ?.classList.add("hidden");
+
     return;
   }
 
@@ -2263,11 +2472,12 @@ function updateSetupScreenText() {
 
   setText(
     "setupDescription",
-    "登録した言葉がメールに含まれていた場合に通知します。基本料金には3個までのキーワードが含まれます。"
+    "この監視アカウントで、メールに含まれていたら通知するキーワードを設定してください。"
   );
 
   continueButton.textContent =
-    "決済内容を確認";
+    "このアカウントのキーワードを決定";
+  renderOwnerKeywordProviderNavigation();
 }
 
 
@@ -2343,6 +2553,62 @@ ${formatYen(totalPrice)}
 
   return;
 }
+  const currentChoice = getOwnerAuthorizedChoices().find(
+    (choice) => choice.provider === ownerSetupKeywordProvider
+  );
+  if (!currentChoice) {
+    openOwnerSetup();
+    return;
+  }
+  const continueButton = document.getElementById(
+    "setupContinueButton"
+  );
+  if (continueButton) continueButton.disabled = true;
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/owner-onboarding/choices/${encodeURIComponent(currentChoice.id)}/keywords`
+      ),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ keywords: [...keywords] })
+      }
+    );
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !isOwnerOnboarding(result)) {
+      throw new Error(
+        result?.error?.message ||
+          "キーワードを保存できませんでした。"
+      );
+    }
+    ownerOnboarding = result;
+    ownerSetupKeywordDrafts[currentChoice.provider] = [...keywords];
+    ownerSetupKeywordDirty[currentChoice.provider] = false;
+    const nextChoice = getOwnerAuthorizedChoices().find(
+      (choice) => !isOwnerKeywordChoiceDecided(choice)
+    );
+    if (nextChoice) {
+      openOwnerKeywordSetup(nextChoice.provider);
+      showSetupError(
+        `${nextChoice.provider === "GOOGLE" ? "Google" : "Microsoft"}の通知キーワードを決定してください。`
+      );
+      return;
+    }
+  } catch (error) {
+    showSetupError(
+      error instanceof Error
+        ? error.message
+        : "キーワードを保存できませんでした。"
+    );
+    return;
+  } finally {
+    if (continueButton) continueButton.disabled = false;
+  }
   paymentMode = "signup";
   openPayment();
 }
@@ -2361,10 +2627,7 @@ function openPayment() {
     paymentMode === "signup" &&
     (!ownerOnboarding ||
       ownerOnboarding.status !== "PENDING" ||
-      !ownerOnboarding.choices.some(
-        (choice) =>
-          choice.status === "AUTHORIZED" && choice.email
-      ))
+      getOwnerAuthorizedChoices().length === 0)
   ) {
     openOwnerSetup();
     setText(
@@ -2372,6 +2635,18 @@ function openPayment() {
       "購入前の設定を確認できませんでした。監視アカウントを設定してください。"
     );
     return;
+  }
+  if (paymentMode === "signup") {
+    const undecided = getOwnerAuthorizedChoices().find(
+      (choice) => !isOwnerKeywordChoiceDecided(choice)
+    );
+    if (undecided) {
+      openOwnerKeywordSetup(undecided.provider);
+      showSetupError(
+        `${undecided.provider === "GOOGLE" ? "Google" : "Microsoft"}の通知キーワードを決定してください。`
+      );
+      return;
+    }
   }
 
   const renewalMode =
@@ -2404,11 +2679,16 @@ function openPayment() {
       : "決済を完了して次へ"
   );
 
+  const paymentKeywordValues =
+    signupMode
+      ? getOwnerSetupBillingKeywords()
+      : [...keywords];
+
   setText(
     "paymentKeywordCount",
     paymentMode === "upgrade"
-      ? `${keywords.length}個（変更後）`
-      : `${keywords.length}個`
+      ? `${paymentKeywordValues.length}個（変更後）`
+      : `${paymentKeywordValues.length}個`
   );
 
   const paymentAmount =
@@ -2446,7 +2726,7 @@ function openPayment() {
   if (container) {
     container.innerHTML = "";
 
-    keywords.forEach(
+    paymentKeywordValues.forEach(
       (keyword) => {
         const chip =
           document.createElement(
@@ -2570,7 +2850,6 @@ ${formatYen(totalPrice)}
         },
         body: JSON.stringify({
           onboardingId: ownerOnboarding.id,
-          keywords: [...keywords],
           seatCount: ownerSetupSeatCount
         })
       }
@@ -2586,6 +2865,7 @@ ${formatYen(totalPrice)}
       );
     }
     ownerOnboarding = result.onboarding;
+    keywords = getOwnerSetupBillingKeywords();
     totalPrice = result.amountYen;
     paidAnnualPrice = result.amountYen;
     currentTeam = await fetchCurrentTeamContext();
@@ -4358,23 +4638,6 @@ function renderConnectedGoogleAccounts() {
 
 
 function renderHomeSetupNotices() {
-  const card = document.getElementById(
-    "homeSetupNoticeCard"
-  );
-  const container = document.getElementById(
-    "homeSetupNotices"
-  );
-  if (!card || !container) return;
-  const notices = [];
-  if (!hasActiveSubscription()) {
-    notices.push({
-      title: "契約とキーワードが未設定です",
-      message:
-        "通知を始めるには、監視キーワードと契約内容を設定してください。",
-      action: "openSetupForAuthenticatedUser()",
-      label: "設定を始める"
-    });
-  }
   const monitoringActive =
     mailConnections.some(
       (connection) =>
@@ -4385,51 +4648,6 @@ function renderHomeSetupNotices() {
     "appMonitoringStatus",
     monitoringActive ? "監視中" : "未設定"
   );
-  if (!monitoringActive) {
-    const monitoringPaused =
-      mailConnections.some(
-        (connection) =>
-          connection.connectionStatus === "PAUSED"
-      );
-    const monitoringDeferred =
-      ownerOnboarding?.choices?.some(
-        (choice) => choice.status === "DEFERRED"
-      );
-    notices.push({
-      title: monitoringPaused
-        ? "メール監視が停止中です"
-        : monitoringDeferred
-          ? "監視開始を保留しています"
-          : "メール監視アカウントが未接続です",
-      message: currentTeam
-        ? monitoringPaused
-          ? "アカウント設定から監視を再開できます。"
-          : monitoringDeferred
-            ? "アカウント設定から監視を開始できます。"
-            : "GmailまたはMicrosoft 365の監視用アカウントを接続してください。"
-        : "契約完了後に、監視用アカウントを設定できます。",
-      action: currentTeam
-        ? "openGoogleAccountManager()"
-        : "openSetupForAuthenticatedUser()",
-      label: currentTeam
-        ? "メール監視を設定"
-        : "契約設定を開く"
-    });
-  }
-  card.classList.toggle("hidden", notices.length === 0);
-  container.innerHTML = notices
-    .map(
-      (notice) => `
-        <div class="setup-notice-item">
-          <strong>${escapeHtml(notice.title)}</strong>
-          <p>${escapeHtml(notice.message)}</p>
-          <button type="button" class="btn outline full-width" onclick="${notice.action}">
-            ${escapeHtml(notice.label)}
-          </button>
-        </div>
-      `
-    )
-    .join("");
 }
 
 
@@ -4582,6 +4800,7 @@ async function performLogout() {
     GOOGLE: "UNKNOWN",
     MICROSOFT: "UNKNOWN"
   };
+  resetOwnerOnboardingClientState();
   notificationMemberManagement = null;
   ownerAlerts = [];
   stopAlertEventStream();

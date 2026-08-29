@@ -112,6 +112,65 @@ describe("owner monitoring onboarding", () => {
     expect(fixture.authRepository.users.size).toBe(1);
   });
 
+  it("requires a separate confirmed keyword set for every authorized provider", async () => {
+    const fixture = createFixture();
+    const googleRequest = await fixture.service.createAuthorizationRequest({
+      provider: "GOOGLE",
+      authenticatedUserId: null
+    });
+    const first = await fixture.service.completeAuthorization({
+      provider: "GOOGLE",
+      state: googleRequest.state,
+      code: "valid-google-code",
+      authenticatedUserId: null,
+      clientContext: {}
+    });
+    const userId = first.login?.user.id ?? "";
+    const microsoftRequest = await fixture.service.createAuthorizationRequest({
+      provider: "MICROSOFT",
+      authenticatedUserId: userId
+    });
+    const second = await fixture.service.completeAuthorization({
+      provider: "MICROSOFT",
+      state: microsoftRequest.state,
+      code: "valid-microsoft-code",
+      authenticatedUserId: userId,
+      clientContext: {}
+    });
+    const googleChoice = second.onboarding?.choices.find(
+      ({ provider }) => provider === "GOOGLE"
+    );
+    const microsoftChoice = second.onboarding?.choices.find(
+      ({ provider }) => provider === "MICROSOFT"
+    );
+    await fixture.service.setChoiceKeywords({
+      userId,
+      choiceId: googleChoice?.id ?? "",
+      keywords: ["博衣こより", "Call Now", "停電のお知らせ"]
+    });
+    await expect(
+      fixture.service.completeDemoPurchase({
+        userId,
+        onboardingId: second.onboarding?.id ?? "",
+        seatCount: 1
+      })
+    ).rejects.toMatchObject({
+      code: "OWNER_ONBOARDING_KEYWORDS_INCOMPLETE"
+    });
+
+    await fixture.service.setChoiceKeywords({
+      userId,
+      choiceId: microsoftChoice?.id ?? "",
+      keywords: ["Call Now", "東京 電力"]
+    });
+    const purchased = await fixture.service.completeDemoPurchase({
+      userId,
+      onboardingId: second.onboarding?.id ?? "",
+      seatCount: 1
+    });
+    expect(purchased.team.currentTermAmountYen).toBe(6100);
+  });
+
   it("never merges an anonymous provider identity by matching email only", async () => {
     const fixture = createFixture();
     fixture.authRepository.users.set("owner@example.com", {

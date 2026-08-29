@@ -129,7 +129,9 @@ export class MemoryOwnerOnboardingRepository implements OwnerOnboardingRepositor
           provider: input.provider,
           status: "AUTHORIZED",
           authorizationId,
-          email: input.email
+          email: input.email,
+          keywords: [],
+          keywordsConfirmedAt: null
         }
       ]
     };
@@ -166,9 +168,35 @@ export class MemoryOwnerOnboardingRepository implements OwnerOnboardingRepositor
           provider: input.provider,
           status: "SKIPPED",
           authorizationId: null,
-          email: null
+          email: null,
+          keywords: [],
+          keywordsConfirmedAt: null
         }
       ]
+    };
+    return this.onboarding;
+  }
+
+  public async setChoiceKeywords(input: {
+    readonly userId: string;
+    readonly choiceId: string;
+    readonly keywords: readonly string[];
+    readonly now: Date;
+  }): Promise<OwnerOnboardingRecord> {
+    if (!this.onboarding || this.onboarding.userId !== input.userId) {
+      throw new Error("onboarding_missing");
+    }
+    this.onboarding = {
+      ...this.onboarding,
+      choices: this.onboarding.choices.map((choice) =>
+        choice.id === input.choiceId && choice.status === "AUTHORIZED"
+          ? {
+              ...choice,
+              keywords: [...input.keywords],
+              keywordsConfirmedAt: input.now
+            }
+          : choice
+      )
     };
     return this.onboarding;
   }

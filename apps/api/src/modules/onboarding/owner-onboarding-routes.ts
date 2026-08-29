@@ -12,8 +12,10 @@ import type { OwnerOnboardingService } from "./owner-onboarding-service.js";
 const ProviderParams = Type.Object({
   provider: Type.Union([Type.Literal("google"), Type.Literal("microsoft")])
 });
+const UUID_PATTERN =
+  "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
 const ChoiceParams = Type.Object({
-  choiceId: Type.String({ format: "uuid" })
+  choiceId: Type.String({ pattern: UUID_PATTERN })
 });
 const OnboardingResponse = Type.Object({
   id: Type.String({ format: "uuid" }),
@@ -40,7 +42,9 @@ const OnboardingResponse = Type.Object({
         Type.Literal("DEFERRED"),
         Type.Literal("SKIPPED")
       ]),
-      email: Type.Union([Type.String(), Type.Null()])
+      email: Type.Union([Type.String(), Type.Null()]),
+      keywords: Type.Array(Type.String()),
+      keywordsConfirmedAt: Type.Union([Type.String(), Type.Null()])
     })
   )
 });
@@ -172,16 +176,43 @@ export function createOwnerOnboardingRoutes(
     );
 
     app.post(
+      "/api/v1/owner-onboarding/choices/:choiceId/keywords",
+      {
+        schema: {
+          params: ChoiceParams,
+          body: Type.Object({
+            keywords: Type.Array(
+              Type.String({ minLength: 1, maxLength: 100 }),
+              { minItems: 1, maxItems: 100 }
+            )
+          }),
+          response: { 200: OnboardingResponse }
+        }
+      },
+      async (request) => {
+        requireSameOrigin(request.headers.origin, environment);
+        const userId = await authenticateUserId(
+          request.cookies,
+          authService,
+          environment
+        );
+        return serializeOnboarding(
+          await onboardingService.setChoiceKeywords({
+            userId,
+            choiceId: request.params.choiceId,
+            keywords: request.body.keywords
+          })
+        );
+      }
+    );
+
+    app.post(
       "/api/v1/owner-onboarding/demo-purchase",
       {
         config: { rateLimit: { max: 10, timeWindow: "15 minutes" } },
         schema: {
           body: Type.Object({
-            onboardingId: Type.String({ format: "uuid" }),
-            keywords: Type.Array(
-              Type.String({ minLength: 1, maxLength: 100 }),
-              { minItems: 1, maxItems: 100 }
-            ),
+            onboardingId: Type.String({ pattern: UUID_PATTERN }),
             seatCount: Type.Integer({ minimum: 1, maximum: 101 })
           }),
           response: {
@@ -203,7 +234,6 @@ export function createOwnerOnboardingRoutes(
         const created = await onboardingService.completeDemoPurchase({
           userId,
           onboardingId: request.body.onboardingId,
-          keywords: request.body.keywords,
           seatCount: request.body.seatCount
         });
         const onboarding = await onboardingService.getCurrent(userId);
@@ -300,7 +330,9 @@ function serializeOnboarding(onboarding: OwnerOnboardingRecord) {
       id: choice.id,
       provider: choice.provider,
       status: choice.status,
-      email: choice.email
+      email: choice.email,
+      keywords: [...choice.keywords],
+      keywordsConfirmedAt: choice.keywordsConfirmedAt?.toISOString() ?? null
     }))
   };
 }
