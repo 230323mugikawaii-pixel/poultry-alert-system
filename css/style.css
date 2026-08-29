@@ -2211,6 +2211,10 @@ body.app-dialog-open {
   margin-bottom: 0;
 }
 
+.member-management-heading > .btn {
+  flex: 0 0 auto;
+}
+
 .member-seat-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2235,6 +2239,144 @@ body.app-dialog-open {
   font-size: 1.2rem;
 }
 
+.member-capacity-message:empty {
+  display: none;
+}
+
+.member-create-panel,
+.member-credential-panel {
+  margin: 20px 0;
+  padding: 20px;
+  border: 1px solid #c9d8ea;
+  border-radius: 16px;
+  background: #f8fbff;
+}
+
+.member-create-panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.member-create-panel-heading h3,
+.member-create-panel-heading p {
+  margin-top: 0;
+}
+
+.member-create-panel-heading p {
+  margin-bottom: 0;
+}
+
+.text-button {
+  flex: 0 0 auto;
+  padding: 4px;
+  border: 0;
+  color: #53657c;
+  background: transparent;
+  font: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.text-button:hover {
+  color: #0862c7;
+}
+
+.member-create-field {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  font-weight: 800;
+}
+
+.member-create-field input {
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 14px;
+  border: 1px solid #bfd0e6;
+  border-radius: 12px;
+  color: #111827;
+  background: #fff;
+  font: inherit;
+}
+
+.member-create-field input:focus {
+  border-color: #0862c7;
+  outline: none;
+  box-shadow: 0 0 0 4px rgb(8 98 199 / 10%);
+}
+
+.member-create-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.member-credential-panel {
+  border-color: #91bdeb;
+  background: #edf6ff;
+}
+
+.member-credential-eyebrow {
+  color: #0862c7;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.member-credential-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0 12px;
+}
+
+.member-credential-value {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #c9d8ea;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.member-credential-value > span {
+  color: #53657c;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.member-credential-value code {
+  overflow-wrap: anywhere;
+  color: #111827;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.member-credential-warning {
+  margin: 14px 0 0;
+  color: #854d0e;
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.7;
+}
+
+.member-copy-status {
+  min-height: 22px;
+  margin: 8px 0 0;
+  color: #0862c7;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.member-list-title {
+  margin: 24px 0 12px;
+}
+
 .notification-member-list {
   display: grid;
   gap: 12px;
@@ -2253,19 +2395,6 @@ body.app-dialog-open {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.member-create-controls {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-}
-
-.member-create-controls input {
-  min-width: 180px;
-  padding: 10px 12px;
-  border: 1px solid #bfd0e6;
-  border-radius: 12px;
 }
 
 .notification-member-id {
@@ -2462,6 +2591,10 @@ body.app-dialog-open {
     grid-template-columns: 1fr;
   }
 
+  .member-credential-grid {
+    grid-template-columns: 1fr;
+  }
+
   .notification-member-actions {
     flex-wrap: wrap;
   }
@@ -2474,8 +2607,10 @@ body.app-dialog-open {
     flex-wrap: wrap;
   }
 
-  .member-create-controls {
-    display: grid;
+  .member-management-heading > .btn,
+  .member-create-actions .btn,
+  .notification-member-actions .btn {
+    width: 100%;
   }
 
   .setup-progress {

@@ -49,6 +49,47 @@ export class NotificationMemberService {
     return this.options.repository.list(teamId);
   }
 
+  public consumeManagementAttempt(input: {
+    readonly operation: "CREATE" | "RESET_PASSWORD" | "DISABLE";
+    readonly actorUserId: string;
+    readonly teamId: string;
+    readonly ipAddress: string;
+  }): Promise<void> {
+    const operation =
+      input.operation === "RESET_PASSWORD"
+        ? "reset"
+        : input.operation.toLowerCase();
+    const maximumAttempts =
+      input.operation === "CREATE"
+        ? 10
+        : input.operation === "RESET_PASSWORD"
+          ? 15
+          : 30;
+    return this.options.securityThrottle.consume(
+      [
+        {
+          scope: `member_admin_${operation}_source`,
+          dimensions: [input.ipAddress],
+          maximumAttempts: 60,
+          windowMinutes: 15,
+          lockMinutes: 15
+        },
+        {
+          scope: `member_admin_${operation}_actor_team`,
+          dimensions: [input.actorUserId, input.teamId],
+          maximumAttempts,
+          windowMinutes: 15,
+          lockMinutes: 15
+        }
+      ],
+      {
+        code: "NOTIFICATION_MEMBER_MANAGEMENT_RATE_LIMITED",
+        message: "参加者の管理操作が続いています。時間をおいてお試しください。",
+        statusCode: 429
+      }
+    );
+  }
+
   public async create(input: {
     readonly teamId: string;
     readonly actorUserId: string;

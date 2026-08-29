@@ -1540,6 +1540,16 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     ).rejects.toMatchObject({
       code: "UNAUTHENTICATED"
     });
+    await expect(
+      service.login({
+        callNowId: created.value.member.callNowId,
+        password: created.value.initialPassword,
+        ipAddress: "198.51.100.71"
+      })
+    ).rejects.toMatchObject({
+      code: "NOTIFICATION_MEMBER_LOGIN_FAILED",
+      statusCode: 401
+    });
     const replacementLogin = await service.login({
       callNowId: created.value.member.callNowId,
       password: reset.initialPassword,
@@ -1563,6 +1573,64 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       select: { passwordHash: true }
     });
     expect(storedMember?.passwordHash).toMatch(/^\$argon2id\$/u);
+    expect(storedMember?.passwordHash).not.toContain(reset.initialPassword);
+    await expect(
+      database.auditEvent.count({
+        where: {
+          teamId: team.team.teamId,
+          action: {
+            in: [
+              "NOTIFICATION_MEMBER_CREATED",
+              "NOTIFICATION_MEMBER_PASSWORD_RESET",
+              "NOTIFICATION_MEMBER_DISABLED"
+            ]
+          }
+        }
+      })
+    ).resolves.toBe(3);
+  });
+
+  it("shares notification member management throttles across API instances", async () => {
+    const throttleRepository = new PrismaSecurityThrottleRepository(database);
+    const services = [0, 1].map(
+      () =>
+        new NotificationMemberService({
+          repository: new PrismaNotificationMemberRepository(database),
+          securityThrottle: new SecurityThrottleService(
+            throttleRepository,
+            testPepper
+          ),
+          tokenPepper: testPepper,
+          sessionIdleDays: 30,
+          sessionAbsoluteDays: 90,
+          maxActiveSessions: 5
+        })
+    );
+    const input = {
+      operation: "CREATE" as const,
+      actorUserId: randomUUID(),
+      teamId: randomUUID(),
+      ipAddress: "198.51.100.72"
+    };
+    const firstService = services[0];
+    const secondService = services[1];
+    if (!firstService || !secondService) {
+      throw new Error("notification_member_services_missing");
+    }
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await (
+        attempt % 2 === 0 ? firstService : secondService
+      ).consumeManagementAttempt(input);
+    }
+
+    await expect(
+      firstService.consumeManagementAttempt(input)
+    ).rejects.toMatchObject({
+      code: "NOTIFICATION_MEMBER_MANAGEMENT_RATE_LIMITED",
+      statusCode: 429
+    });
+    await expect(database.securityThrottle.count()).resolves.toBe(2);
   });
 
   it("applies a pending seat decrease after a notification member is disabled", async () => {
