@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import test from "node:test";
 import assert from "node:assert/strict";
+
+const require = createRequire(import.meta.url);
+const ownerOnboardingRouting = require(
+  "../js/owner-onboarding-routing.js"
+);
 
 const appSource = readFileSync(
   new URL("../js/app.js", import.meta.url),
@@ -66,6 +72,54 @@ test("OAuth returns to provider setup and configured cards show an unambiguous s
   assert.match(appSource, /✓ 設定しました/);
   assert.match(appSource, /Googleアカウントを変更/);
   assert.match(appSource, /Microsoftアカウントを変更/);
+});
+
+test("server-side onboarding state takes priority over an existing team", () => {
+  const select = ownerOnboardingRouting.selectAuthenticatedDestination;
+
+  assert.ok(
+    (appSource.match(/openAuthenticatedStartupDestination\(\)/gu) ?? [])
+      .length >= 4,
+    "callback and query-free startup paths use the shared routing decision"
+  );
+
+  assert.equal(
+    select({ onboardingStatus: "PENDING", hasCurrentTeam: false }),
+    "OWNER_SETUP",
+    "A: a new owner with pending onboarding continues setup"
+  );
+  assert.equal(
+    select({ onboardingStatus: "PENDING", hasCurrentTeam: true }),
+    "OWNER_SETUP",
+    "B: pending onboarding takes priority over an existing team"
+  );
+  assert.equal(
+    select({ onboardingStatus: null, hasCurrentTeam: true }),
+    "APP",
+    "C: an existing team without onboarding opens Home"
+  );
+  assert.equal(
+    select({ onboardingStatus: "PURCHASED", hasCurrentTeam: true }),
+    "MONITORING_CONFIRMATION",
+    "D: purchased onboarding opens monitoring confirmation"
+  );
+  assert.equal(
+    select({ onboardingStatus: "PENDING", hasCurrentTeam: true }),
+    "OWNER_SETUP",
+    "E: server-side pending state works without a callback query parameter"
+  );
+  assert.equal(
+    select({ onboardingStatus: "EXPIRED", hasCurrentTeam: true }),
+    "APP",
+    "F: an expired onboarding does not interrupt an existing team"
+  );
+  for (const status of ["COMPLETED", "ABANDONED", "CANCELLED"]) {
+    assert.equal(
+      select({ onboardingStatus: status, hasCurrentTeam: true }),
+      "APP",
+      `${status} onboarding does not interrupt an existing team`
+    );
+  }
 });
 
 test("provider keywords are decided separately and restored from the server", () => {

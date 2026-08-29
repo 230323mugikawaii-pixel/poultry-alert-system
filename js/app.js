@@ -1,4 +1,14 @@
 "use strict";
+
+const ownerOnboardingRouting =
+  globalThis.CallNowOwnerOnboardingRouting;
+
+if (!ownerOnboardingRouting) {
+  throw new Error(
+    "Owner onboarding routing is unavailable."
+  );
+}
+
 /* ========================================
    契約データを保存
 ======================================== */
@@ -179,7 +189,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-29.2";
+  "2026-08-29.3";
 
 /*
   正式なURLが決まった場合だけ設定する公開リンク。
@@ -263,6 +273,31 @@ let paymentMode = "signup";
   編集前の料金
 */
 let priceBeforeEditing = BASE_PRICE;
+
+
+function openAuthenticatedStartupDestination() {
+  const destination =
+    ownerOnboardingRouting.selectAuthenticatedDestination({
+      onboardingStatus: ownerOnboarding?.status ?? null,
+      hasCurrentTeam: Boolean(currentTeam)
+    });
+
+  if (
+    destination ===
+    ownerOnboardingRouting.destinations.OWNER_SETUP
+  ) {
+    openOwnerSetup();
+  } else if (
+    destination ===
+    ownerOnboardingRouting.destinations.MONITORING_CONFIRMATION
+  ) {
+    openMonitoringConfirmation();
+  } else {
+    openApp();
+  }
+
+  return destination;
+}
 
 window.addEventListener("DOMContentLoaded", () => {
   void initializeApplication();
@@ -361,15 +396,7 @@ async function initializeApplication() {
       primaryAuthResult === "success" &&
       authenticatedUser
     ) {
-      if (currentTeam) {
-        if (ownerOnboarding?.status === "PURCHASED") {
-          openMonitoringConfirmation();
-        } else {
-          openApp();
-        }
-      } else {
-        openOwnerSetup();
-      }
+      openAuthenticatedStartupDestination();
       return;
     }
 
@@ -412,19 +439,7 @@ async function initializeApplication() {
         await fetchOwnerOnboarding();
       currentTeam =
         await fetchCurrentTeamContext();
-      if (
-        ownerOnboarding?.status === "PURCHASED"
-      ) {
-        openMonitoringConfirmation();
-      } else if (
-        ownerOnboarding?.status === "PENDING"
-      ) {
-        openOwnerSetup();
-      } else if (currentTeam) {
-        openApp();
-      } else {
-        openOwnerSetup();
-      }
+      openAuthenticatedStartupDestination();
       return;
     }
 
@@ -439,21 +454,14 @@ async function initializeApplication() {
   }
 
   if (authenticatedUser) {
+    const destination =
+      openAuthenticatedStartupDestination();
     if (
-      !currentTeam &&
-      ownerOnboarding?.status === "PENDING"
+      destination !==
+      ownerOnboardingRouting.destinations.APP
     ) {
-      openOwnerSetup();
       return;
     }
-    if (
-      currentTeam &&
-      ownerOnboarding?.status === "PURCHASED"
-    ) {
-      openMonitoringConfirmation();
-      return;
-    }
-    openApp();
     if (mailAuthResult) {
       await showAppAlert(
         mailAuthResult === "success"
