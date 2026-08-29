@@ -12,12 +12,19 @@ const script = readFileSync(
 const frontend = `${html}\n${script}`;
 
 describe("frontend mail connection boundary", () => {
-  it("shows login identity and mail monitoring as separate account roles", () => {
-    expect(frontend).toContain("ログイン方法");
+  it("shows monitoring controls without exposing recovery login controls in the normal UI", () => {
     expect(frontend).toContain("メール監視アカウント");
-    expect(frontend).toContain("Call Nowログイン");
     expect(frontend).toContain("Gmail / Google Workspace");
     expect(frontend).toContain("Microsoft 365 / Outlook");
+    expect(script).toContain('accountCard.classList.add("hidden")');
+    expect(script).toContain('googleScreenMode === "manage"');
+    const homeAccountRenderer = script.slice(
+      script.indexOf("function renderConnectedGoogleAccounts()"),
+      script.indexOf("function openGoogleAccountManager()")
+    );
+    expect(homeAccountRenderer).not.toContain("Call Nowログイン");
+    expect(script).toContain("/api/v1/auth/identities");
+    expect(html).toContain('id="googleAuthCard"');
   });
 
   it("uses three primary login choices and bootstraps monitoring choices", () => {

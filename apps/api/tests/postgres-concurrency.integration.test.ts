@@ -36,6 +36,8 @@ import { PrismaTeamRepository } from "../src/modules/teams/prisma-team-repositor
 import { PrismaSecurityThrottleRepository } from "../src/modules/security/prisma-security-throttle-repository.js";
 import { SecurityThrottleService } from "../src/modules/security/security-throttle-service.js";
 import { TeamService } from "../src/modules/teams/team-service.js";
+import { PrismaUserCommunicationRepository } from "../src/modules/user-communications/prisma-user-communication-repository.js";
+import { UserCommunicationService } from "../src/modules/user-communications/user-communication-service.js";
 
 const databaseUrl = process.env.DATABASE_URL ?? "";
 const postgresDescribe =
@@ -55,6 +57,8 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     await database.$executeRawUnsafe(`
       TRUNCATE TABLE
         audit_events,
+        user_notifications,
+        feedback_submissions,
         alert_recipients,
         alerts,
         onboarding_mail_choices,
@@ -1849,6 +1853,99 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     await expect(
       alertService.listForOwner(otherTeam.team.teamId, otherOwner.id)
     ).resolves.toEqual([]);
+  });
+
+  it("stores feedback privately and delivers one idempotent reply notification", async () => {
+    const clock = { value: new Date("2026-08-29T04:00:00.000Z") };
+    const owner = await createUser("feedback-owner@example.com");
+    const other = await createUser("feedback-other@example.com");
+    const team = await createServices(clock, "482743").teamService.createTeam({
+      ownerUserId: owner.id,
+      seatLimit: 0
+    });
+    const service = new UserCommunicationService(
+      new PrismaUserCommunicationRepository(database),
+      () => clock.value
+    );
+
+    const feedback = await service.submitFeedback({
+      userId: owner.id,
+      teamId: team.team.teamId,
+      message: "  監視アカウント画面を改善してほしいです。  ",
+      requestId: "postgres-feedback-submit"
+    });
+    await expect(
+      database.feedbackSubmission.findUniqueOrThrow({
+        where: { id: feedback.id },
+        select: { message: true, status: true }
+      })
+    ).resolves.toEqual({
+      message: "監視アカウント画面を改善してほしいです。",
+      status: "SUBMITTED"
+    });
+
+    clock.value = new Date("2026-08-29T04:05:00.000Z");
+    const concurrentReplies = await Promise.all([
+      service.recordOperatorReply({
+        feedbackId: feedback.id,
+        title: "フィードバックへの返信",
+        message: "ご意見を確認しました。",
+        requestId: "postgres-feedback-reply-first"
+      }),
+      service.recordOperatorReply({
+        feedbackId: feedback.id,
+        title: "二重返信",
+        message: "この内容は新規通知になりません。",
+        requestId: "postgres-feedback-reply-second"
+      })
+    ]);
+    expect(new Set(concurrentReplies.map(({ id }) => id))).toHaveLength(1);
+    const reply = concurrentReplies[0];
+    await expect(
+      database.userNotification.count({
+        where: { feedbackId: feedback.id }
+      })
+    ).resolves.toBe(1);
+
+    await expect(service.listNotifications(owner.id)).resolves.toMatchObject({
+      unreadCount: 1,
+      notifications: [
+        {
+          id: reply.id,
+          type: "FEEDBACK_REPLY",
+          readAt: null
+        }
+      ]
+    });
+    await expect(
+      service.markNotificationRead(other.id, reply.id)
+    ).rejects.toMatchObject({
+      code: "NOTIFICATION_NOT_FOUND",
+      statusCode: 404
+    });
+    const read = await service.markNotificationRead(owner.id, reply.id);
+    expect(read.readAt).toEqual(clock.value);
+    await expect(
+      service.markNotificationRead(owner.id, reply.id)
+    ).resolves.toEqual(read);
+    await expect(service.listNotifications(owner.id)).resolves.toMatchObject({
+      unreadCount: 0
+    });
+
+    const audits = await database.auditEvent.findMany({
+      where: {
+        targetType: "FeedbackSubmission",
+        targetId: feedback.id
+      },
+      select: { action: true, metadata: true }
+    });
+    expect(audits.map(({ action }) => action)).toEqual([
+      "FEEDBACK_SUBMITTED",
+      "FEEDBACK_REPLIED"
+    ]);
+    expect(JSON.stringify(audits)).not.toContain(
+      "監視アカウント画面を改善してほしいです。"
+    );
   });
 });
 

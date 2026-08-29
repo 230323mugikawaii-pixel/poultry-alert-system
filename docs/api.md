@@ -68,6 +68,24 @@ PostgreSQL persistence. Disconnect disables the local credential transactionally
 before provider-specific best-effort revocation. Gmail-only endpoint aliases remain
 temporarily available for clients from the preceding foundation release.
 
+## User notifications and feedback
+
+- `GET /api/v1/notifications`
+- `POST /api/v1/notifications/:notificationId/read`
+- `POST /api/v1/feedback`
+
+Notifications are private to the authenticated User and return an unread count with
+at most the 50 newest items. A User cannot read or update another User's notification.
+The read and feedback writes require the configured same origin. Feedback submission
+is protected by the shared PostgreSQL throttle as well as the API request limiter.
+
+The initial notification types are operator announcements, system notices, and
+feedback replies. Feedback content is stored in `FeedbackSubmission`; it is not copied
+to `AuditEvent.metadata`. There is intentionally no public operator-reply route in this
+phase. Future authenticated operator tooling calls `recordOperatorReply`, which stores
+the reply notification and feedback state atomically and idempotently. The browser
+never creates a dummy reply.
+
 ## Invitations and membership
 
 - `GET /api/v1/teams/current/invitations`

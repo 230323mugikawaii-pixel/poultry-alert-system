@@ -105,6 +105,18 @@ enum NotificationMemberStatus {
   DISABLED
 }
 
+enum UserNotificationType {
+  OPERATOR_ANNOUNCEMENT
+  SYSTEM
+  FEEDBACK_REPLY
+}
+
+enum FeedbackStatus {
+  SUBMITTED
+  REPLIED
+  CLOSED
+}
+
 enum AlertStatus {
   ACTIVE
   ACKNOWLEDGED
@@ -189,6 +201,8 @@ model User {
   alertRecipients         AlertRecipient[]
   acknowledgedAlerts      Alert[]                @relation("AlertAcknowledgedByUser")
   ownerOnboarding         OwnerOnboarding?
+  notifications           UserNotification[]
+  feedbackSubmissions     FeedbackSubmission[]
 
   @@map("users")
 }
@@ -304,6 +318,7 @@ model Team {
   ownerTransfers  OwnerTransfer[]
   auditEvents     AuditEvent[]
   ownerOnboarding OwnerOnboarding?
+  feedbackSubmissions FeedbackSubmission[]
 
   @@map("teams")
 }
@@ -632,6 +647,42 @@ model AlertRecipient {
   @@index([userId, status, createdAt])
   @@index([notificationMemberId, status, createdAt])
   @@map("alert_recipients")
+}
+
+model UserNotification {
+  id         String               @id @default(uuid()) @db.Uuid
+  userId     String               @db.Uuid
+  feedbackId String?              @unique @db.Uuid
+  type       UserNotificationType
+  title      String               @db.VarChar(160)
+  message    String               @db.Text
+  createdAt  DateTime             @default(now()) @db.Timestamptz(3)
+  readAt     DateTime?            @db.Timestamptz(3)
+  user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  feedback   FeedbackSubmission?  @relation("FeedbackReplyNotification", fields: [feedbackId], references: [id], onDelete: SetNull)
+
+  @@index([userId, readAt, createdAt])
+  @@index([userId, createdAt])
+  @@map("user_notifications")
+}
+
+model FeedbackSubmission {
+  id                String            @id @default(uuid()) @db.Uuid
+  userId            String            @db.Uuid
+  teamId            String?           @db.Uuid
+  message           String            @db.Text
+  status            FeedbackStatus    @default(SUBMITTED)
+  createdAt         DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime          @updatedAt @db.Timestamptz(3)
+  repliedAt         DateTime?         @db.Timestamptz(3)
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team              Team?             @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  replyNotification UserNotification? @relation("FeedbackReplyNotification")
+
+  @@index([userId, createdAt])
+  @@index([teamId, createdAt])
+  @@index([status, createdAt])
+  @@map("feedback_submissions")
 }
 
 model OwnerTransfer {

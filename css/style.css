@@ -976,6 +976,41 @@ button {
   gap: 10px;
 }
 
+.notification-bell-button {
+  position: relative;
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 50%;
+  font-size: 22px;
+}
+
+.notification-bell-button:hover,
+.notification-bell-button:focus-visible {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.notification-unread-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: grid;
+  min-width: 21px;
+  height: 21px;
+  place-items: center;
+  padding: 0 5px;
+  color: var(--white);
+  background: #e13d3d;
+  border: 2px solid var(--blue-dark);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
 .logout-button {
   border:
     1px solid
@@ -1463,6 +1498,89 @@ button {
 
 .feedback-card {
   background: var(--blue-light);
+}
+
+.feedback-form {
+  display: grid;
+  gap: 16px;
+}
+
+.feedback-form label {
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.feedback-form textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  padding: 16px;
+  color: var(--text);
+  background: var(--white);
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  font: inherit;
+  line-height: 1.7;
+}
+
+.feedback-form textarea:focus {
+  border-color: var(--blue);
+  outline: 3px solid rgba(8, 98, 199, 0.14);
+}
+
+.feedback-status {
+  min-height: 1.5em;
+  margin: 0;
+  color: var(--blue-dark);
+  font-weight: 800;
+}
+
+.user-notification-list {
+  display: grid;
+  gap: 14px;
+}
+
+.user-notification-item,
+.notification-empty {
+  padding: 20px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+
+.user-notification-item.unread {
+  border-color: #7db8f7;
+  box-shadow: 0 10px 26px rgba(8, 98, 199, 0.12);
+}
+
+.user-notification-item h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.user-notification-item p {
+  margin: 0 0 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+
+.user-notification-item time {
+  color: var(--subtext);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.notification-read-button {
+  display: block;
+  margin-top: 14px;
+  padding: 8px 12px;
+  color: var(--blue);
+  background: var(--blue-light);
+  border: 0;
+  border-radius: 10px;
+  font-weight: 800;
 }
 
 .store-review-links {

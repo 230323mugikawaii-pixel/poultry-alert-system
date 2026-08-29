@@ -26,6 +26,8 @@ import type { SecurityThrottleService } from "./modules/security/security-thrott
 import { createInvitationRoutes } from "./modules/invitations/invitation-routes.js";
 import type { TeamService } from "./modules/teams/team-service.js";
 import { createTeamRoutes } from "./modules/teams/team-routes.js";
+import type { UserCommunicationService } from "./modules/user-communications/user-communication-service.js";
+import { createUserCommunicationRoutes } from "./modules/user-communications/user-communication-routes.js";
 import { createSystemRoutes } from "./routes/system.js";
 
 export interface BuildAppOptions {
@@ -40,6 +42,7 @@ export interface BuildAppOptions {
   readonly notificationMemberService?: NotificationMemberService;
   readonly ownerOnboardingService?: OwnerOnboardingService;
   readonly alertService?: AlertService;
+  readonly userCommunicationService?: UserCommunicationService;
   readonly securityThrottleService?: SecurityThrottleService;
   readonly readinessCheck?: () => Promise<void>;
 }
@@ -70,7 +73,8 @@ export async function buildApp(
                 "body.authorizationCode",
                 "body.code",
                 "body.state",
-                "body.user"
+                "body.user",
+                "body.content"
               ],
               censor: "[REDACTED]"
             }
@@ -289,6 +293,22 @@ export async function buildApp(
         options.teamService,
         options.notificationMemberService,
         options.alertService,
+        options.environment
+      )
+    );
+  }
+
+  if (options.authService && options.userCommunicationService) {
+    if (!options.securityThrottleService) {
+      throw new Error(
+        "securityThrottleService is required for user communications"
+      );
+    }
+    await app.register(
+      createUserCommunicationRoutes(
+        options.authService,
+        options.userCommunicationService,
+        options.securityThrottleService,
         options.environment
       )
     );

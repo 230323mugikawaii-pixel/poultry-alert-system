@@ -80,6 +80,27 @@ const alertMigration = readFileSync(
   ),
   "utf8"
 );
+const ownerOnboardingMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260829000100_owner_monitoring_onboarding/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const providerKeywordMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260829000200_provider_monitoring_keywords/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const userCommunicationMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260829000300_user_notifications_feedback/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 const migration =
   baseMigration +
   gmailMigration +
@@ -87,7 +108,10 @@ const migration =
   primaryProviderMigration +
   multipleMailConnectionsMigration +
   notificationMemberMigration +
-  alertMigration;
+  alertMigration +
+  ownerOnboardingMigration +
+  providerKeywordMigration +
+  userCommunicationMigration;
 
 const databases: PGlite[] = [];
 
@@ -227,6 +251,18 @@ describe("PostgreSQL migrations", () => {
     expect(alertTables.rows).toEqual([
       { table_name: "alert_recipients" },
       { table_name: "alerts" }
+    ]);
+
+    const communicationTables = await database.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN ('feedback_submissions', 'user_notifications')
+      ORDER BY table_name;
+    `);
+    expect(communicationTables.rows).toEqual([
+      { table_name: "feedback_submissions" },
+      { table_name: "user_notifications" }
     ]);
 
     await database.exec(`

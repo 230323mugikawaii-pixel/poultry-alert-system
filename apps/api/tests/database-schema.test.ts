@@ -30,10 +30,21 @@ describe("database foundation", () => {
       "MailAuthorization",
       "MailConnection",
       "Alert",
-      "AlertRecipient"
+      "AlertRecipient",
+      "UserNotification",
+      "FeedbackSubmission"
     ]) {
       expect(schema).toContain(`model ${model} {`);
     }
+  });
+
+  it("keeps service notifications separate from monitored-mail alerts", () => {
+    expect(schema).toContain("enum UserNotificationType");
+    expect(schema).toContain("FEEDBACK_REPLY");
+    expect(schema).toContain("model FeedbackSubmission {");
+    expect(schema).toContain("model UserNotification {");
+    expect(schema).toContain("@@index([userId, readAt, createdAt])");
+    expect(schema).toContain('@@map("user_notifications")');
   });
 
   it("defines provider-neutral alert fan-out and idempotency", () => {
