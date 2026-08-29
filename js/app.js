@@ -189,7 +189,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-29.4";
+  "2026-08-29.5";
 
 let alarmAudioContext = null;
 let alarmRepeatTimer = null;
@@ -237,6 +237,7 @@ const ownerSetupKeywordDirty = {
   MICROSOFT: false
 };
 let notificationMemberManagement = null;
+let notificationMemberCredential = null;
 let ownerAlerts = [];
 let userNotifications = [];
 let notificationUnreadCount = 0;
@@ -3842,20 +3843,43 @@ function renderNotificationMemberManagement() {
   const createButton = document.getElementById(
     "createNotificationMemberButton"
   );
-  if (!card || !summary || !list || !createButton) return;
+  const openCreateButton = document.getElementById(
+    "openNotificationMemberCreateButton"
+  );
+  const createPanel = document.getElementById(
+    "notificationMemberCreatePanel"
+  );
+  const capacityMessage = document.getElementById(
+    "notificationMemberCapacityMessage"
+  );
+  if (
+    !card ||
+    !summary ||
+    !list ||
+    !createButton ||
+    !openCreateButton ||
+    !createPanel ||
+    !capacityMessage
+  ) return;
   const canManage =
     currentTeam?.role === "OWNER" &&
     hasActiveSubscription();
   card.classList.toggle("hidden", !canManage);
-  if (!canManage) return;
+  if (!canManage) {
+    closeNotificationMemberCreateForm();
+    closeNotificationMemberCredential();
+    return;
+  }
 
   const seats = notificationMemberManagement?.seats;
   const members = notificationMemberManagement?.members ?? [];
   if (!seats) {
     summary.textContent =
-      "通知メンバー情報を読み込めませんでした。";
+      "参加者情報を読み込めませんでした。";
     list.replaceChildren();
     createButton.disabled = true;
+    openCreateButton.disabled = true;
+    capacityMessage.textContent = "";
     return;
   }
   summary.innerHTML = `
@@ -3864,7 +3888,7 @@ function renderNotificationMemberManagement() {
       <strong>${seats.seatCount}人</strong>
     </div>
     <div class="member-seat-item">
-      <span>通知メンバー</span>
+      <span>参加者</span>
       <strong>${seats.activeNotificationMemberCount}人</strong>
     </div>
     <div class="member-seat-item">
@@ -3878,14 +3902,25 @@ function renderNotificationMemberManagement() {
       `<p class="error-message">${seats.pendingSeatCount}人への変更は、利用人数が上限以下になるまで保留中です。</p>`
     );
   }
-  createButton.disabled =
+  const cannotAdd =
     seats.availableSeats <= 0 ||
     seats.pendingSeatCount !== null;
+  createButton.disabled = cannotAdd;
+  openCreateButton.disabled = cannotAdd;
+  capacityMessage.textContent =
+    seats.availableSeats <= 0
+      ? "現在の利用人数上限に達しています。"
+      : seats.pendingSeatCount !== null
+        ? "利用人数の変更が完了するまで参加者を追加できません。"
+        : "";
+  if (cannotAdd) {
+    closeNotificationMemberCreateForm();
+  }
   list.replaceChildren();
   if (members.length === 0) {
     const empty = document.createElement("p");
     empty.className = "input-help";
-    empty.textContent = "通知メンバーはまだ登録されていません。";
+    empty.textContent = "参加者はまだ登録されていません。";
     list.appendChild(empty);
     return;
   }
@@ -3895,23 +3930,64 @@ function renderNotificationMemberManagement() {
     const active = member.status === "ACTIVE";
     item.innerHTML = `
       <div>
-        <strong>${escapeHtml(member.displayName || "通知メンバー")}</strong>
+        <strong>${escapeHtml(member.displayName || "参加者")}</strong>
         <div class="notification-member-id">${escapeHtml(member.callNowId)}</div>
-        <small>${active ? "利用中" : "無効"}</small>
+        <small>${active ? "有効" : "無効"}</small>
       </div>
       <div class="notification-member-actions">
         ${active ? `
           <button type="button" class="btn outline" onclick="resetNotificationMemberPassword('${member.id}')">
-            パスワード再発行
+            パスワードを再発行
           </button>
           <button type="button" class="btn outline" onclick="disableNotificationMember('${member.id}')">
-            利用停止
+            無効にする
           </button>
         ` : ""}
       </div>
     `;
     list.appendChild(item);
   });
+}
+
+
+function openNotificationMemberCreateForm() {
+  const seats = notificationMemberManagement?.seats;
+  const capacityMessage = document.getElementById(
+    "notificationMemberCapacityMessage"
+  );
+  if (
+    !seats ||
+    seats.availableSeats <= 0 ||
+    seats.pendingSeatCount !== null
+  ) {
+    if (capacityMessage) {
+      capacityMessage.textContent =
+        seats?.pendingSeatCount !== null &&
+        seats?.pendingSeatCount !== undefined &&
+        seats?.availableSeats > 0
+          ? "利用人数の変更が完了するまで参加者を追加できません。"
+          : "現在の利用人数上限に達しています。";
+    }
+    return;
+  }
+  closeNotificationMemberCredential();
+  document
+    .getElementById("notificationMemberCreatePanel")
+    ?.classList.remove("hidden");
+  document
+    .getElementById("notificationMemberNameInput")
+    ?.focus();
+}
+
+
+function closeNotificationMemberCreateForm() {
+  document
+    .getElementById("notificationMemberCreatePanel")
+    ?.classList.add("hidden");
+  const input = document.getElementById(
+    "notificationMemberNameInput"
+  );
+  if (input) input.value = "";
 }
 
 
@@ -3942,20 +4018,33 @@ async function createNotificationMember() {
     if (!response.ok) {
       throw new Error(
         payload?.error?.message ||
-          "通知メンバーを追加できませんでした。"
+          "参加者を追加できませんでした。"
       );
     }
-    if (input) input.value = "";
     notificationMemberManagement =
       await fetchNotificationMembers();
     renderNotificationMemberManagement();
-    await showNotificationMemberCredential(payload);
+    closeNotificationMemberCreateForm();
+    showNotificationMemberCredential(payload, "create");
   } catch (error) {
+    if (
+      error instanceof Error &&
+      /(?:利用人数|追加枠|上限)/u.test(error.message)
+    ) {
+      const capacityMessage = document.getElementById(
+        "notificationMemberCapacityMessage"
+      );
+      if (capacityMessage) {
+        capacityMessage.textContent =
+          "現在の利用人数上限に達しています。";
+      }
+      return;
+    }
     await showAppAlert(
       error instanceof Error
         ? error.message
-        : "通知メンバーを追加できませんでした。",
-      { title: "通知メンバーの追加エラー" }
+        : "参加者を追加できませんでした。",
+      { title: "参加者の追加エラー" }
     );
   }
 }
@@ -3989,7 +4078,7 @@ async function resetNotificationMemberPassword(memberId) {
           "パスワードを再発行できませんでした。"
       );
     }
-    await showNotificationMemberCredential(payload);
+    showNotificationMemberCredential(payload, "reset");
   } catch (error) {
     await showAppAlert(
       error instanceof Error
@@ -4003,10 +4092,10 @@ async function resetNotificationMemberPassword(memberId) {
 
 async function disableNotificationMember(memberId) {
   const confirmed = await showAppConfirm(
-    "この通知メンバーを利用停止にしますか？ログイン中の端末も直ちにログアウトされます。",
+    "この参加者を無効にしますか？ログイン中の端末も直ちにログアウトされます。",
     {
-      title: "通知メンバーの利用停止",
-      confirmText: "利用停止にする",
+      title: "参加者を無効にする",
+      confirmText: "無効にする",
       tone: "danger"
     }
   );
@@ -4026,7 +4115,7 @@ async function disableNotificationMember(memberId) {
     if (!response.ok) {
       throw new Error(
         payload?.error?.message ||
-          "通知メンバーを利用停止にできませんでした。"
+          "参加者を無効にできませんでした。"
       );
     }
     notificationMemberManagement = payload;
@@ -4037,18 +4126,116 @@ async function disableNotificationMember(memberId) {
     await showAppAlert(
       error instanceof Error
         ? error.message
-        : "通知メンバーを利用停止にできませんでした。",
-      { title: "通知メンバーの利用停止エラー" }
+        : "参加者を無効にできませんでした。",
+      { title: "参加者の無効化エラー" }
     );
   }
 }
 
 
-function showNotificationMemberCredential(payload) {
-  return showAppAlert(
-    `Call Now ID：${payload.member.callNowId}\n初期パスワード：${payload.initialPassword}\n\nこのパスワードは再表示できません。安全な方法で本人へお伝えください。`,
-    { title: "通知メンバーを登録しました" }
+function showNotificationMemberCredential(
+  payload,
+  mode = "create"
+) {
+  const panel = document.getElementById(
+    "notificationMemberCredentialPanel"
   );
+  if (
+    !panel ||
+    !payload?.member?.callNowId ||
+    !payload?.initialPassword
+  ) return;
+  notificationMemberCredential = {
+    callNowId: String(payload.member.callNowId),
+    password: String(payload.initialPassword)
+  };
+  setText(
+    "notificationMemberCredentialTitle",
+    mode === "reset"
+      ? "新しいパスワードを発行しました"
+      : "参加者情報を発行しました"
+  );
+  setText(
+    "notificationMemberCredentialPasswordLabel",
+    mode === "reset"
+      ? "新しいパスワード"
+      : "初期パスワード"
+  );
+  setText(
+    "notificationMemberCredentialWarning",
+    `${mode === "reset" ? "新しい" : "初期"}パスワードはこの画面を閉じると再表示できません。必要な場合は参加者へ共有するか、安全な場所に保存してください。`
+  );
+  setText(
+    "notificationMemberCredentialId",
+    notificationMemberCredential.callNowId
+  );
+  setText(
+    "notificationMemberCredentialPassword",
+    notificationMemberCredential.password
+  );
+  setText("notificationMemberCredentialCopyStatus", "");
+  panel.classList.remove("hidden");
+  panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+
+function closeNotificationMemberCredential() {
+  notificationMemberCredential = null;
+  setText("notificationMemberCredentialId", "");
+  setText("notificationMemberCredentialPassword", "");
+  setText("notificationMemberCredentialCopyStatus", "");
+  document
+    .getElementById("notificationMemberCredentialPanel")
+    ?.classList.add("hidden");
+}
+
+
+async function copyNotificationMemberCredential(target) {
+  if (!notificationMemberCredential) return;
+  const { callNowId, password } =
+    notificationMemberCredential;
+  const copyValue =
+    target === "id"
+      ? callNowId
+      : target === "password"
+        ? password
+        : `Call Now参加者情報\nID：${callNowId}\nパスワード：${password}`;
+  const successMessage =
+    target === "id"
+      ? "IDをコピーしました。"
+      : target === "password"
+        ? "パスワードをコピーしました。"
+        : "IDとパスワードをコピーしました。";
+  try {
+    await writeTextToClipboard(copyValue);
+    setText(
+      "notificationMemberCredentialCopyStatus",
+      successMessage
+    );
+  } catch {
+    await showAppAlert(
+      "コピーできませんでした。内容を選択してコピーしてください。",
+      { title: "コピーエラー" }
+    );
+  }
+}
+
+
+async function writeTextToClipboard(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const textArea = document.createElement("textarea");
+  textArea.value = value;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "fixed";
+  textArea.style.opacity = "0";
+  document.body.appendChild(textArea);
+  textArea.select();
+  const copied = document.execCommand("copy");
+  textArea.remove();
+  if (!copied) throw new Error("clipboard_copy_failed");
 }
 
 
@@ -4586,6 +4773,11 @@ function showAppPage(
     return;
   }
 
+  if (pageId !== "contractPage") {
+    closeNotificationMemberCreateForm();
+    closeNotificationMemberCredential();
+  }
+
   document
     .querySelectorAll(
       ".app-page"
@@ -4723,6 +4915,8 @@ async function performLogout() {
   };
   resetOwnerOnboardingClientState();
   notificationMemberManagement = null;
+  closeNotificationMemberCreateForm();
+  closeNotificationMemberCredential();
   ownerAlerts = [];
   userNotifications = [];
   notificationUnreadCount = 0;

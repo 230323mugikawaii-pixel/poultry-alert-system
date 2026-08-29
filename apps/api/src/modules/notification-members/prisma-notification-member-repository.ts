@@ -62,7 +62,7 @@ export class PrismaNotificationMemberRepository implements NotificationMemberRep
               if (occupied >= subscription.seatLimit) {
                 throw new AppError(
                   "MEMBER_CAPACITY_REACHED",
-                  "追加できる通知メンバー数の上限に達しています。",
+                  "現在の利用人数上限に達しています。",
                   409
                 );
               }
@@ -92,7 +92,7 @@ export class PrismaNotificationMemberRepository implements NotificationMemberRep
         () =>
           new AppError(
             "MEMBER_CAPACITY_CONFLICT",
-            "追加枠が同時に使用されました。最新の状態を確認してください。",
+            "現在の利用人数上限に達しました。最新の状態を確認してください。",
             409
           )
       );

@@ -108,6 +108,12 @@ export function createNotificationMemberRoutes(
           request,
           request.params.teamId
         );
+        await memberService.consumeManagementAttempt({
+          operation: "CREATE",
+          actorUserId,
+          teamId: request.params.teamId,
+          ipAddress: request.ip
+        });
         const result = await memberService.create({
           teamId: request.params.teamId,
           actorUserId,
@@ -115,6 +121,7 @@ export function createNotificationMemberRoutes(
             ? { displayName: request.body.displayName }
             : {})
         });
+        reply.header("Cache-Control", "no-store");
         await reply.status(201).send({
           member: serializeMember(result.member),
           initialPassword: result.initialPassword
@@ -133,17 +140,24 @@ export function createNotificationMemberRoutes(
           response: { 200: CredentialResponse }
         }
       },
-      async (request) => {
+      async (request, reply) => {
         requireSameOrigin(request);
         const actorUserId = await authenticateOwner(
           request,
           request.params.teamId
         );
+        await memberService.consumeManagementAttempt({
+          operation: "RESET_PASSWORD",
+          actorUserId,
+          teamId: request.params.teamId,
+          ipAddress: request.ip
+        });
         const result = await memberService.resetPassword({
           teamId: request.params.teamId,
           memberId: request.params.memberId,
           actorUserId
         });
+        reply.header("Cache-Control", "no-store");
         return {
           member: serializeMember(result.member),
           initialPassword: result.initialPassword
@@ -168,6 +182,12 @@ export function createNotificationMemberRoutes(
           request,
           request.params.teamId
         );
+        await memberService.consumeManagementAttempt({
+          operation: "DISABLE",
+          actorUserId,
+          teamId: request.params.teamId,
+          ipAddress: request.ip
+        });
         return serializeList(
           await memberService.disable({
             teamId: request.params.teamId,

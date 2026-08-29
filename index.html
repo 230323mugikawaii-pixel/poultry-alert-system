@@ -14,7 +14,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=23">
+    <link rel="stylesheet" href="css/style.css?v=24">
 </head>
 
 <body>
@@ -127,14 +127,14 @@
       <button type="button" class="back-button" onclick="openGuestHome()">
         ← ホームへ戻る
       </button>
-      <p class="step-label">通知メンバー</p>
+      <p class="step-label">通知参加者</p>
       <h1>通知グループに参加</h1>
       <p class="description">
         代表者から受け取ったCall Now IDとパスワードを入力してください。
       </p>
       <form id="notificationMemberLoginForm" onsubmit="loginNotificationMember(event)">
         <label class="member-login-field">
-          <span>Call Now ID</span>
+          <span>参加者ID</span>
           <input
             id="notificationMemberCallNowId"
             type="text"
@@ -156,7 +156,7 @@
         </label>
         <p id="notificationMemberLoginError" class="error-message" aria-live="polite"></p>
         <button type="submit" class="btn primary full-width">
-          通知メンバーとしてログイン
+          参加する
         </button>
       </form>
     </div>
@@ -1158,28 +1158,134 @@
         <article id="notificationMemberManagementCard" class="card member-management-card hidden">
           <div class="member-management-heading">
             <div>
-              <h2>通知メンバー</h2>
-              <p>重要メールの通知だけを受け取る利用者を管理します。</p>
+              <h2>参加者</h2>
+              <p>重要メールの通知を受け取る参加者を管理します。</p>
             </div>
-            <div class="member-create-controls">
+            <button
+              id="openNotificationMemberCreateButton"
+              type="button"
+              class="btn primary"
+              onclick="openNotificationMemberCreateForm()"
+            >
+              参加者を追加
+            </button>
+          </div>
+          <div id="notificationMemberSeatSummary" class="member-seat-summary"></div>
+          <p
+            id="notificationMemberCapacityMessage"
+            class="error-message member-capacity-message"
+            aria-live="polite"
+          ></p>
+          <div
+            id="notificationMemberCreatePanel"
+            class="member-create-panel hidden"
+          >
+            <div class="member-create-panel-heading">
+              <div>
+                <h3>参加者を追加</h3>
+                <p>参加者へ渡すIDと初期パスワードを発行します。</p>
+              </div>
+              <button
+                type="button"
+                class="text-button"
+                onclick="closeNotificationMemberCreateForm()"
+              >
+                閉じる
+              </button>
+            </div>
+            <label class="member-create-field" for="notificationMemberNameInput">
+              <span>表示名（任意）</span>
               <input
                 id="notificationMemberNameInput"
                 type="text"
                 maxlength="120"
-                placeholder="表示名（任意）"
-                aria-label="通知メンバーの表示名"
+                autocomplete="off"
+                placeholder="例：山田"
               >
+            </label>
+            <div class="member-create-actions">
               <button
                 id="createNotificationMemberButton"
                 type="button"
-                class="btn outline"
+                class="btn primary"
                 onclick="createNotificationMember()"
               >
-                通知メンバーを追加
+                IDとパスワードを発行
+              </button>
+              <button
+                type="button"
+                class="btn outline"
+                onclick="closeNotificationMemberCreateForm()"
+              >
+                キャンセル
               </button>
             </div>
           </div>
-          <div id="notificationMemberSeatSummary" class="member-seat-summary"></div>
+
+          <section
+            id="notificationMemberCredentialPanel"
+            class="member-credential-panel hidden"
+            aria-live="polite"
+            aria-labelledby="notificationMemberCredentialTitle"
+          >
+            <div class="member-create-panel-heading">
+              <div>
+                <p class="member-credential-eyebrow">発行完了</p>
+                <h3 id="notificationMemberCredentialTitle">参加者情報を発行しました</h3>
+              </div>
+              <button
+                type="button"
+                class="text-button"
+                onclick="closeNotificationMemberCredential()"
+              >
+                閉じる
+              </button>
+            </div>
+            <div class="member-credential-grid">
+              <div class="member-credential-value">
+                <span>参加者ID</span>
+                <code id="notificationMemberCredentialId"></code>
+                <button
+                  type="button"
+                  class="btn outline"
+                  onclick="copyNotificationMemberCredential('id')"
+                >
+                  IDをコピー
+                </button>
+              </div>
+              <div class="member-credential-value">
+                <span id="notificationMemberCredentialPasswordLabel">初期パスワード</span>
+                <code id="notificationMemberCredentialPassword"></code>
+                <button
+                  type="button"
+                  class="btn outline"
+                  onclick="copyNotificationMemberCredential('password')"
+                >
+                  パスワードをコピー
+                </button>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="btn primary full-width"
+              onclick="copyNotificationMemberCredential('all')"
+            >
+              IDとパスワードをまとめてコピー
+            </button>
+            <p
+              id="notificationMemberCredentialWarning"
+              class="member-credential-warning"
+            >
+              初期パスワードはこの画面を閉じると再表示できません。必要な場合は参加者へ共有するか、安全な場所に保存してください。
+            </p>
+            <p
+              id="notificationMemberCredentialCopyStatus"
+              class="member-copy-status"
+              aria-live="polite"
+            ></p>
+          </section>
+
+          <h3 class="member-list-title">参加者一覧</h3>
           <div id="notificationMemberList" class="notification-member-list"></div>
         </article>
 
@@ -1340,7 +1446,7 @@
 
     <script src="js/keyword-policy.js?v=2"></script>
     <script src="js/owner-onboarding-routing.js?v=1"></script>
-    <script src="js/app.js?v=25"></script>
+    <script src="js/app.js?v=26"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";
