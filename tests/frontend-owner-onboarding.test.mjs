@@ -140,25 +140,29 @@ test("Home does not render the large setup notice card", () => {
 test("both skipped providers are rejected inline and demo purchase is explicit", () => {
   assert.match(
     appSource,
-    /少なくとも1つの監視アカウントを設定してください/
+    /GoogleまたはMicrosoftの監視アカウントを1件以上設定してください/
   );
   assert.match(htmlSource, /現在は試作版です/);
   assert.match(htmlSource, /実際の料金は発生しません/);
 });
 
-test("an authorized provider enables usage setup and clears the missing-account warning", () => {
+test("usage setup stays clickable and explains a missing account inline", () => {
   assert.match(
     appSource,
     /function getOwnerAuthorizedChoices\(\)[\s\S]*?choice\.status === "AUTHORIZED"/
   );
   assert.match(
     appSource,
-    /continueButton\.disabled\s*=\s*authorizedChoices\.length === 0/
+    /continueButton\.disabled\s*=\s*false/
   );
   assert.match(
     appSource,
     /authorizedChoices\.length === 0 &&[\s\S]*?skippedProviders\.length === 2/
   );
+  assert.match(htmlSource, /id="ownerMonitoringSetupError"/);
+  assert.match(appSource, /合計利用人数は1以上の整数で入力してください。/);
+  assert.match(appSource, /通知キーワードを1件以上入力してください。/);
+  assert.match(appSource, /空白だけのキーワードは登録できません。/);
 });
 
 test("owner pricing counts each input as one keyword and additional users separately", () => {

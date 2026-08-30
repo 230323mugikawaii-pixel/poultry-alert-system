@@ -22,6 +22,10 @@ test("owner participant management keeps the simple add and list flow", () => {
   assert.match(management, /参加者一覧/);
   assert.match(appSource, /currentTeam\?\.role === "OWNER"/);
   assert.match(appSource, /現在の利用人数上限に達しています。/);
+  assert.match(htmlSource, /id="notificationMemberActionError"/);
+  assert.match(appSource, /参加者情報を読み込めませんでした。再読み込みしてください。/);
+  assert.match(appSource, /この参加者を再び有効にするための空き枠がありません。/);
+  assert.match(appSource, /この参加者はすでに削除されています。/);
   assert.match(appSource, /refreshNotificationMemberManagement/);
   assert.match(appSource, /参加者はまだ登録されていません。/);
   assert.match(appSource, /1 \+ seats\.occupiedAdditionalSeats/);

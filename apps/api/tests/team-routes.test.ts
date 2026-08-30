@@ -86,6 +86,16 @@ interface TeamBootstrapResponse {
   };
 }
 
+interface ContractQuoteResponse {
+  readonly quote: {
+    readonly id: string;
+    readonly previousAnnualAmountYen: number;
+    readonly nextAnnualAmountYen: number;
+    readonly additionalChargeYen: number;
+    readonly requiresCheckout: boolean;
+  };
+}
+
 afterEach(async () => {
   await Promise.all(apps.splice(0).map(async (app) => app.close()));
 });
@@ -155,9 +165,10 @@ describe("team routes", () => {
     });
     expect(teamRepository.teamCreationCount).toBe(1);
 
-    const contractUrl = `/api/v1/teams/${firstPayload.team.id}/contract-settings`;
+    const contractUrl = `/api/v1/teams/${firstPayload.team.id}/contract-settings/quote`;
     const contractPayload = {
       seatCount: 100,
+      idempotencyKey: "contract-quote-request-0001",
       connections: [
         { connectionId: randomUUID(), keywords: ["停電", "警報"] },
         {
@@ -167,7 +178,7 @@ describe("team routes", () => {
       ]
     };
     const missingOrigin = await app.inject({
-      method: "PUT",
+      method: "POST",
       url: contractUrl,
       headers: {
         cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`
@@ -181,14 +192,14 @@ describe("team routes", () => {
       url: contractUrl,
       headers: {
         origin: environment.PUBLIC_ORIGIN,
-        "access-control-request-method": "PUT"
+        "access-control-request-method": "POST"
       }
     });
     expect(preflight.statusCode).toBe(204);
-    expect(preflight.headers["access-control-allow-methods"]).toContain("PUT");
+    expect(preflight.headers["access-control-allow-methods"]).toContain("POST");
 
-    const updated = await app.inject({
-      method: "PUT",
+    const quoted = await app.inject({
+      method: "POST",
       url: contractUrl,
       headers: {
         cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`,
@@ -196,8 +207,32 @@ describe("team routes", () => {
       },
       payload: contractPayload
     });
-    expect(updated.statusCode, updated.body).toBe(200);
-    expect(updated.json<TeamBootstrapResponse>().team).toMatchObject({
+    expect(quoted.statusCode, quoted.body).toBe(201);
+    const quote = quoted.json<ContractQuoteResponse>().quote;
+    expect(quote).toMatchObject({
+      previousAnnualAmountYen: 6000,
+      nextAnnualAmountYen: 15_900,
+      additionalChargeYen: 9900,
+      requiresCheckout: true
+    });
+    expect(teamRepository.context?.seatSummary.totalUserLimit).toBe(1);
+
+    const applied = await app.inject({
+      method: "POST",
+      url: `/api/v1/teams/${firstPayload.team.id}/contract-settings/quotes/${quote.id}/apply`,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      },
+      payload: {
+        idempotencyKey: "contract-apply-request-0001",
+        expectedPreviousAnnualAmountYen: quote.previousAnnualAmountYen,
+        expectedNextAnnualAmountYen: quote.nextAnnualAmountYen,
+        expectedAdditionalChargeYen: quote.additionalChargeYen
+      }
+    });
+    expect(applied.statusCode, applied.body).toBe(200);
+    expect(applied.json<TeamBootstrapResponse>().team).toMatchObject({
       role: "OWNER",
       keywords: ["停電", "警報", "サーバー障害"],
       seats: { seatLimit: 99 },
@@ -222,13 +257,16 @@ describe("team routes", () => {
     expect(teamRepository.teamCreationCount).toBe(1);
 
     const memberUpdate = await app.inject({
-      method: "PUT",
+      method: "POST",
       url: contractUrl,
       headers: {
         cookie: `${environment.COOKIE_NAME}=${member.sessionToken}`,
         origin: environment.PUBLIC_ORIGIN
       },
-      payload: contractPayload
+      payload: {
+        ...contractPayload,
+        idempotencyKey: "contract-quote-request-member"
+      }
     });
     expect(memberUpdate.statusCode).toBe(403);
   });

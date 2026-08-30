@@ -108,6 +108,13 @@ const notificationMemberSoftDeleteMigration = readFileSync(
   ),
   "utf8"
 );
+const contractChangeQuoteMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260830000200_contract_change_quotes/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 const migration =
   baseMigration +
   gmailMigration +
@@ -119,7 +126,8 @@ const migration =
   ownerOnboardingMigration +
   providerKeywordMigration +
   userCommunicationMigration +
-  notificationMemberSoftDeleteMigration;
+  notificationMemberSoftDeleteMigration +
+  contractChangeQuoteMigration;
 
 const databases: PGlite[] = [];
 
@@ -221,6 +229,30 @@ describe("PostgreSQL migrations", () => {
       { table_name: "mail_authorizations" },
       { table_name: "mail_connections" }
     ]);
+
+    const contractChangeTables = await database.query<{
+      table_name: string;
+    }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name = 'contract_change_quotes';
+    `);
+    expect(contractChangeTables.rows).toEqual([
+      { table_name: "contract_change_quotes" }
+    ]);
+
+    const renewalAmount = await database.query<{ renewal: number }>(`
+      INSERT INTO subscriptions (
+        id, "teamId", "currentTermAmountYen",
+        "currentTermStartedAt", "currentTermEndsAt", "updatedAt"
+      ) VALUES (
+        '30000000-0000-0000-0000-000000000001',
+        '10000000-0000-0000-0000-000000000001',
+        7100, now(), now() + interval '1 year', now()
+      ) RETURNING "renewalAmountYen" AS renewal;
+    `);
+    expect(renewalAmount.rows).toEqual([{ renewal: 6000 }]);
 
     const mailProviders = await database.query<{ enumlabel: string }>(`
       SELECT enumlabel

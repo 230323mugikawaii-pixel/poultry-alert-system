@@ -416,11 +416,33 @@ button {
   text-align: right;
 }
 
-.error-message {
+.error-message,
+.form-error,
+.field-error {
   min-height: 24px;
 
   color: var(--red);
 
+  font-weight: 800;
+}
+
+.form-error,
+.field-error {
+  margin: 8px 0;
+}
+
+.field-error {
+  font-size: 0.9rem;
+}
+
+input[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+  border-color: var(--red) !important;
+  box-shadow: 0 0 0 3px rgb(208 39 39 / 12%);
+}
+
+.feedback-status.error {
+  color: var(--red);
   font-weight: 800;
 }
 
@@ -1371,6 +1393,15 @@ button {
   border: 1px solid var(--border);
   border-radius: 16px;
   background: #f8fbff;
+}
+
+.contract-provider-error {
+  margin: 10px 0 0;
+}
+
+.contract-change-payment-card {
+  display: grid;
+  gap: 0;
 }
 
 .contract-provider-status {

@@ -14,7 +14,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=25"/>
+    <link rel="stylesheet" href="css/style.css?v=26"/>
 </head>
 
 <body>
@@ -674,9 +674,76 @@
       >
         決済を完了して次へ
       </button>
+      <p
+        id="paymentError"
+        class="form-error"
+        role="alert"
+        aria-live="polite"
+      ></p>
 
     </div>
 
+  </section>
+
+  <section
+    id="contractChangeCheckoutScreen"
+    class="flow-screen hidden"
+  >
+    <div class="flow-container">
+      <button
+        type="button"
+        class="back-button"
+        onclick="backFromContractChangeCheckout()"
+      >
+        ← 戻って修正する
+      </button>
+      <p class="step-label">契約内容の変更</p>
+      <h1>契約変更の決済内容を確認</h1>
+      <div class="payment-card contract-change-payment-card">
+        <div class="payment-detail">
+          <span>現在の年額</span>
+          <strong id="contractCheckoutCurrentAnnual">―</strong>
+        </div>
+        <div class="payment-detail">
+          <span>変更後の年額</span>
+          <strong id="contractCheckoutNextAnnual">―</strong>
+        </div>
+        <div class="payment-detail total-payment">
+          <span>今回の追加料金</span>
+          <strong id="contractCheckoutAdditionalCharge">―</strong>
+        </div>
+        <div class="payment-detail">
+          <span>変更後の利用人数</span>
+          <strong id="contractCheckoutSeatCount">―</strong>
+        </div>
+        <div class="payment-detail">
+          <span>変更後のキーワード数</span>
+          <strong id="contractCheckoutKeywordCount">―</strong>
+        </div>
+        <div class="payment-detail">
+          <span>監視アカウント</span>
+          <strong id="contractCheckoutMailConnectionCount">―</strong>
+        </div>
+      </div>
+      <div class="notice-box">
+        <strong>現在は試作版です</strong>
+        <p>現在は試作版のため、実際の決済は行われません。</p>
+      </div>
+      <p
+        id="contractCheckoutError"
+        class="form-error"
+        role="alert"
+        aria-live="polite"
+      ></p>
+      <button
+        id="applyContractChangeButton"
+        type="button"
+        class="btn primary full-width"
+        onclick="applyPendingContractChange()"
+      >
+        追加料金を確定して変更を適用
+      </button>
+    </div>
   </section>
 
   <!-- ========================================
@@ -1010,6 +1077,13 @@
           登録している端末へテスト通知を送ります。
         </p>
 
+        <p
+          id="notificationTestError"
+          class="form-error"
+          role="alert"
+          aria-live="polite"
+        ></p>
+
 
         <div
           id="testKeywordCards"
@@ -1137,6 +1211,12 @@
           <p
             id="notificationMemberCapacityMessage"
             class="error-message member-capacity-message"
+            aria-live="polite"
+          ></p>
+          <p
+            id="notificationMemberActionError"
+            class="form-error"
+            role="alert"
             aria-live="polite"
           ></p>
           <div
@@ -1272,7 +1352,7 @@
         </p>
 
 
-        <article class="cardcontract-settings-card">
+        <article class="card contract-settings-card">
 
           <div class="contract-settings-heading">
               <div>
@@ -1314,13 +1394,20 @@
                   step="1"
                   inputmode="numeric"
                   oninput="
+                    clearContractInputError(this);
                     updateContractSettingsPreview()
                   "
+                  aria-describedby="contractSeatHelp contractSeatError"
                 />
               </label>
               <p
                 id="contractSeatHelp"
                 class="input-help"
+              ></p>
+              <p
+                id="contractSeatError"
+                class="field-error"
+                aria-live="polite"
               ></p>
             </div>
 
@@ -1349,7 +1436,8 @@
 
             <p
               id="contractSettingsError"
-              class="error-message"
+              class="form-error"
+              role="alert"
               aria-live="polite"
             ></p>
             <button
@@ -1396,9 +1484,9 @@
               maxlength="2000"
               rows="8"
               placeholder="内容を入力"
-              required
+              oninput="clearFeedbackError(this)"
             ></textarea>
-            <p id="feedbackStatus" class="feedback-status" aria-live="polite"></p>
+            <p id="feedbackStatus" class="feedback-status" role="status" aria-live="polite"></p>
             <button id="feedbackSubmitButton" type="submit" class="btn primary full-width">
               送信する
             </button>
@@ -1413,6 +1501,12 @@
           ← ホームへ戻る
         </button>
         <h1>通知</h1>
+        <p
+          id="notificationCenterError"
+          class="form-error"
+          role="alert"
+          aria-live="polite"
+        ></p>
         <div
           id="userNotificationList"
           class="user-notification-list"
@@ -1487,7 +1581,7 @@
 
     <script src="js/keyword-policy.js?v=2"></script>
     <script src="js/owner-onboarding-routing.js?v=2"></script>
-    <script src="js/app.js?v=27"></script>
+    <script src="js/app.js?v=28"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";

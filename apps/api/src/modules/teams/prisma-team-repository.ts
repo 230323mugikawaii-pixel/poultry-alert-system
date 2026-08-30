@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { DatabaseClient } from "../../db/client.js";
 import { retrySerializableTransaction } from "../../db/transaction-retry.js";
 import { Prisma } from "../../generated/prisma/client.js";
@@ -9,6 +10,9 @@ import {
   calculateSeatSummary
 } from "./seat-policy.js";
 import type {
+  AppliedContractChangeRecord,
+  ContractChangeQuoteRecord,
+  ContractConnectionSettings,
   CreateTeamInput,
   InvitationDraft,
   IssuedInvitationRecord,
@@ -415,7 +419,8 @@ export class PrismaTeamRepository implements TeamRepository {
               where: { id: subscription.id },
               data: {
                 seatLimit: input.seatLimit,
-                currentTermAmountYen: input.currentTermAmountYen
+                currentTermAmountYen: input.currentTermAmountYen,
+                renewalAmountYen: input.currentTermAmountYen
               }
             });
             await transaction.auditEvent.create({
@@ -460,6 +465,329 @@ export class PrismaTeamRepository implements TeamRepository {
           409
         )
     );
+  }
+
+  public createContractChangeQuote(input: {
+    readonly teamId: string;
+    readonly actorUserId: string;
+    readonly seatLimit: number;
+    readonly keywords: readonly string[];
+    readonly connectionKeywords: readonly ContractConnectionSettings[];
+    readonly idempotencyKey: string;
+    readonly now: Date;
+    readonly expiresAt: Date;
+  }): Promise<ContractChangeQuoteRecord> {
+    return retrySerializableTransaction(
+      () =>
+        this.database.$transaction(
+          async (transaction) => {
+            const membership = await requireOwnerMembership(transaction, {
+              teamId: input.teamId,
+              actorUserId: input.actorUserId
+            });
+            void membership;
+            const snapshot = await loadContractSnapshot(
+              transaction,
+              input.teamId
+            );
+            assertContractConnectionsMatch(
+              snapshot.connections,
+              input.connectionKeywords
+            );
+            if (input.seatLimit < snapshot.occupiedAdditionalSeats) {
+              throw new AppError(
+                "SEAT_LIMIT_BELOW_OCCUPANCY",
+                `現在${1 + snapshot.occupiedAdditionalSeats}人が利用中のため、${1 + snapshot.occupiedAdditionalSeats}人未満には変更できません。`,
+                409
+              );
+            }
+            if (snapshot.subscription.pendingSeatLimit !== null) {
+              throw new AppError(
+                "SUBSCRIPTION_CHANGE_PENDING",
+                "利用人数の変更処理中です。完了後にもう一度お試しください。",
+                409
+              );
+            }
+            if (
+              contractSettingsAreEqual(snapshot, {
+                seatLimit: input.seatLimit,
+                keywords: input.keywords,
+                connectionKeywords: input.connectionKeywords
+              })
+            ) {
+              throw new AppError(
+                "CONTRACT_SETTINGS_UNCHANGED",
+                "変更内容がありません。",
+                409
+              );
+            }
+            const nextAnnualAmountYen = calculateAnnualPriceYen(
+              input.seatLimit,
+              input.keywords.length
+            );
+            const previousAnnualAmountYen =
+              snapshot.subscription.currentTermAmountYen;
+            const additionalChargeYen = Math.max(
+              nextAnnualAmountYen - previousAnnualAmountYen,
+              0
+            );
+            const quote = await transaction.contractChangeQuote.upsert({
+              where: { idempotencyKey: input.idempotencyKey },
+              update: {},
+              create: {
+                teamId: input.teamId,
+                subscriptionId: snapshot.subscription.id,
+                requestedByUserId: input.actorUserId,
+                idempotencyKey: input.idempotencyKey,
+                baselineFingerprint: snapshot.fingerprint,
+                requestedSeatLimit: input.seatLimit,
+                requestedKeywords: [...input.keywords],
+                requestedConnectionSettings: input.connectionKeywords.map(
+                  (connection) => ({
+                    connectionId: connection.connectionId,
+                    keywords: [...connection.keywords]
+                  })
+                ),
+                previousAnnualAmountYen,
+                nextAnnualAmountYen,
+                additionalChargeYen,
+                mailConnectionCount: input.connectionKeywords.length,
+                expiresAt: input.expiresAt
+              }
+            });
+            if (
+              quote.teamId !== input.teamId ||
+              quote.requestedByUserId !== input.actorUserId ||
+              quote.requestedSeatLimit !== input.seatLimit ||
+              !sameKeywordSet(quote.requestedKeywords, input.keywords) ||
+              !sameConnectionSettings(
+                parseContractConnectionSettings(
+                  quote.requestedConnectionSettings
+                ),
+                input.connectionKeywords
+              )
+            ) {
+              throw new AppError(
+                "CONTRACT_CHANGE_IDEMPOTENCY_CONFLICT",
+                "契約変更の再送内容が一致しません。もう一度お試しください。",
+                409
+              );
+            }
+            if (quote.status !== "PENDING" && quote.status !== "APPLIED") {
+              throw contractQuoteExpiredError();
+            }
+            return mapContractChangeQuote(quote);
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
+      () => contractSettingsConflictError()
+    );
+  }
+
+  public async applyContractChangeQuote(input: {
+    readonly teamId: string;
+    readonly quoteId: string;
+    readonly actorUserId: string;
+    readonly applyIdempotencyKey: string;
+    readonly expectedPreviousAnnualAmountYen: number;
+    readonly expectedNextAnnualAmountYen: number;
+    readonly expectedAdditionalChargeYen: number;
+    readonly requestId: string | null;
+    readonly now: Date;
+  }): Promise<AppliedContractChangeRecord> {
+    try {
+      return await retrySerializableTransaction(
+        () =>
+          this.database.$transaction(
+            async (transaction) => {
+              const membership = await requireOwnerMembership(transaction, {
+                teamId: input.teamId,
+                actorUserId: input.actorUserId
+              });
+              const quoteIdentity =
+                await transaction.contractChangeQuote.findFirst({
+                  where: {
+                    id: input.quoteId,
+                    teamId: input.teamId,
+                    requestedByUserId: input.actorUserId
+                  },
+                  select: { id: true }
+                });
+              if (!quoteIdentity) {
+                throw new AppError(
+                  "CONTRACT_CHANGE_QUOTE_NOT_FOUND",
+                  "契約変更の内容を確認できませんでした。",
+                  404
+                );
+              }
+              await transaction.$queryRaw(
+                Prisma.sql`SELECT id FROM contract_change_quotes WHERE id = ${quoteIdentity.id}::uuid FOR UPDATE`
+              );
+              const quote =
+                await transaction.contractChangeQuote.findUniqueOrThrow({
+                  where: { id: quoteIdentity.id }
+                });
+              if (quote.status === "APPLIED") {
+                if (quote.applyIdempotencyKey !== input.applyIdempotencyKey) {
+                  throw new AppError(
+                    "CONTRACT_CHANGE_ALREADY_APPLIED",
+                    "この契約変更はすでに適用されています。",
+                    409
+                  );
+                }
+                return {
+                  quote: mapContractChangeQuote(quote),
+                  team: await loadTeamContextAfterContractChange(transaction, {
+                    teamId: input.teamId,
+                    membership
+                  })
+                };
+              }
+              if (quote.status !== "PENDING" || quote.expiresAt <= input.now) {
+                if (quote.status === "PENDING") {
+                  await transaction.contractChangeQuote.update({
+                    where: { id: quote.id },
+                    data: { status: "EXPIRED" }
+                  });
+                }
+                throw contractQuoteExpiredError();
+              }
+              if (
+                quote.previousAnnualAmountYen !==
+                  input.expectedPreviousAnnualAmountYen ||
+                quote.nextAnnualAmountYen !==
+                  input.expectedNextAnnualAmountYen ||
+                quote.additionalChargeYen !== input.expectedAdditionalChargeYen
+              ) {
+                throw contractSettingsConflictError();
+              }
+              const requestedConnections = parseContractConnectionSettings(
+                quote.requestedConnectionSettings
+              );
+              const snapshot = await loadContractSnapshot(
+                transaction,
+                input.teamId
+              );
+              if (snapshot.fingerprint !== quote.baselineFingerprint) {
+                throw contractSettingsConflictError();
+              }
+              assertContractConnectionsMatch(
+                snapshot.connections,
+                requestedConnections
+              );
+              if (quote.requestedSeatLimit < snapshot.occupiedAdditionalSeats) {
+                throw contractSettingsConflictError();
+              }
+              const recalculatedNextAnnualAmountYen = calculateAnnualPriceYen(
+                quote.requestedSeatLimit,
+                quote.requestedKeywords.length
+              );
+              const recalculatedAdditionalChargeYen = Math.max(
+                recalculatedNextAnnualAmountYen -
+                  snapshot.subscription.currentTermAmountYen,
+                0
+              );
+              if (
+                snapshot.subscription.currentTermAmountYen !==
+                  quote.previousAnnualAmountYen ||
+                recalculatedNextAnnualAmountYen !== quote.nextAnnualAmountYen ||
+                recalculatedAdditionalChargeYen !== quote.additionalChargeYen
+              ) {
+                throw contractSettingsConflictError();
+              }
+              for (const connection of requestedConnections) {
+                await transaction.mailConnection.update({
+                  where: { id: connection.connectionId },
+                  data: { keywords: [...connection.keywords] }
+                });
+              }
+              await transaction.teamKeyword.deleteMany({
+                where: { teamId: input.teamId }
+              });
+              if (quote.requestedKeywords.length > 0) {
+                await transaction.teamKeyword.createMany({
+                  data: quote.requestedKeywords.map((keyword, sortOrder) => ({
+                    teamId: input.teamId,
+                    keyword,
+                    normalized: keyword.normalize("NFKC").toLowerCase(),
+                    sortOrder
+                  }))
+                });
+              }
+              const updatedSubscription = await transaction.subscription.update(
+                {
+                  where: { id: snapshot.subscription.id },
+                  data: {
+                    seatLimit: quote.requestedSeatLimit,
+                    currentTermAmountYen:
+                      quote.additionalChargeYen > 0
+                        ? quote.nextAnnualAmountYen
+                        : snapshot.subscription.currentTermAmountYen,
+                    renewalAmountYen: quote.nextAnnualAmountYen
+                  }
+                }
+              );
+              const appliedQuote = await transaction.contractChangeQuote.update(
+                {
+                  where: { id: quote.id },
+                  data: {
+                    status: "APPLIED",
+                    appliedAt: input.now,
+                    applyIdempotencyKey: input.applyIdempotencyKey
+                  }
+                }
+              );
+              await transaction.auditEvent.create({
+                data: {
+                  teamId: input.teamId,
+                  actorUserId: input.actorUserId,
+                  action: "CONTRACT_CHANGE_APPLIED",
+                  targetType: "ContractChangeQuote",
+                  targetId: quote.id,
+                  requestId: input.requestId,
+                  metadata: {
+                    previousSeatLimit: snapshot.subscription.seatLimit,
+                    seatLimit: quote.requestedSeatLimit,
+                    previousAnnualAmountYen: quote.previousAnnualAmountYen,
+                    annualAmountYen: quote.nextAnnualAmountYen,
+                    additionalChargeYen: quote.additionalChargeYen,
+                    keywordCount: quote.requestedKeywords.length,
+                    mailConnectionCount: quote.mailConnectionCount
+                  }
+                }
+              });
+              const team = await transaction.team.findUniqueOrThrow({
+                where: { id: input.teamId },
+                include: {
+                  keywords: {
+                    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
+                  }
+                }
+              });
+              return {
+                quote: mapContractChangeQuote(appliedQuote),
+                team: mapTeamContext({
+                  team,
+                  membership,
+                  subscription: updatedSubscription,
+                  activeMemberCount: snapshot.occupiedAdditionalSeats
+                })
+              };
+            },
+            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+          ),
+        () => contractSettingsConflictError()
+      );
+    } catch (error) {
+      if (isContractChangeApplyKeyUniqueConstraintError(error)) {
+        throw new AppError(
+          "CONTRACT_CHANGE_IDEMPOTENCY_CONFLICT",
+          "この確定操作は別の契約変更に使用されています。内容を再確認してください。",
+          409
+        );
+      }
+      throw error;
+    }
   }
 
   public async requestSeatLimitChange(input: {
@@ -741,6 +1069,10 @@ export class PrismaTeamRepository implements TeamRepository {
                   currentTermAmountYen: calculateAnnualPriceYen(
                     change.requestedSeatLimit,
                     keywordCount
+                  ),
+                  renewalAmountYen: calculateAnnualPriceYen(
+                    change.requestedSeatLimit,
+                    keywordCount
                   )
                 }
               });
@@ -879,6 +1211,265 @@ async function activatePurchasedMonitoringChoices(
   });
 }
 
+interface ContractSnapshot {
+  readonly subscription: {
+    readonly id: string;
+    readonly seatLimit: number;
+    readonly pendingSeatLimit: number | null;
+    readonly currentTermAmountYen: number;
+    readonly renewalAmountYen: number;
+    readonly updatedAt: Date;
+  };
+  readonly occupiedAdditionalSeats: number;
+  readonly keywords: readonly string[];
+  readonly connections: readonly {
+    readonly id: string;
+    readonly status: string;
+    readonly keywords: readonly string[];
+  }[];
+  readonly fingerprint: string;
+}
+
+async function requireOwnerMembership(
+  transaction: Prisma.TransactionClient,
+  input: { readonly teamId: string; readonly actorUserId: string }
+) {
+  const membership = await transaction.teamMembership.findFirst({
+    where: {
+      teamId: input.teamId,
+      userId: input.actorUserId,
+      role: "OWNER",
+      status: "ACTIVE",
+      team: { status: "ACTIVE" }
+    }
+  });
+  if (!membership) {
+    throw new AppError(
+      "OWNER_REQUIRED",
+      "この操作はチームの代表者だけが実行できます。",
+      403
+    );
+  }
+  return membership;
+}
+
+async function loadContractSnapshot(
+  transaction: Prisma.TransactionClient,
+  teamId: string
+): Promise<ContractSnapshot> {
+  const subscriptionIdentity = await transaction.subscription.findUnique({
+    where: { teamId },
+    select: { id: true }
+  });
+  if (!subscriptionIdentity) {
+    throw new AppError("SUBSCRIPTION_NOT_FOUND", "契約が見つかりません。", 404);
+  }
+  await transaction.$queryRaw(
+    Prisma.sql`SELECT id FROM subscriptions WHERE id = ${subscriptionIdentity.id}::uuid FOR UPDATE`
+  );
+  const [subscription, occupiedAdditionalSeats, keywords, connections] =
+    await Promise.all([
+      transaction.subscription.findUniqueOrThrow({
+        where: { id: subscriptionIdentity.id },
+        select: {
+          id: true,
+          seatLimit: true,
+          pendingSeatLimit: true,
+          currentTermAmountYen: true,
+          renewalAmountYen: true,
+          updatedAt: true
+        }
+      }),
+      countOccupiedAdditionalSeats(transaction, teamId),
+      transaction.teamKeyword.findMany({
+        where: { teamId },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        select: { keyword: true }
+      }),
+      transaction.mailConnection.findMany({
+        where: { teamId, status: { not: "REVOKED" } },
+        orderBy: { id: "asc" },
+        select: { id: true, status: true, keywords: true }
+      })
+    ]);
+  const snapshotValues = {
+    subscriptionId: subscription.id,
+    seatLimit: subscription.seatLimit,
+    pendingSeatLimit: subscription.pendingSeatLimit,
+    currentTermAmountYen: subscription.currentTermAmountYen,
+    renewalAmountYen: subscription.renewalAmountYen,
+    updatedAt: subscription.updatedAt.toISOString(),
+    occupiedAdditionalSeats,
+    keywords: canonicalKeywords(keywords.map(({ keyword }) => keyword)),
+    connections: connections.map((connection) => ({
+      id: connection.id,
+      status: connection.status,
+      keywords: canonicalKeywords(connection.keywords)
+    }))
+  };
+  return {
+    subscription,
+    occupiedAdditionalSeats,
+    keywords: keywords.map(({ keyword }) => keyword),
+    connections,
+    fingerprint: createHash("sha256")
+      .update(JSON.stringify(snapshotValues))
+      .digest("hex")
+  };
+}
+
+function contractSettingsAreEqual(
+  snapshot: ContractSnapshot,
+  requested: {
+    readonly seatLimit: number;
+    readonly keywords: readonly string[];
+    readonly connectionKeywords: readonly ContractConnectionSettings[];
+  }
+): boolean {
+  return (
+    snapshot.subscription.seatLimit === requested.seatLimit &&
+    sameKeywordSet(snapshot.keywords, requested.keywords) &&
+    sameConnectionSettings(
+      snapshot.connections.map((connection) => ({
+        connectionId: connection.id,
+        keywords: connection.keywords
+      })),
+      requested.connectionKeywords
+    )
+  );
+}
+
+function assertContractConnectionsMatch(
+  existing: readonly { readonly id: string }[],
+  requested: readonly ContractConnectionSettings[]
+): void {
+  const expectedIds = new Set(existing.map(({ id }) => id));
+  if (
+    expectedIds.size !== requested.length ||
+    requested.some(({ connectionId }) => !expectedIds.has(connectionId))
+  ) {
+    throw contractSettingsConflictError();
+  }
+}
+
+function parseContractConnectionSettings(
+  value: Prisma.JsonValue
+): readonly ContractConnectionSettings[] {
+  if (!Array.isArray(value)) throw contractSettingsConflictError();
+  const parsed = value.map((entry) => {
+    if (
+      !entry ||
+      typeof entry !== "object" ||
+      Array.isArray(entry) ||
+      typeof entry.connectionId !== "string" ||
+      !Array.isArray(entry.keywords) ||
+      !entry.keywords.every((keyword) => typeof keyword === "string")
+    ) {
+      throw contractSettingsConflictError();
+    }
+    return {
+      connectionId: entry.connectionId,
+      keywords: entry.keywords
+    };
+  });
+  return parsed;
+}
+
+function sameConnectionSettings(
+  left: readonly ContractConnectionSettings[],
+  right: readonly ContractConnectionSettings[]
+): boolean {
+  const canonicalize = (connections: readonly ContractConnectionSettings[]) =>
+    [...connections]
+      .map((connection) => ({
+        connectionId: connection.connectionId,
+        keywords: canonicalKeywords(connection.keywords)
+      }))
+      .sort((a, b) => a.connectionId.localeCompare(b.connectionId));
+  return (
+    JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right))
+  );
+}
+
+function canonicalKeywords(values: readonly string[]): readonly string[] {
+  return [...values]
+    .map((value) => value.normalize("NFKC").toLocaleLowerCase("ja-JP"))
+    .sort();
+}
+
+function mapContractChangeQuote(input: {
+  readonly id: string;
+  readonly status: "PENDING" | "APPLIED" | "EXPIRED" | "CANCELED";
+  readonly previousAnnualAmountYen: number;
+  readonly nextAnnualAmountYen: number;
+  readonly additionalChargeYen: number;
+  readonly requestedSeatLimit: number;
+  readonly requestedKeywords: readonly string[];
+  readonly mailConnectionCount: number;
+  readonly expiresAt: Date;
+}): ContractChangeQuoteRecord {
+  if (input.status !== "PENDING" && input.status !== "APPLIED") {
+    throw contractQuoteExpiredError();
+  }
+  return {
+    id: input.id,
+    status: input.status,
+    previousAnnualAmountYen: input.previousAnnualAmountYen,
+    nextAnnualAmountYen: input.nextAnnualAmountYen,
+    additionalChargeYen: input.additionalChargeYen,
+    seatCount: input.requestedSeatLimit + 1,
+    keywordCount: input.requestedKeywords.length,
+    mailConnectionCount: input.mailConnectionCount,
+    expiresAt: input.expiresAt
+  };
+}
+
+async function loadTeamContextAfterContractChange(
+  transaction: Prisma.TransactionClient,
+  input: {
+    readonly teamId: string;
+    readonly membership: {
+      readonly id: string;
+      readonly role: "OWNER" | "MEMBER";
+    };
+  }
+): Promise<TeamContextRecord> {
+  const [team, subscription, occupiedAdditionalSeats] = await Promise.all([
+    transaction.team.findUniqueOrThrow({
+      where: { id: input.teamId },
+      include: {
+        keywords: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }
+      }
+    }),
+    transaction.subscription.findUniqueOrThrow({
+      where: { teamId: input.teamId }
+    }),
+    countOccupiedAdditionalSeats(transaction, input.teamId)
+  ]);
+  return mapTeamContext({
+    team,
+    membership: input.membership,
+    subscription,
+    activeMemberCount: occupiedAdditionalSeats
+  });
+}
+
+function contractSettingsConflictError(): AppError {
+  return new AppError(
+    "CONTRACT_SETTINGS_CONFLICT",
+    "契約情報が更新されました。内容と料金をもう一度確認してください。",
+    409
+  );
+}
+
+function contractQuoteExpiredError(): AppError {
+  return new AppError(
+    "CONTRACT_CHANGE_QUOTE_EXPIRED",
+    "契約変更の有効期限が切れました。戻ってもう一度確認してください。",
+    409
+  );
+}
+
 function sameKeywordSet(
   left: readonly string[],
   right: readonly string[]
@@ -953,6 +1544,7 @@ async function createTeamInTransaction(
         create: {
           seatLimit: input.seatLimit,
           currentTermAmountYen: input.currentTermAmountYen,
+          renewalAmountYen: input.currentTermAmountYen,
           currentTermStartedAt: input.currentTermStartedAt,
           currentTermEndsAt: input.currentTermEndsAt
         }
@@ -1032,6 +1624,7 @@ function mapTeamContext(input: {
     readonly seatLimit: number;
     readonly pendingSeatLimit: number | null;
     readonly currentTermAmountYen: number;
+    readonly renewalAmountYen: number;
     readonly currentTermStartedAt: Date;
     readonly currentTermEndsAt: Date;
   };
@@ -1051,6 +1644,7 @@ function mapTeamContext(input: {
     pendingSeatLimit: input.subscription.pendingSeatLimit,
     subscriptionStatus: input.subscription.status,
     currentTermAmountYen: input.subscription.currentTermAmountYen,
+    renewalAmountYen: input.subscription.renewalAmountYen,
     currentTermStartedAt: input.subscription.currentTermStartedAt,
     currentTermEndsAt: input.subscription.currentTermEndsAt
   };
@@ -1089,6 +1683,21 @@ function isPaymentEventUniqueConstraintError(error: unknown): boolean {
   return JSON.stringify(
     (error as { readonly meta?: unknown }).meta ?? {}
   ).includes("paymentEventId");
+}
+
+function isContractChangeApplyKeyUniqueConstraintError(
+  error: unknown
+): boolean {
+  if (
+    !(error instanceof Error) ||
+    !("code" in error) ||
+    (error as { readonly code?: unknown }).code !== "P2002"
+  ) {
+    return false;
+  }
+  return JSON.stringify(
+    (error as { readonly meta?: unknown }).meta ?? {}
+  ).includes("applyIdempotencyKey");
 }
 
 function seatIncreaseNotPayableError(): AppError {

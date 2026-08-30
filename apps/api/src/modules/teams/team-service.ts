@@ -1,6 +1,9 @@
 import { randomInt } from "node:crypto";
 import { AppError } from "../../lib/app-error.js";
 import type {
+  AppliedContractChangeRecord,
+  ContractChangeQuoteRecord,
+  ContractConnectionSettings,
   InvitationDraft,
   SeatLimitChangeResult,
   TeamCreationResult,
@@ -194,46 +197,67 @@ export class TeamService {
     }[];
     readonly requestId?: string;
   }): Promise<TeamContextRecord> {
-    assertConfiguredSeatCount(input.seatCount, this.maxConfiguredSeatCount);
-    const seatLimit = input.seatCount - 1;
-    const connectionIds = new Set<string>();
-    const connections = input.connections.map((connection) => {
-      if (connectionIds.has(connection.connectionId)) {
-        throw new AppError(
-          "DUPLICATE_MAIL_CONNECTION",
-          "同じ監視アカウントが重複しています。",
-          400
-        );
-      }
-      connectionIds.add(connection.connectionId);
-      const keywords = normalizeTeamKeywords(connection.keywords);
-      if (keywords.length === 0) {
-        throw new AppError(
-          "MAIL_KEYWORDS_REQUIRED",
-          "各監視アカウントに通知キーワードを1件以上設定してください。",
-          400
-        );
-      }
-      return { connectionId: connection.connectionId, keywords };
-    });
-    if (connections.length === 0) {
-      throw new AppError(
-        "MAIL_CONNECTION_REQUIRED",
-        "監視アカウントを1件以上設定してください。",
-        400
-      );
-    }
-    const keywords = mergeTeamKeywordSets(
-      connections.map((connection) => connection.keywords)
-    );
+    const settings = this.normalizeContractSettings(input);
     const context = await this.requireOwnerForTeam(input.userId, input.teamId);
     return this.options.repository.updateContractSettings({
       teamId: context.teamId,
       actorUserId: input.userId,
-      seatLimit,
-      keywords,
-      connectionKeywords: connections,
-      currentTermAmountYen: calculateAnnualPriceYen(seatLimit, keywords.length),
+      seatLimit: settings.seatLimit,
+      keywords: settings.keywords,
+      connectionKeywords: settings.connections,
+      currentTermAmountYen: calculateAnnualPriceYen(
+        settings.seatLimit,
+        settings.keywords.length
+      ),
+      requestId: input.requestId ?? null,
+      now: this.now()
+    });
+  }
+
+  public async createContractChangeQuote(input: {
+    readonly userId: string;
+    readonly teamId: string;
+    readonly seatCount: number;
+    readonly connections: readonly ContractConnectionSettings[];
+    readonly idempotencyKey: string;
+  }): Promise<ContractChangeQuoteRecord> {
+    assertIdempotencyKey(input.idempotencyKey);
+    const settings = this.normalizeContractSettings(input);
+    const context = await this.requireOwnerForTeam(input.userId, input.teamId);
+    const now = this.now();
+    const expiresAt = new Date(now.getTime() + 15 * 60 * 1000);
+    return this.options.repository.createContractChangeQuote({
+      teamId: context.teamId,
+      actorUserId: input.userId,
+      seatLimit: settings.seatLimit,
+      keywords: settings.keywords,
+      connectionKeywords: settings.connections,
+      idempotencyKey: input.idempotencyKey,
+      now,
+      expiresAt
+    });
+  }
+
+  public async applyContractChangeQuote(input: {
+    readonly userId: string;
+    readonly teamId: string;
+    readonly quoteId: string;
+    readonly idempotencyKey: string;
+    readonly expectedPreviousAnnualAmountYen: number;
+    readonly expectedNextAnnualAmountYen: number;
+    readonly expectedAdditionalChargeYen: number;
+    readonly requestId?: string;
+  }): Promise<AppliedContractChangeRecord> {
+    assertIdempotencyKey(input.idempotencyKey);
+    await this.requireOwnerForTeam(input.userId, input.teamId);
+    return this.options.repository.applyContractChangeQuote({
+      teamId: input.teamId,
+      quoteId: input.quoteId,
+      actorUserId: input.userId,
+      applyIdempotencyKey: input.idempotencyKey,
+      expectedPreviousAnnualAmountYen: input.expectedPreviousAnnualAmountYen,
+      expectedNextAnnualAmountYen: input.expectedNextAnnualAmountYen,
+      expectedAdditionalChargeYen: input.expectedAdditionalChargeYen,
       requestId: input.requestId ?? null,
       now: this.now()
     });
@@ -291,6 +315,52 @@ export class TeamService {
     }
     return context;
   }
+
+  private normalizeContractSettings(input: {
+    readonly seatCount: number;
+    readonly connections: readonly ContractConnectionSettings[];
+  }): {
+    readonly seatLimit: number;
+    readonly keywords: readonly string[];
+    readonly connections: readonly ContractConnectionSettings[];
+  } {
+    assertConfiguredSeatCount(input.seatCount, this.maxConfiguredSeatCount);
+    const seatLimit = input.seatCount - 1;
+    const connectionIds = new Set<string>();
+    const connections = input.connections.map((connection) => {
+      if (connectionIds.has(connection.connectionId)) {
+        throw new AppError(
+          "DUPLICATE_MAIL_CONNECTION",
+          "同じ監視アカウントが重複しています。",
+          400
+        );
+      }
+      connectionIds.add(connection.connectionId);
+      const keywords = normalizeTeamKeywords(connection.keywords);
+      if (keywords.length === 0) {
+        throw new AppError(
+          "MAIL_KEYWORDS_REQUIRED",
+          "各監視アカウントに通知キーワードを1件以上設定してください。",
+          400
+        );
+      }
+      return { connectionId: connection.connectionId, keywords };
+    });
+    if (connections.length === 0) {
+      throw new AppError(
+        "MAIL_CONNECTION_REQUIRED",
+        "監視アカウントを1件以上設定してください。",
+        400
+      );
+    }
+    return {
+      seatLimit,
+      connections,
+      keywords: mergeTeamKeywordSets(
+        connections.map((connection) => connection.keywords)
+      )
+    };
+  }
 }
 
 export function generateTeamCode(): string {
@@ -299,4 +369,14 @@ export function generateTeamCode(): string {
 
 function isTeamCodeConflict(error: unknown): boolean {
   return error instanceof AppError && error.code === "TEAM_CODE_CONFLICT";
+}
+
+function assertIdempotencyKey(value: string): void {
+  if (!/^[A-Za-z0-9_-]{16,100}$/.test(value)) {
+    throw new AppError(
+      "INVALID_IDEMPOTENCY_KEY",
+      "契約変更を開始できませんでした。もう一度お試しください。",
+      400
+    );
+  }
 }

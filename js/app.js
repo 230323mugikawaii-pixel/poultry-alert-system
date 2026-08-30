@@ -189,7 +189,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-30.1";
+  "2026-08-30.2";
 
 let alarmAudioContext = null;
 let alarmRepeatTimer = null;
@@ -239,6 +239,7 @@ const ownerSetupKeywordDirty = {
 let notificationMemberManagement = null;
 let notificationMemberManagementLoadState = "idle";
 let notificationMemberCredential = null;
+let pendingContractChange = null;
 let ownerAlerts = [];
 let userNotifications = [];
 let notificationUnreadCount = 0;
@@ -925,6 +926,10 @@ function parseTeamContext(team) {
       status: subscription.status,
       currentTermAmountYen:
         subscription.currentTermAmountYen,
+      renewalAmountYen:
+        typeof subscription.renewalAmountYen === "number"
+          ? subscription.renewalAmountYen
+          : subscription.currentTermAmountYen,
       currentTermStartedAt:
         termStartedAt,
       currentTermEndsAt:
@@ -1018,7 +1023,7 @@ function synchronizeContractFromCurrentTeam() {
   paidAnnualPrice =
     currentTeam.subscription.currentTermAmountYen;
   totalPrice =
-    currentTeam.subscription.currentTermAmountYen;
+    currentTeam.subscription.renewalAmountYen;
   saveData();
 }
 
@@ -1288,8 +1293,7 @@ function renderOwnerMonitoringSetup() {
       "ownerMonitoringContinueButton"
     );
   if (continueButton) {
-    continueButton.disabled =
-      authorizedChoices.length === 0;
+    continueButton.disabled = false;
   }
 
   const choices =
@@ -1308,7 +1312,7 @@ function renderOwnerMonitoringSetup() {
     "ownerMonitoringSetupError",
     authorizedChoices.length === 0 &&
       skippedProviders.length === 2
-      ? "Call Nowを利用するには、少なくとも1つの監視アカウントを設定してください。"
+      ? "Call Nowを利用するには、GoogleまたはMicrosoftの監視アカウントを1件以上設定してください。"
       : ""
   );
 }
@@ -1456,7 +1460,7 @@ function continueFromOwnerMonitoringSetup() {
   if (!authenticatedUser || authorizedChoices.length === 0) {
     setText(
       "ownerMonitoringSetupError",
-      "Call Nowを利用するには、少なくとも1つの監視アカウントを設定してください。"
+      "Call Nowを利用するには、GoogleまたはMicrosoftの監視アカウントを1件以上設定してください。"
     );
     return;
   }
@@ -2161,6 +2165,11 @@ function changeKeyword(
     inputElement.setCustomValidity(
       errorMessage
     );
+    if (errorMessage) {
+      inputElement.setAttribute("aria-invalid", "true");
+    } else {
+      inputElement.removeAttribute("aria-invalid");
+    }
   }
 
   showSetupError(errorMessage);
@@ -2224,9 +2233,18 @@ function validateKeywords() {
     );
 
   if (!validation.valid) {
-    showSetupError(
-      validation.message
-    );
+    const invalidInput = document.querySelectorAll("#keywordInputs input")[
+      validation.index ?? 0
+    ];
+    const rawValue = keywords[validation.index ?? 0] ?? "";
+    const message =
+      validation.reasonCode === "KEYWORD_REQUIRED" ||
+      (keywords.length === 1 && !rawValue)
+        ? "通知キーワードを1件以上入力してください。"
+        : rawValue.length > 0 && !rawValue.trim()
+          ? "空白だけのキーワードは登録できません。"
+          : validation.message;
+    showSetupValidationError(message, invalidInput);
 
     return false;
   }
@@ -2242,6 +2260,15 @@ function showSetupError(message) {
     "setupError",
     message
   );
+}
+
+function showSetupValidationError(message, input = null) {
+  showSetupError(message);
+  if (input) {
+    input.setAttribute("aria-invalid", "true");
+    input.scrollIntoView({ behavior: "smooth", block: "center" });
+    input.focus({ preventScroll: true });
+  }
 }
 
 
@@ -2451,14 +2478,36 @@ function updatePrice() {
 
 
 function updateOwnerSeatCount() {
-  const value = Number(
-    document.getElementById("ownerSeatCount")?.value
-  );
-  ownerSetupSeatCount =
-    Number.isInteger(value) && value >= 1
-      ? value
-      : 1;
+  const input = document.getElementById("ownerSeatCount");
+  const value = Number(input?.value);
+  if (Number.isInteger(value) && value >= 1) {
+    ownerSetupSeatCount = value;
+    input?.removeAttribute("aria-invalid");
+    showSetupError("");
+  }
   updatePrice();
+}
+
+function validateOwnerSeatCount() {
+  const input = document.getElementById("ownerSeatCount");
+  const value = Number(input?.value);
+  if (!Number.isInteger(value) || value < 1) {
+    showSetupValidationError(
+      "合計利用人数は1以上の整数で入力してください。",
+      input
+    );
+    return false;
+  }
+  if (value > 1_000_000) {
+    showSetupValidationError(
+      "入力できる利用人数の上限を超えています。",
+      input
+    );
+    return false;
+  }
+  ownerSetupSeatCount = value;
+  input?.removeAttribute("aria-invalid");
+  return true;
 }
 
 
@@ -2573,6 +2622,10 @@ async function continueFromSetup() {
       "ownerMonitoringSetupError",
       "Call Nowを利用するには、少なくとも1つの監視アカウントを設定してください。"
     );
+    return;
+  }
+
+  if (setupMode === "signup" && !validateOwnerSeatCount()) {
     return;
   }
 
@@ -2721,6 +2774,7 @@ function openPayment() {
       return;
     }
   }
+  setText("paymentError", "");
 
   const renewalMode =
     paymentMode === "renewal";
@@ -2830,6 +2884,7 @@ function openPayment() {
 
 async function completeDemoPayment() {
   if (!authenticatedUser) {
+    setText("paymentError", "ログイン状態を確認できませんでした。初期設定をもう一度お試しください。");
     openOwnerSetup();
     return;
   }
@@ -2902,7 +2957,7 @@ ${formatYen(totalPrice)}
   ) {
     openOwnerSetup();
     setText(
-      "ownerMonitoringSetupError",
+      "paymentError",
       "購入前の設定を確認できませんでした。初期設定をもう一度お試しください。"
     );
     return;
@@ -2958,11 +3013,11 @@ ${formatYen(totalPrice)}
     ownerAlerts = await fetchOwnerAlerts();
     openApp();
   } catch (error) {
-    await showAppAlert(
+    setText(
+      "paymentError",
       error instanceof Error
         ? error.message
-        : "契約情報を保存できませんでした。通信状態を確認して、もう一度お試しください。",
-      { title: "契約処理のエラー" }
+        : "契約情報を保存できませんでした。通信状態を確認して、もう一度お試しください。"
     );
   } finally {
     if (button) button.disabled = false;
@@ -3797,6 +3852,7 @@ function renderContractSettings() {
     return;
 
   container.replaceChildren();
+  pendingContractChange = null;
   const canManage =
     currentTeam?.role === "OWNER" &&
     hasActiveSubscription();
@@ -3879,6 +3935,12 @@ function renderContractSettings() {
         inputs
       );
 
+      const providerError = document.createElement("p");
+      providerError.className = "field-error contract-provider-error";
+      providerError.dataset.contractProviderError = connection.id;
+      providerError.setAttribute("aria-live", "polite");
+      card.appendChild(providerError);
+
       const addButton =
         document.createElement(
           "button"
@@ -3907,8 +3969,7 @@ function renderContractSettings() {
   );
   seatInput.disabled = !canManage;
   saveButton.disabled =
-    !canManage ||
-    mailConnections.length === 0;
+    !canManage;
   setText(
     "contractSeatHelp",
     `現在の利用人数は${1 + (currentTeam?.seats?.activeMemberCount ?? 0)}人です。これより少ない人数には変更できません。`
@@ -3920,7 +3981,16 @@ function renderContractSettings() {
         ?.currentTermAmountYen ?? 0
     )
   );
+  setText("contractSeatError", "");
   setText("contractSettingsError", "");
+  if (!canManage) {
+    setText(
+      "contractSettingsError",
+      currentTeam?.role === "OWNER"
+        ? "現在の契約状態では変更できません。"
+        : "契約内容の変更は管理者のみ行えます。"
+    );
+  }
   updateContractSettingsPreview();
 }
 
@@ -3947,7 +4017,10 @@ function createContractKeywordRow(
   );
   input.addEventListener(
     "input",
-    updateContractSettingsPreview
+    () => {
+      clearContractInputError(input);
+      updateContractSettingsPreview();
+    }
   );
   const remove =
     document.createElement("button");
@@ -4012,25 +4085,37 @@ function addContractKeyword(
 function readContractSettingsForm(
   showError = false
 ) {
-  const seatCount = Number(
-    document.getElementById(
-      "contractSeatCount"
-    )?.value
-  );
+  const seatInput = document.getElementById("contractSeatCount");
+  const seatCount = Number(seatInput?.value);
   const minimumSeatCount =
     1 +
     (currentTeam?.seats
       ?.activeMemberCount ?? 0);
-  if (
-    !Number.isInteger(seatCount) ||
-    seatCount < minimumSeatCount
-  ) {
-    if (showError) {
-      setText(
-        "contractSettingsError",
-        `合計利用人数は現在利用中の${minimumSeatCount}人以上で入力してください。`
+  if (!Number.isInteger(seatCount) || seatCount < 1) {
+    if (showError)
+      showContractValidationError(
+        "合計利用人数は1以上の整数で入力してください。",
+        seatInput,
+        "contractSeatError"
       );
-    }
+    return null;
+  }
+  if (seatCount < minimumSeatCount) {
+    if (showError)
+      showContractValidationError(
+        `現在${minimumSeatCount}人が利用中のため、${minimumSeatCount}人未満には変更できません。`,
+        seatInput,
+        "contractSeatError"
+      );
+    return null;
+  }
+  if (seatCount > 1_000_000) {
+    if (showError)
+      showContractValidationError(
+        "入力できる利用人数の上限を超えています。",
+        seatInput,
+        "contractSeatError"
+      );
     return null;
   }
 
@@ -4040,11 +4125,27 @@ function readContractSettingsForm(
   )) {
     const connectionId =
       card.dataset.contractConnectionId;
-    const values = [
+    const inputs = [
       ...card.querySelectorAll(
         ".contract-keyword-row input"
       )
-    ].map((input) => input.value);
+    ];
+    const values = inputs.map((input) => input.value);
+    const normalizedValues = values.map((value) =>
+      keywordPolicy.normalizeKeyword(value)
+    );
+    if (normalizedValues.every((value) => !value)) {
+      if (showError) {
+        const firstInput = inputs[0] ?? card;
+        showContractValidationError(
+          "各監視アカウントに通知キーワードを1件以上設定してください。",
+          firstInput,
+          null,
+          card
+        );
+      }
+      return null;
+    }
     const validation =
       keywordPolicy.validateKeywordList(
         values
@@ -4055,10 +4156,17 @@ function readContractSettingsForm(
       validation.keywords.length === 0
     ) {
       if (showError) {
-        setText(
-          "contractSettingsError",
-          validation.message ||
-            "各監視アカウントに通知キーワードを1件以上設定してください。"
+        const invalidInput =
+          inputs[validation.index ?? 0] ?? inputs[0] ?? card;
+        const rawValue = values[validation.index ?? 0] ?? "";
+        showContractValidationError(
+          rawValue.length > 0 && !rawValue.trim()
+            ? "空白だけのキーワードは登録できません。"
+            : validation.message ||
+                "各監視アカウントに通知キーワードを1件以上設定してください。",
+          invalidInput,
+          null,
+          card
         );
       }
       return null;
@@ -4070,9 +4178,9 @@ function readContractSettingsForm(
   }
   if (connections.length === 0) {
     if (showError) {
-      setText(
-        "contractSettingsError",
-        "監視アカウントを1件以上設定してください。"
+      showContractValidationError(
+        "監視アカウントを1件以上設定してください。",
+        document.getElementById("contractSettingsProviders")
       );
     }
     return null;
@@ -4137,41 +4245,49 @@ function updateContractSettingsPreview() {
         )
       : "―"
   );
+  const button = document.getElementById("saveContractSettingsButton");
+  if (button && currentTeam?.role === "OWNER") {
+    const currentPrice =
+      currentTeam?.subscription?.currentTermAmountYen ?? 0;
+    const nextPrice = settings
+      ? calculateContractSettingsPrice(settings)
+      : null;
+    button.textContent =
+      nextPrice !== null && nextPrice > currentPrice
+        ? "決済内容を確認"
+        : "契約内容を保存";
+  }
 }
 
 async function saveContractSettings() {
-  if (currentTeam?.role !== "OWNER")
+  if (currentTeam?.role !== "OWNER") {
+    setText(
+      "contractSettingsError",
+      "契約内容の変更は管理者のみ行えます。"
+    );
     return;
+  }
   setText("contractSettingsError", "");
   const settings =
     readContractSettingsForm(true);
   if (!settings) return;
-  const nextPrice =
-    calculateContractSettingsPrice(
-      settings
-    );
-  const confirmed =
-    await showAppConfirm(
-      `変更後の年額は${formatYen(nextPrice)}です。契約内容を保存しますか？\n\n現在は試作版のため、実際の決済は行われません。`,
-      {
-        title: "契約内容を変更する",
-        confirmText: "変更を保存",
-        tone: "warning"
-      }
-    );
-  if (!confirmed) return;
+  if (!contractSettingsHaveChanges(settings)) {
+    showContractValidationError("変更内容がありません。", document.getElementById("saveContractSettingsButton"));
+    return;
+  }
   const button =
     document.getElementById(
       "saveContractSettingsButton"
     );
   if (button) button.disabled = true;
   try {
+    button.textContent = "料金を確認中…";
     const response = await fetch(
       apiUrl(
-        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/contract-settings`
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/contract-settings/quote`
       ),
       {
-        method: "PUT",
+        method: "POST",
         credentials: "include",
         headers: {
           Accept: "application/json",
@@ -4181,7 +4297,8 @@ async function saveContractSettings() {
         body: JSON.stringify({
           seatCount: settings.seatCount,
           connections:
-            settings.connections
+            settings.connections,
+          idempotencyKey: createClientRequestId()
         })
       }
     );
@@ -4194,35 +4311,230 @@ async function saveContractSettings() {
           "契約内容を保存できませんでした。"
       );
     }
-    const updatedTeam =
-      parseTeamContext(payload?.team);
-    if (!updatedTeam) {
+    const quote = parseContractChangeQuote(payload?.quote);
+    if (!quote) {
       throw new Error(
-        "契約内容を確認できませんでした。"
+        "変更後の料金を計算できませんでした。入力内容を確認してください。"
       );
     }
-    currentTeam = updatedTeam;
-    mailConnections =
-      await fetchMailConnections();
-    hydrateContractKeywordsFromServer();
-    synchronizeContractFromCurrentTeam();
-    renderTestKeywordCards();
-    renderContractInformation();
-    renderContractSettings();
-    await refreshNotificationMemberManagement();
-    await showAppAlert(
-      "契約内容を保存しました。"
+    pendingContractChange = {
+      quote,
+      applyIdempotencyKey: createClientRequestId()
+    };
+    if (quote.additionalChargeYen > 0) {
+      openContractChangeCheckout();
+      return;
+    }
+    const isDowngrade =
+      quote.nextAnnualAmountYen < quote.previousAnnualAmountYen;
+    const confirmed = await showAppConfirm(
+      isDowngrade
+        ? `現在の契約期間中の返金はありません。次回更新時から年額${formatYen(quote.nextAnnualAmountYen)}になります。保存しますか？`
+        : "追加料金はありません。契約内容を保存しますか？",
+      {
+        title: "契約内容を変更する",
+        confirmText: "保存する",
+        tone: "warning"
+      }
     );
+    if (!confirmed) {
+      pendingContractChange = null;
+      return;
+    }
+    await applyPendingContractChange();
   } catch (error) {
     setText(
       "contractSettingsError",
       error instanceof Error
         ? error.message
-        : "契約内容を保存できませんでした。"
+        : "契約内容を保存できませんでした。通信状態を確認して、もう一度お試しください。"
     );
   } finally {
-    if (button) button.disabled = false;
+    if (button) {
+      button.disabled = false;
+      updateContractSettingsPreview();
+    }
   }
+}
+
+function contractSettingsHaveChanges(settings) {
+  if (!currentTeam || settings.seatCount !== currentTeam.seats.seatCount) {
+    return true;
+  }
+  const currentById = new Map(
+    mailConnections.map((connection) => [
+      connection.id,
+      (connection.keywords ?? []).map((keyword) =>
+        keywordPolicy.comparisonKey(keyword)
+      ).sort()
+    ])
+  );
+  if (currentById.size !== settings.connections.length) return true;
+  return settings.connections.some((connection) => {
+    const current = currentById.get(connection.connectionId);
+    const next = connection.keywords
+      .map((keyword) => keywordPolicy.comparisonKey(keyword))
+      .sort();
+    return !current || JSON.stringify(current) !== JSON.stringify(next);
+  });
+}
+
+function parseContractChangeQuote(value) {
+  if (
+    !value ||
+    typeof value.id !== "string" ||
+    !["PENDING", "APPLIED"].includes(value.status) ||
+    !Number.isInteger(value.previousAnnualAmountYen) ||
+    !Number.isInteger(value.nextAnnualAmountYen) ||
+    !Number.isInteger(value.additionalChargeYen) ||
+    !Number.isInteger(value.seatCount) ||
+    !Number.isInteger(value.keywordCount) ||
+    !Number.isInteger(value.mailConnectionCount)
+  ) return null;
+  return value;
+}
+
+function openContractChangeCheckout() {
+  const quote = pendingContractChange?.quote;
+  if (!quote || quote.additionalChargeYen <= 0) {
+    showContractValidationError(
+      "追加料金を確認できませんでした。",
+      document.getElementById("saveContractSettingsButton")
+    );
+    return;
+  }
+  setText("contractCheckoutCurrentAnnual", formatYen(quote.previousAnnualAmountYen));
+  setText("contractCheckoutNextAnnual", formatYen(quote.nextAnnualAmountYen));
+  setText("contractCheckoutAdditionalCharge", formatYen(quote.additionalChargeYen));
+  setText("contractCheckoutSeatCount", `${quote.seatCount}人`);
+  setText("contractCheckoutKeywordCount", `${quote.keywordCount}個`);
+  setText("contractCheckoutMailConnectionCount", `${quote.mailConnectionCount}件`);
+  setText("contractCheckoutError", "");
+  showOnlyScreen("contractChangeCheckoutScreen");
+  window.scrollTo({ top: 0 });
+}
+
+function backFromContractChangeCheckout() {
+  pendingContractChange = null;
+  showOnlyScreen("appScreen");
+  showAppPage("keywordPage");
+}
+
+async function applyPendingContractChange() {
+  const pending = pendingContractChange;
+  if (!pending || !currentTeam) {
+    setText(
+      "contractCheckoutError",
+      "契約変更の内容を確認できませんでした。戻ってもう一度確認してください。"
+    );
+    return;
+  }
+  const checkoutVisible = !document
+    .getElementById("contractChangeCheckoutScreen")
+    ?.classList.contains("hidden");
+  const button = document.getElementById(
+    checkoutVisible ? "applyContractChangeButton" : "saveContractSettingsButton"
+  );
+  const originalText = button?.textContent ?? "";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "変更を適用中…";
+  }
+  const errorId = checkoutVisible
+    ? "contractCheckoutError"
+    : "contractSettingsError";
+  setText(errorId, "");
+  try {
+    const quote = pending.quote;
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/contract-settings/quotes/${encodeURIComponent(quote.id)}/apply`
+      ),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          idempotencyKey: pending.applyIdempotencyKey,
+          expectedPreviousAnnualAmountYen: quote.previousAnnualAmountYen,
+          expectedNextAnnualAmountYen: quote.nextAnnualAmountYen,
+          expectedAdditionalChargeYen: quote.additionalChargeYen
+        })
+      }
+    );
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      const staleMessage = response.status === 409
+        ? "契約情報が更新されました。内容と料金をもう一度確認してください。"
+        : payload?.error?.message ||
+          "契約内容を保存できませんでした。通信状態を確認して、もう一度お試しください。";
+      throw new Error(staleMessage);
+    }
+    const updatedTeam = parseTeamContext(payload?.team);
+    if (!updatedTeam) throw new Error("契約内容を確認できませんでした。再読み込みしてもう一度お試しください。");
+    const appliedQuote = pending.quote;
+    currentTeam = updatedTeam;
+    pendingContractChange = null;
+    mailConnections = await fetchMailConnections();
+    hydrateContractKeywordsFromServer();
+    synchronizeContractFromCurrentTeam();
+    renderTestKeywordCards();
+    renderContractInformation();
+    await refreshNotificationMemberManagement();
+    showOnlyScreen("appScreen");
+    showAppPage("keywordPage");
+    renderContractSettings();
+    if (appliedQuote.nextAnnualAmountYen < appliedQuote.previousAnnualAmountYen) {
+      await showAppAlert(
+        `契約内容を保存しました。\n\n現在の契約期間中の返金はありません。\n次回更新時から年額${formatYen(appliedQuote.nextAnnualAmountYen)}になります。`
+      );
+    } else {
+      await showAppAlert("契約内容を保存しました。");
+    }
+  } catch (error) {
+    setText(
+      errorId,
+      error instanceof Error
+        ? error.message
+        : "契約内容または料金が変更されています。戻ってもう一度確認してください。"
+    );
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+}
+
+function showContractValidationError(message, target, errorId = null, card = null) {
+  setText("contractSettingsError", message);
+  if (errorId) setText(errorId, message);
+  const providerError = card?.querySelector("[data-contract-provider-error]");
+  if (providerError) providerError.textContent = message;
+  if (target?.matches?.("input, textarea, select")) {
+    target.setAttribute("aria-invalid", "true");
+  }
+  target?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+  target?.focus?.({ preventScroll: true });
+}
+
+function clearContractInputError(input) {
+  input?.removeAttribute?.("aria-invalid");
+  setText("contractSettingsError", "");
+  setText("contractSeatError", "");
+  const card = input?.closest?.("[data-contract-connection-id]");
+  const providerError = card?.querySelector("[data-contract-provider-error]");
+  if (providerError) providerError.textContent = "";
+}
+
+function createClientRequestId() {
+  if (window.crypto && typeof window.crypto.randomUUID === "function") {
+    return window.crypto.randomUUID();
+  }
+  return `request-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
 }
 
 function renderNotificationMemberManagement() {
@@ -4277,8 +4589,15 @@ function renderNotificationMemberManagement() {
     createButton.disabled = true;
     openCreateButton.disabled = true;
     capacityMessage.textContent = "";
+    setText(
+      "notificationMemberActionError",
+      notificationMemberManagementLoadState === "error"
+        ? "参加者情報を読み込めませんでした。再読み込みしてください。"
+        : ""
+    );
     return;
   }
+  setText("notificationMemberActionError", "");
   summary.innerHTML = `
     <div class="member-seat-item">
       <span>利用人数</span>
@@ -4376,6 +4695,7 @@ function openNotificationMemberCreateForm() {
     }
     return;
   }
+  setText("notificationMemberActionError", "");
   closeNotificationMemberCredential();
   document
     .getElementById("notificationMemberCreatePanel")
@@ -4398,11 +4718,15 @@ function closeNotificationMemberCreateForm() {
 
 
 async function createNotificationMember() {
-  if (currentTeam?.role !== "OWNER") return;
+  if (currentTeam?.role !== "OWNER") {
+    showNotificationMemberActionError("参加者の管理は管理者のみ行えます。");
+    return;
+  }
   const input = document.getElementById(
     "notificationMemberNameInput"
   );
   const displayName = input?.value?.trim();
+  setText("notificationMemberActionError", "");
   try {
     const response = await fetch(
       apiUrl(
@@ -4442,13 +4766,13 @@ async function createNotificationMember() {
         capacityMessage.textContent =
           "現在の利用人数上限に達しています。";
       }
+      showNotificationMemberActionError("現在の利用人数上限に達しています。");
       return;
     }
-    await showAppAlert(
+    showNotificationMemberActionError(
       error instanceof Error
         ? error.message
-        : "参加者を追加できませんでした。",
-      { title: "参加者の追加エラー" }
+        : "参加者を追加できませんでした。"
     );
   }
 }
@@ -4463,7 +4787,12 @@ async function resetNotificationMemberPassword(memberId) {
       tone: "warning"
     }
   );
-  if (!confirmed || currentTeam?.role !== "OWNER") return;
+  if (!confirmed) return;
+  if (currentTeam?.role !== "OWNER") {
+    showNotificationMemberActionError("参加者の管理は管理者のみ行えます。");
+    return;
+  }
+  setText("notificationMemberActionError", "");
   try {
     const response = await fetch(
       apiUrl(
@@ -4484,11 +4813,10 @@ async function resetNotificationMemberPassword(memberId) {
     }
     showNotificationMemberCredential(payload, "reset");
   } catch (error) {
-    await showAppAlert(
+    showNotificationMemberActionError(
       error instanceof Error
         ? error.message
-        : "パスワードを再発行できませんでした。",
-      { title: "パスワード再発行エラー" }
+        : "パスワードを再発行できませんでした。"
     );
   }
 }
@@ -4503,7 +4831,12 @@ async function disableNotificationMember(memberId) {
       tone: "danger"
     }
   );
-  if (!confirmed || currentTeam?.role !== "OWNER") return;
+  if (!confirmed) return;
+  if (currentTeam?.role !== "OWNER") {
+    showNotificationMemberActionError("参加者の管理は管理者のみ行えます。");
+    return;
+  }
+  setText("notificationMemberActionError", "");
   try {
     const response = await fetch(
       apiUrl(
@@ -4528,11 +4861,10 @@ async function disableNotificationMember(memberId) {
       (await fetchCurrentTeamContext()) || currentTeam;
     renderNotificationMemberManagement();
   } catch (error) {
-    await showAppAlert(
+    showNotificationMemberActionError(
       error instanceof Error
         ? error.message
-        : "参加者を無効にできませんでした。",
-      { title: "参加者の無効化エラー" }
+        : "参加者を無効にできませんでした。"
     );
   }
 }
@@ -4550,11 +4882,12 @@ async function reactivateNotificationMember(
         tone: "warning"
       }
     );
-  if (
-    !confirmed ||
-    currentTeam?.role !== "OWNER"
-  )
+  if (!confirmed) return;
+  if (currentTeam?.role !== "OWNER") {
+    showNotificationMemberActionError("参加者の管理は管理者のみ行えます。");
     return;
+  }
+  setText("notificationMemberActionError", "");
   try {
     const response = await fetch(
       apiUrl(
@@ -4587,13 +4920,10 @@ async function reactivateNotificationMember(
       "reactivate"
     );
   } catch (error) {
-    await showAppAlert(
+    showNotificationMemberActionError(
       error instanceof Error
         ? error.message
-        : "参加者を再有効化できませんでした。",
-      {
-        title: "参加者の再有効化エラー"
-      }
+        : "この参加者を再び有効にするための空き枠がありません。"
     );
   }
 }
@@ -4610,11 +4940,12 @@ async function deleteNotificationMember(
         tone: "danger"
       }
     );
-  if (
-    !confirmed ||
-    currentTeam?.role !== "OWNER"
-  )
+  if (!confirmed) return;
+  if (currentTeam?.role !== "OWNER") {
+    showNotificationMemberActionError("参加者の管理は管理者のみ行えます。");
     return;
+  }
+  setText("notificationMemberActionError", "");
   try {
     const response = await fetch(
       apiUrl(
@@ -4644,13 +4975,19 @@ async function deleteNotificationMember(
     closeNotificationMemberCredential();
     renderNotificationMemberManagement();
   } catch (error) {
-    await showAppAlert(
+    showNotificationMemberActionError(
       error instanceof Error
         ? error.message
-        : "参加者を削除できませんでした。",
-      { title: "参加者の削除エラー" }
+        : "この参加者はすでに削除されています。"
     );
   }
+}
+
+function showNotificationMemberActionError(message) {
+  setText("notificationMemberActionError", message);
+  document
+    .getElementById("notificationMemberActionError")
+    ?.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 function showNotificationMemberCredential(
@@ -5037,6 +5374,7 @@ function renderUserNotifications() {
 
 
 async function markUserNotificationRead(notificationId) {
+  setText("notificationCenterError", "");
   try {
     const response = await fetch(
       apiUrl(
@@ -5049,7 +5387,12 @@ async function markUserNotificationRead(notificationId) {
       }
     );
     const payload = await response.json().catch(() => null);
-    if (!response.ok || !payload?.id) return;
+    if (!response.ok || !payload?.id) {
+      throw new Error(
+        payload?.error?.message ||
+          "通知を既読にできませんでした。もう一度お試しください。"
+      );
+    }
 
     const index = userNotifications.findIndex(
       (notification) => notification.id === payload.id
@@ -5062,8 +5405,13 @@ async function markUserNotificationRead(notificationId) {
     ).length;
     renderNotificationBadge();
     renderUserNotifications();
-  } catch {
-    return;
+  } catch (error) {
+    setText(
+      "notificationCenterError",
+      error instanceof Error
+        ? error.message
+        : "通知を既読にできませんでした。もう一度お試しください。"
+    );
   }
 }
 
@@ -5078,11 +5426,15 @@ async function submitFeedback(event) {
     );
   const content = input?.value.trim() ?? "";
   setText("feedbackStatus", "");
+  document.getElementById("feedbackStatus")?.classList.remove("error");
   if (!content) {
     setText(
       "feedbackStatus",
-      "ご意見・フィードバックを入力してください。"
+      "ご意見・フィードバックの内容を入力してください。"
     );
+    document.getElementById("feedbackStatus")?.classList.add("error");
+    input?.setAttribute("aria-invalid", "true");
+    input?.focus();
     return;
   }
 
@@ -5118,6 +5470,7 @@ async function submitFeedback(event) {
       "送信しました。返信がある場合は通知でお知らせします。"
     );
   } catch (error) {
+    document.getElementById("feedbackStatus")?.classList.add("error");
     setText(
       "feedbackStatus",
       error instanceof Error
@@ -5127,6 +5480,12 @@ async function submitFeedback(event) {
   } finally {
     if (button) button.disabled = false;
   }
+}
+
+function clearFeedbackError(input) {
+  input?.removeAttribute("aria-invalid");
+  setText("feedbackStatus", "");
+  document.getElementById("feedbackStatus")?.classList.remove("error");
 }
 
 
@@ -6485,17 +6844,18 @@ const testButtons =
   );
 
   try {
+    setText("notificationTestError", "");
     if (isContractExpired()) {
-      await showAppAlert(
-        `契約期限が切れています。
-
-契約を更新してください。`
+      setText(
+        "notificationTestError",
+        "契約期限が切れています。契約を更新してください。"
       );
       return;
     }
 
     if (!TEST_API_URL || !TEST_API_TOKEN) {
-      await showAppAlert(
+      setText(
+        "notificationTestError",
         "テストAPIのURLまたはトークンが設定されていません。"
       );
       return;
@@ -6586,11 +6946,9 @@ Gmailにテストメールが届いているか、
       error
     );
 
-    await showAppAlert(
-      `テスト処理に失敗しました。
-
-${String(error.message)
-  .replace("SERVER:", "")}`
+    setText(
+      "notificationTestError",
+      `テスト処理に失敗しました。${String(error.message).replace("SERVER:", "")}`
     );
   } finally {
     testButtons.forEach((testButton) => {
@@ -6825,6 +7183,7 @@ function showOnlyScreen(screenId) {
   const authenticatedScreens = new Set([
     "setupScreen",
     "paymentScreen",
+    "contractChangeCheckoutScreen",
     "renewalCompleteScreen",
     "appScreen"
   ]);
@@ -6861,6 +7220,7 @@ function showOnlyScreen(screenId) {
     "notificationMemberAppScreen",
     "setupScreen",
     "paymentScreen",
+    "contractChangeCheckoutScreen",
     "renewalCompleteScreen",
     "googleScreen",
     "appScreen"

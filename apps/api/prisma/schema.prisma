@@ -72,6 +72,13 @@ enum SubscriptionChangeStatus {
   FAILED
 }
 
+enum ContractChangeQuoteStatus {
+  PENDING
+  APPLIED
+  EXPIRED
+  CANCELED
+}
+
 enum InvitationKind {
   PASSWORD_CAPACITY
 }
@@ -193,6 +200,7 @@ model User {
   memberships             TeamMembership[]
   removedMemberships      TeamMembership[]       @relation("MembershipRemover")
   requestedChanges        SubscriptionChange[]
+  contractChangeQuotes    ContractChangeQuote[]
   createdInvitations      Invitation[]
   redemptions             InvitationRedemption[]
   initiatedOwnerTransfers OwnerTransfer[]
@@ -319,6 +327,7 @@ model Team {
   auditEvents     AuditEvent[]
   ownerOnboarding OwnerOnboarding?
   feedbackSubmissions FeedbackSubmission[]
+  contractChangeQuotes ContractChangeQuote[]
 
   @@map("teams")
 }
@@ -392,6 +401,7 @@ model Subscription {
   seatLimit            Int                  @default(0)
   pendingSeatLimit     Int?
   currentTermAmountYen Int                  @default(6000)
+  renewalAmountYen     Int                  @default(6000)
   currentTermStartedAt DateTime             @db.Timestamptz(3)
   currentTermEndsAt    DateTime             @db.Timestamptz(3)
   pricingVersion       String               @default("2026-08") @db.VarChar(32)
@@ -399,8 +409,38 @@ model Subscription {
   updatedAt            DateTime             @updatedAt @db.Timestamptz(3)
   team                 Team                 @relation(fields: [teamId], references: [id], onDelete: Cascade)
   changes              SubscriptionChange[]
+  contractChangeQuotes ContractChangeQuote[]
 
   @@map("subscriptions")
+}
+
+model ContractChangeQuote {
+  id                           String                    @id @default(uuid()) @db.Uuid
+  teamId                       String                    @db.Uuid
+  subscriptionId               String                    @db.Uuid
+  requestedByUserId            String                    @db.Uuid
+  status                       ContractChangeQuoteStatus @default(PENDING)
+  idempotencyKey               String                    @unique @db.VarChar(100)
+  applyIdempotencyKey          String?                   @unique @db.VarChar(100)
+  baselineFingerprint          String                    @db.Char(64)
+  requestedSeatLimit           Int
+  requestedKeywords            String[]
+  requestedConnectionSettings  Json
+  previousAnnualAmountYen      Int
+  nextAnnualAmountYen          Int
+  additionalChargeYen          Int
+  mailConnectionCount          Int
+  expiresAt                    DateTime                  @db.Timestamptz(3)
+  appliedAt                    DateTime?                 @db.Timestamptz(3)
+  createdAt                    DateTime                  @default(now()) @db.Timestamptz(3)
+  updatedAt                    DateTime                  @updatedAt @db.Timestamptz(3)
+  team                         Team                      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  subscription                 Subscription              @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  requestedByUser              User                      @relation(fields: [requestedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([teamId, status, expiresAt])
+  @@index([subscriptionId, status])
+  @@map("contract_change_quotes")
 }
 
 model SubscriptionChange {
