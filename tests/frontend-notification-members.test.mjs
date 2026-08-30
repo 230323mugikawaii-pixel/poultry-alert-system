@@ -4,16 +4,16 @@ import assert from "node:assert/strict";
 
 const appSource = readFileSync(
   new URL("../js/app.js", import.meta.url),
-  "utf8"
+  "utf8",
 );
 const htmlSource = readFileSync(
   new URL("../index.html", import.meta.url),
-  "utf8"
+  "utf8",
 );
 
 test("owner participant management keeps the simple add and list flow", () => {
   const management = htmlSource.match(
-    /id="notificationMemberManagementCard"[\s\S]*?<\/article>/
+    /id="notificationMemberManagementCard"[\s\S]*?<\/article>/,
   )?.[0];
   assert.ok(management, "participant management card should be present");
   assert.match(management, />\s*参加者を追加\s*</);
@@ -36,7 +36,7 @@ test("credentials are one-time, copyable, and kept out of browser storage", () =
   assert.match(htmlSource, /この画面を閉じると再表示できません/);
 
   const credentialFunctions = appSource.match(
-    /function showNotificationMemberCredential[\s\S]*?function calculateRemainingDays/
+    /function showNotificationMemberCredential[\s\S]*?function calculateRemainingDays/,
   )?.[0];
   assert.ok(credentialFunctions, "credential functions should be present");
   assert.match(credentialFunctions, /notificationMemberCredential = null/);
@@ -47,7 +47,7 @@ test("credentials are one-time, copyable, and kept out of browser storage", () =
 
 test("guest participant login stays password-based without OAuth", () => {
   const login = htmlSource.match(
-    /id="notificationMemberLoginScreen"[\s\S]*?<\/section>/
+    /id="notificationMemberLoginScreen"[\s\S]*?<\/section>/,
   )?.[0];
   assert.ok(login, "participant login should be present");
   assert.match(login, /参加者ID/);
@@ -59,8 +59,12 @@ test("guest participant login stays password-based without OAuth", () => {
 test("participant management uses only the existing team APIs", () => {
   assert.match(
     appSource,
-    /\/api\/v1\/teams\/\$\{encodeURIComponent\(currentTeam\.id\)\}\/notification-members/
+    /\/api\/v1\/teams\/\$\{encodeURIComponent\(currentTeam\.id\)\}\/notification-members/,
   );
   assert.match(appSource, /\/password-reset/);
+  assert.match(appSource, /\/reactivate/);
+  assert.match(appSource, /\/record/);
+  assert.match(appSource, /再び有効にする/);
+  assert.match(appSource, /過去の通知履歴は保持されます。/);
   assert.doesNotMatch(appSource, /participantPassword|participantCredential/);
 });

@@ -1,20 +1,20 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8"/>
 
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1.0, viewport-fit=cover"
-  >
+  />
 
-  <meta name="theme-color" content="#0862c7">
-  <meta name="call-now-api-origin" content="">
+  <meta name="theme-color" content="#0862c7"/>
+  <meta name="call-now-api-origin" content=""/>
 
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=25">
+    <link rel="stylesheet" href="css/style.css?v=25"/>
 </head>
 
 <body>
@@ -142,7 +142,7 @@
             autocomplete="username"
             placeholder="CN-XXXXXXXX"
             required
-          >
+          />
         </label>
         <label class="member-login-field">
           <span>パスワード</span>
@@ -152,7 +152,7 @@
             maxlength="128"
             autocomplete="current-password"
             required
-          >
+          />
         </label>
         <p id="notificationMemberLoginError" class="error-message" aria-live="polite"></p>
         <button type="submit" class="btn primary full-width">
@@ -292,8 +292,8 @@
 
 
         <p>
-          3キーワードまで基本料金に含まれます。<br>
-          4個目以降は、1個につき年額100円追加されます。<br>
+          3キーワードまで基本料金に含まれます。<br/>
+          4個目以降は、1個につき年額100円追加されます。<br/>
           監視アカウントの追加料金はありません。
         </p>
 
@@ -317,7 +317,7 @@
             value="1"
             onchange="updateOwnerSeatCount()"
             oninput="updateOwnerSeatCount()"
-          >
+          />
         </label>
       </div>
 
@@ -409,7 +409,7 @@
         </div>
 
 
-        <hr>
+        <hr/>
 
 
         <div class="price-row total-row">
@@ -1027,7 +1027,7 @@
     </p>
 
     <p>
-      <strong>⚠️ ご注意</strong><br>
+      <strong>⚠️ ご注意</strong><br/>
       Gmailにテストメールが届いたあとも、
       Call Now側の検知が完了するまでは、
       メールを削除したり、アーカイブへ移動したりしないでください。
@@ -1042,7 +1042,7 @@
 
 
 
-      <!-- 契約情報 -->
+      <!-- 詳細 -->
 
       <section
         id="contractPage"
@@ -1050,8 +1050,7 @@
       >
 
         <h1>
-          契約情報
-        </h1>
+          詳細</h1>
 
 
         <article class="card contract-table">
@@ -1090,19 +1089,6 @@
 
             <strong id="remainingDays">
               ―
-            </strong>
-
-          </div>
-
-
-          <div class="contract-row">
-
-            <span>
-              キーワード数
-            </span>
-
-            <strong id="contractKeywordCount">
-              3個
             </strong>
 
           </div>
@@ -1178,7 +1164,7 @@
                 maxlength="120"
                 autocomplete="off"
                 placeholder="例：山田"
-              >
+              />
             </label>
             <div class="member-create-actions">
               <button
@@ -1270,7 +1256,7 @@
 
 
 
-      <!-- キーワード設定 -->
+      <!-- 契約内容 -->
 
       <section
         id="keywordPage"
@@ -1278,27 +1264,105 @@
       >
 
         <h1>
-          キーワード設定
-        </h1>
+          契約内容</h1>
 
 
         <p>
-          現在、通知対象として登録されているキーワードです。
+          監視アカウントごとの通知キーワードと利用人数を確認・変更できます。
         </p>
 
 
-        <article class="card">
+        <article class="cardcontract-settings-card">
 
-          <div id="savedKeywordList"></div>
+          <div class="contract-settings-heading">
+              <div>
+                <h2>監視アカウント</h2>
+                <p>
+                  アカウントごとに通知するキーワードを設定します。
+                </p></div>
 
 
           <button
             type="button"
-            class="btn outline full-width"
-            onclick="openKeywordEdit()"
+            class="btn outline "
+                onclick="
+                  openGoogleAccountManager()
+                "
+              >
+                監視アカウントを管理
+              </button>
+            </div>
+
+            <div
+              id="contractSettingsProviders"
+              class="contract-provider-list"
+            ></div>
+
+            <div
+              class="contract-seat-editor"
+            >
+              <label
+                for="contractSeatCount"
+              >
+                <span>
+                  合計利用人数
+                </span>
+                <input
+                  id="contractSeatCount"
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputmode="numeric"
+                  oninput="
+                    updateContractSettingsPreview()
+                  "
+                />
+              </label>
+              <p
+                id="contractSeatHelp"
+                class="input-help"
+              ></p>
+            </div>
+
+            <div
+              class="contract-price-preview"
+            >
+              <div>
+                <span>現在の年額</span>
+                <strong
+                  id="contractCurrentAnnualPrice"
+                >
+                  ―
+                </strong>
+              </div>
+              <div>
+                <span>
+                  変更後の年額
+                </span>
+                <strong
+                  id="contractNextAnnualPrice"
+                >
+                  ―
+                </strong>
+              </div>
+            </div>
+
+            <p
+              id="contractSettingsError"
+              class="error-message"
+              aria-live="polite"
+            ></p>
+            <button
+              id="saveContractSettingsButton"
+              type="button"
+              class="btn primary full-width"
+            onclick="saveContractSettings()"
           >
-            キーワードを編集
-          </button>
+            契約内容を保存
+            </button>
+            <p class="input-help">
+              現在は試作版のため、この操作で実際の決済は行われません。
+            </p>
 
         </article>
 
@@ -1390,7 +1454,7 @@
         onclick="showAppPage('contractPage', this)"
       >
         <span>📄</span>
-        <small>契約</small>
+        <small>詳細</small>
       </button>
 
 
@@ -1400,7 +1464,7 @@
         onclick="showAppPage('keywordPage', this)"
       >
         <span>🔑</span>
-        <small>キーワード</small>
+        <small>契約内容</small>
       </button>
 
 

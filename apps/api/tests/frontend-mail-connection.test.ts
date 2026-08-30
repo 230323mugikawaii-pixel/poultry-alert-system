@@ -42,15 +42,17 @@ describe("frontend mail connection boundary", () => {
   });
 
   it("uses common server APIs without storing provider credentials", () => {
-    expect(script).toContain('beginMailOAuth("oauth/start", provider, null)');
+    expect(script).toMatch(
+      /beginMailOAuth\(\s*"oauth\/start",\s*provider,\s*null\s*\)/u
+    );
     expect(script).toContain(
       "/mail-connections/${encodeURIComponent(connectionId)}"
     );
     expect(script).toContain("/mail-connection/providers");
     expect(html).toContain('id="googleMailProviderButton"');
     expect(html).toContain('id="microsoftMailProviderButton"');
-    expect(script).toContain(
-      'mailProviderAvailability[provider] !==\n    "AVAILABLE"'
+    expect(script).toMatch(
+      /mailProviderAvailability\[\s*provider\s*\]\s*!==\s*"AVAILABLE"/u
     );
     expect(frontend).toContain(
       "接続を開始できませんでした。現在サービス設定を確認しています。"
