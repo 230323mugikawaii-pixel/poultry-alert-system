@@ -238,6 +238,7 @@ const ownerSetupKeywordDirty = {
 };
 let notificationMemberManagement = null;
 let notificationMemberManagementLoadState = "idle";
+let notificationMemberLoginInfo = null;
 let notificationMemberCredential = null;
 let pendingContractChange = null;
 let ownerAlerts = [];
@@ -4574,6 +4575,7 @@ function renderNotificationMemberManagement() {
   card.classList.toggle("hidden", !canManage);
   if (!canManage) {
     closeNotificationMemberCreateForm();
+    closeNotificationMemberLoginInfo();
     closeNotificationMemberCredential();
     return;
   }
@@ -4634,11 +4636,24 @@ function renderNotificationMemberManagement() {
   }
   list.replaceChildren();
   if (members.length === 0) {
+    closeNotificationMemberLoginInfo();
     const empty = document.createElement("p");
     empty.className = "input-help";
     empty.textContent = "参加者はまだ登録されていません。";
     list.appendChild(empty);
     return;
+  }
+  if (notificationMemberLoginInfo) {
+    const selectedMember = members.find(
+      (member) =>
+        member.id === notificationMemberLoginInfo.id &&
+        member.status === "ACTIVE"
+    );
+    if (selectedMember) {
+      renderNotificationMemberLoginInfo(selectedMember);
+    } else {
+      closeNotificationMemberLoginInfo();
+    }
   }
   members.forEach((member) => {
     const item = document.createElement("div");
@@ -4652,8 +4667,8 @@ function renderNotificationMemberManagement() {
       </div>
       <div class="notification-member-actions">
         ${active ? `
-          <button type="button" class="btn outline" onclick="resetNotificationMemberPassword('${member.id}')">
-            パスワードを再発行
+          <button type="button" class="btn outline" onclick="openNotificationMemberLoginInfo('${member.id}')">
+            ログイン情報を確認
           </button>
           <button type="button" class="btn outline" onclick="disableNotificationMember('${member.id}')">
             無効にする
@@ -4696,6 +4711,7 @@ function openNotificationMemberCreateForm() {
     return;
   }
   setText("notificationMemberActionError", "");
+  closeNotificationMemberLoginInfo();
   closeNotificationMemberCredential();
   document
     .getElementById("notificationMemberCreatePanel")
@@ -4778,20 +4794,109 @@ async function createNotificationMember() {
 }
 
 
-async function resetNotificationMemberPassword(memberId) {
+function openNotificationMemberLoginInfo(memberId) {
+  const member = notificationMemberManagement?.members?.find(
+    (candidate) =>
+      candidate.id === memberId && candidate.status === "ACTIVE"
+  );
+  if (!member) {
+    showNotificationMemberActionError(
+      "参加者の最新情報を確認できませんでした。契約画面を開き直してください。"
+    );
+    return;
+  }
+  closeNotificationMemberCreateForm();
+  closeNotificationMemberCredential();
+  renderNotificationMemberLoginInfo(member);
+}
+
+
+function renderNotificationMemberLoginInfo(member) {
+  const panel = document.getElementById(
+    "notificationMemberLoginInfoPanel"
+  );
+  if (!panel) return;
+  notificationMemberLoginInfo = {
+    id: String(member.id),
+    callNowId: String(member.callNowId),
+    displayName: String(member.displayName || "参加者")
+  };
+  setText(
+    "notificationMemberLoginInfoName",
+    notificationMemberLoginInfo.displayName
+  );
+  setText(
+    "notificationMemberLoginInfoId",
+    notificationMemberLoginInfo.callNowId
+  );
+  setText("notificationMemberLoginInfoError", "");
+  setText("notificationMemberLoginInfoCopyStatus", "");
+  panel.classList.remove("hidden");
+  panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+
+function closeNotificationMemberLoginInfo() {
+  notificationMemberLoginInfo = null;
+  setText("notificationMemberLoginInfoName", "");
+  setText("notificationMemberLoginInfoId", "");
+  setText("notificationMemberLoginInfoError", "");
+  setText("notificationMemberLoginInfoCopyStatus", "");
+  document
+    .getElementById("notificationMemberLoginInfoPanel")
+    ?.classList.add("hidden");
+}
+
+
+async function copyNotificationMemberLoginId() {
+  if (!notificationMemberLoginInfo) return;
+  try {
+    await writeTextToClipboard(notificationMemberLoginInfo.callNowId);
+    setText(
+      "notificationMemberLoginInfoCopyStatus",
+      "IDをコピーしました。"
+    );
+  } catch {
+    showNotificationMemberLoginInfoError(
+      "IDをコピーできませんでした。選択してコピーしてください。"
+    );
+  }
+}
+
+
+function showNotificationMemberLoginInfoError(message) {
+  setText("notificationMemberLoginInfoError", message);
+  document
+    .getElementById("notificationMemberLoginInfoError")
+    ?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+
+async function resetNotificationMemberPassword(
+  memberId = notificationMemberLoginInfo?.id
+) {
+  if (!memberId) return;
   const confirmed = await showAppConfirm(
-    "新しいパスワードを発行すると、現在のログインはすべて解除されます。続けますか？",
+    "現在のパスワードではログインできなくなり、ログイン中の端末もログアウトされます。",
     {
-      title: "パスワードの再発行",
-      confirmText: "再発行する",
+      title: "新しいパスワードを発行しますか？",
+      confirmText: "発行する",
       tone: "warning"
     }
   );
   if (!confirmed) return;
+  const showInlineError =
+    notificationMemberLoginInfo?.id === memberId;
   if (currentTeam?.role !== "OWNER") {
-    showNotificationMemberActionError("参加者の管理は管理者のみ行えます。");
+    const message = "参加者の管理は管理者のみ行えます。";
+    if (showInlineError) {
+      showNotificationMemberLoginInfoError(message);
+    } else {
+      showNotificationMemberActionError(message);
+    }
     return;
   }
+  setText("notificationMemberLoginInfoError", "");
   setText("notificationMemberActionError", "");
   try {
     const response = await fetch(
@@ -4811,13 +4916,20 @@ async function resetNotificationMemberPassword(memberId) {
           "パスワードを再発行できませんでした。"
       );
     }
+    closeNotificationMemberLoginInfo();
     showNotificationMemberCredential(payload, "reset");
   } catch (error) {
-    showNotificationMemberActionError(
-      error instanceof Error
+    const message =
+      error instanceof Error &&
+      error.message &&
+      !/(?:Failed to fetch|Load failed|NetworkError)/iu.test(error.message)
         ? error.message
-        : "パスワードを再発行できませんでした。"
-    );
+        : "新しいパスワードを発行できませんでした。通信状態を確認して、もう一度お試しください。";
+    if (showInlineError) {
+      showNotificationMemberLoginInfoError(message);
+    } else {
+      showNotificationMemberActionError(message);
+    }
   }
 }
 
@@ -4859,6 +4971,9 @@ async function disableNotificationMember(memberId) {
     notificationMemberManagementLoadState = "ready";
     currentTeam =
       (await fetchCurrentTeamContext()) || currentTeam;
+    if (notificationMemberLoginInfo?.id === memberId) {
+      closeNotificationMemberLoginInfo();
+    }
     renderNotificationMemberManagement();
   } catch (error) {
     showNotificationMemberActionError(
@@ -5002,6 +5117,7 @@ function showNotificationMemberCredential(
     !payload?.member?.callNowId ||
     !payload?.initialPassword
   ) return;
+  closeNotificationMemberLoginInfo();
   notificationMemberCredential = {
     callNowId: String(payload.member.callNowId),
     password: String(payload.initialPassword)
@@ -5009,7 +5125,7 @@ function showNotificationMemberCredential(
   setText(
     "notificationMemberCredentialTitle",
     mode === "reset"
-      ? "新しいパスワードを発行しました"
+      ? "新しいログイン情報を発行しました"
       : mode === "reactivate"
         ? "参加者を再び有効にしました"
         : "参加者情報を発行しました"
@@ -5658,6 +5774,7 @@ function showAppPage(
 
   if (pageId !== "contractPage") {
     closeNotificationMemberCreateForm();
+    closeNotificationMemberLoginInfo();
     closeNotificationMemberCredential();
   }
 
@@ -5811,6 +5928,7 @@ async function performLogout() {
   notificationMemberManagement = null;
   notificationMemberManagementLoadState = "idle";
   closeNotificationMemberCreateForm();
+  closeNotificationMemberLoginInfo();
   closeNotificationMemberCredential();
   ownerAlerts = [];
   userNotifications = [];
@@ -7211,6 +7329,12 @@ function showOnlyScreen(screenId) {
   ) {
     openNotificationMemberLogin();
     return;
+  }
+
+  if (screenId !== "appScreen") {
+    closeNotificationMemberCreateForm();
+    closeNotificationMemberLoginInfo();
+    closeNotificationMemberCredential();
   }
 
   const screenIds = [
