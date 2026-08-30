@@ -114,7 +114,7 @@ describe("system routes", () => {
       );
       expect(response.headers["access-control-allow-credentials"]).toBe("true");
       expect(response.headers["access-control-allow-methods"]).toBe(
-        "GET, HEAD, POST, DELETE, OPTIONS"
+        "GET, HEAD, POST, PUT, DELETE, OPTIONS"
       );
     }
   );

@@ -333,6 +333,7 @@ async function initializeApplication() {
       await fetchLoginIdentities();
     currentTeam =
       await fetchCurrentTeamContext();
+    hydrateContractKeywordsFromServer();
     await refreshUserNotifications();
     synchronizeContractFromCurrentTeam();
 
@@ -341,6 +342,7 @@ async function initializeApplication() {
         await fetchMailProviderAvailability();
       mailConnections =
         await fetchMailConnections();
+      hydrateContractKeywordsFromServer();
       if (currentTeam?.role === "OWNER") {
         await refreshNotificationMemberManagement();
         ownerAlerts =
@@ -887,6 +889,20 @@ function parseTeamContext(team) {
   return {
     id: team.id,
     role: team.role,
+    keywords: Array.isArray(
+      team.keywords
+    )
+      ? team.keywords
+          .filter(
+            (keyword) =>
+              typeof keyword ===
+              "string"
+          )
+          .map((keyword) =>
+            keyword.trim()
+          )
+          .filter(Boolean)
+      : [],
     teamCode:
       typeof team.teamCode === "string"
         ? team.teamCode
@@ -1007,6 +1023,19 @@ function synchronizeContractFromCurrentTeam() {
 }
 
 
+function hydrateContractKeywordsFromServer() {
+  if (
+    !currentTeam ||
+    !Array.isArray(currentTeam.keywords)
+  ) {
+    return;
+  }
+
+  keywords = [...currentTeam.keywords];
+  ownerSetupSeatCount =
+    currentTeam.seats?.seatCount ?? 1;
+}
+
 async function fetchMailConnections() {
   if (currentTeam?.role !== "OWNER") {
     return [];
@@ -1046,6 +1075,24 @@ async function fetchMailConnections() {
             typeof connection.email === "string" &&
             (connection.provider === "GOOGLE" ||
               connection.provider === "MICROSOFT")
+          )
+          .map((connection) => ({
+            ...connection,
+            keywords: Array.isArray(
+              connection.keywords
+            )
+              ? connection.keywords
+                  .filter(
+                    (keyword) =>
+                      typeof keyword ===
+                      "string"
+                  )
+                  .map((keyword) =>
+                    keyword.trim()
+                  )
+                  .filter(Boolean)
+              : []
+          })
         )
       : [];
   } catch (error) {
@@ -1693,8 +1740,7 @@ async function fetchOwnerAlerts() {
     return [];
   }
   return fetchAlerts(
-    `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/alerts`,
-  );
+    `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/alerts`);
 }
 
 async function fetchNotificationMemberAlerts() {
@@ -1710,8 +1756,7 @@ async function fetchAlerts(path) {
       method: "GET",
       credentials: "include",
       headers: { Accept: "application/json" },
-      cache: "no-store",
-    });
+      cache: "no-store"});
     if (!response.ok) {
       return [];
     }
@@ -1739,8 +1784,7 @@ function startOwnerAlertStream() {
   }
   startAlertEventStream(
     `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/alerts/events`,
-    "OWNER",
-  );
+    "OWNER");
 }
 
 function startNotificationMemberAlertStream() {
@@ -1750,8 +1794,7 @@ function startNotificationMemberAlertStream() {
   }
   startAlertEventStream(
     "/api/v1/notification-members/alerts/events",
-    "NOTIFICATION_MEMBER",
-  );
+    "NOTIFICATION_MEMBER");
 }
 
 function startAlertEventStream(path, audience) {
@@ -1761,8 +1804,7 @@ function startAlertEventStream(path, audience) {
     return;
   }
   const stream = new EventSource(apiUrl(path), {
-    withCredentials: true,
-  });
+    withCredentials: true});
   alertEventSource = stream;
   setAlertStreamStatus(audience, "接続中", false);
   stream.addEventListener("alerts", (event) => {
@@ -1818,8 +1860,7 @@ function applyAlertUpdate(alerts, audience) {
   renderAlertList(
     audience === "OWNER" ? "ownerAlertList" : "notificationMemberAlertList",
     alerts,
-    audience,
-  );
+    audience);
   const current = currentAlarmAlertContext
     ? alerts.find((alert) => alert.id === currentAlarmAlertContext.alertId)
     : null;
@@ -1827,14 +1868,12 @@ function applyAlertUpdate(alerts, audience) {
     closeAlarmNotification();
   }
   const nextAlert = alerts.find(
-    (alert) => alert.status === "ACTIVE" && !notifiedAlertIds.has(alert.id),
-  );
+    (alert) => alert.status === "ACTIVE" && !notifiedAlertIds.has(alert.id));
   if (nextAlert) {
     notifiedAlertIds.add(nextAlert.id);
     showAlarmNotification(nextAlert.matchedKeyword, nextAlert.detectedAt, {
       alertId: nextAlert.id,
-      audience,
-    });
+      audience});
   }
 }
 
@@ -1888,8 +1927,7 @@ async function acknowledgeAlert(alertId, audience) {
     const response = await fetch(apiUrl(path), {
       method: "POST",
       credentials: "include",
-      headers: { Accept: "application/json" },
-    });
+      headers: { Accept: "application/json" }});
     if (!response.ok) throw new Error("alert_acknowledge_failed");
     const result = await response.json();
     if (audience === "OWNER") {
@@ -1904,14 +1942,12 @@ async function acknowledgeAlert(alertId, audience) {
         (result.alert?.acknowledgedBy === "OWNER" ? "代表者" : "通知メンバー");
       await showAppAlert(
         `すでに${acknowledgedByName}さんが対応を開始しています。`,
-        { title: "対応開始済み" },
-      );
+        { title: "対応開始済み" });
     }
   } catch {
     await showAppAlert(
       "対応開始を記録できませんでした。通信状態を確認して、もう一度お試しください。",
-      { title: "対応開始エラー" },
-    );
+      { title: "対応開始エラー" });
   }
 }
 
@@ -1920,21 +1956,17 @@ async function resolveAlert(alertId) {
   try {
     const response = await fetch(
       apiUrl(
-        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/alerts/${encodeURIComponent(alertId)}/resolve`,
-      ),
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/alerts/${encodeURIComponent(alertId)}/resolve`),
       {
         method: "POST",
         credentials: "include",
-        headers: { Accept: "application/json" },
-      },
-    );
+        headers: { Accept: "application/json" }});
     if (!response.ok) throw new Error("alert_resolve_failed");
     await refreshOwnerAlerts();
   } catch {
     await showAppAlert(
       "通知を対応完了にできませんでした。もう一度お試しください。",
-      { title: "通知の更新エラー" },
-    );
+      { title: "通知の更新エラー" });
   }
 }
 
@@ -2915,12 +2947,14 @@ ${formatYen(totalPrice)}
         "契約情報を確認できませんでした。"
       );
     }
+    hydrateContractKeywordsFromServer();
     synchronizeContractFromCurrentTeam();
     saveData();
     await refreshNotificationMemberManagement();
     mailProviderAvailability =
       await fetchMailProviderAvailability();
     mailConnections = await fetchMailConnections();
+    hydrateContractKeywordsFromServer();
     ownerAlerts = await fetchOwnerAlerts();
     openApp();
   } catch (error) {
@@ -3742,6 +3776,455 @@ function renderContractInformation() {
 }
 
 
+function renderContractSettings() {
+  const container =
+    document.getElementById(
+      "contractSettingsProviders"
+    );
+  const seatInput =
+    document.getElementById(
+      "contractSeatCount"
+    );
+  const saveButton =
+    document.getElementById(
+      "saveContractSettingsButton"
+    );
+  if (
+    !container ||
+    !seatInput ||
+    !saveButton
+  )
+    return;
+
+  container.replaceChildren();
+  const canManage =
+    currentTeam?.role === "OWNER" &&
+    hasActiveSubscription();
+  if (mailConnections.length === 0) {
+    const empty =
+      document.createElement("p");
+    empty.className =
+      "contract-provider-empty";
+    empty.textContent =
+      "監視アカウントが設定されていません。監視アカウントを追加してください。";
+    container.appendChild(empty);
+  }
+
+  mailConnections.forEach(
+    (connection) => {
+      const card =
+        document.createElement(
+          "section"
+        );
+      card.className =
+        "contract-provider-card";
+      card.dataset.contractConnectionId =
+        connection.id;
+
+      const heading =
+        document.createElement("div");
+      heading.className =
+        "contract-provider-heading";
+      const title =
+        document.createElement("div");
+      const providerName =
+        document.createElement("h3");
+      providerName.textContent =
+        mailProviderLabel(
+          connection.provider
+        );
+      const email =
+        document.createElement("p");
+      email.textContent =
+        connection.email;
+      title.append(providerName, email);
+      const status =
+        document.createElement("span");
+      status.className =
+        "contract-provider-status";
+      status.textContent =
+        connection.connectionStatus ===
+        "ACTIVE"
+          ? "監視中"
+          : connection.connectionStatus ===
+              "PAUSED"
+            ? "停止中"
+            : "再設定が必要";
+      heading.append(title, status);
+
+      const label =
+        document.createElement("h4");
+      label.textContent =
+        "通知キーワード";
+      const inputs =
+        document.createElement("div");
+      inputs.className =
+        "contract-keyword-inputs";
+      const values =
+        connection.keywords.length > 0
+          ? connection.keywords
+          : [""];
+      values.forEach((keyword) => {
+        inputs.appendChild(
+          createContractKeywordRow(
+            connection.id,
+            keyword,
+            canManage
+          )
+        );
+      });
+      card.append(
+        heading,
+        label,
+        inputs
+      );
+
+      const addButton =
+        document.createElement(
+          "button"
+        );
+      addButton.type = "button";
+      addButton.className =
+        "btn outline contract-keyword-add";
+      addButton.textContent =
+        "キーワードを追加";
+      addButton.disabled = !canManage;
+      addButton.addEventListener(
+        "click",
+        () => {
+          addContractKeyword(
+            connection.id
+          );
+        }
+      );
+      card.appendChild(addButton);
+      container.appendChild(card);
+    }
+  );
+
+  seatInput.value = String(
+    currentTeam?.seats?.seatCount ?? 1
+  );
+  seatInput.disabled = !canManage;
+  saveButton.disabled =
+    !canManage ||
+    mailConnections.length === 0;
+  setText(
+    "contractSeatHelp",
+    `現在の利用人数は${1 + (currentTeam?.seats?.activeMemberCount ?? 0)}人です。これより少ない人数には変更できません。`
+  );
+  setText(
+    "contractCurrentAnnualPrice",
+    formatYen(
+      currentTeam?.subscription
+        ?.currentTermAmountYen ?? 0
+    )
+  );
+  setText("contractSettingsError", "");
+  updateContractSettingsPreview();
+}
+
+function createContractKeywordRow(
+  connectionId,
+  keyword,
+  enabled
+) {
+  const row =
+    document.createElement("div");
+  row.className =
+    "contract-keyword-row";
+  const input =
+    document.createElement("input");
+  input.type = "text";
+  input.maxLength = 100;
+  input.value = keyword;
+  input.placeholder =
+    "例：停電のお知らせ";
+  input.disabled = !enabled;
+  input.setAttribute(
+    "aria-label",
+    "通知キーワード"
+  );
+  input.addEventListener(
+    "input",
+    updateContractSettingsPreview
+  );
+  const remove =
+    document.createElement("button");
+  remove.type = "button";
+  remove.className =
+    "contract-keyword-remove";
+  remove.textContent = "削除";
+  remove.disabled = !enabled;
+  remove.addEventListener(
+    "click",
+    () => {
+      row.remove();
+      const card =
+        document.querySelector(
+          `[data-contract-connection-id="${connectionId}"]`
+        );
+      if (
+        card &&
+        card.querySelectorAll(
+          ".contract-keyword-row"
+        ).length === 0
+      ) {
+        card
+          .querySelector(
+            ".contract-keyword-inputs"
+          )
+          ?.appendChild(
+            createContractKeywordRow(
+              connectionId,
+              "",
+              enabled
+            )
+          );
+      }
+      updateContractSettingsPreview();
+    }
+  );
+  row.append(input, remove);
+  return row;
+}
+
+function addContractKeyword(
+  connectionId
+) {
+  const card = document.querySelector(
+    `[data-contract-connection-id="${connectionId}"]`
+  );
+  const inputs = card?.querySelector(
+    ".contract-keyword-inputs"
+  );
+  if (!inputs) return;
+  const row = createContractKeywordRow(
+    connectionId,
+    "",
+    true
+  );
+  inputs.appendChild(row);
+  row.querySelector("input")?.focus();
+  updateContractSettingsPreview();
+}
+
+function readContractSettingsForm(
+  showError = false
+) {
+  const seatCount = Number(
+    document.getElementById(
+      "contractSeatCount"
+    )?.value
+  );
+  const minimumSeatCount =
+    1 +
+    (currentTeam?.seats
+      ?.activeMemberCount ?? 0);
+  if (
+    !Number.isInteger(seatCount) ||
+    seatCount < minimumSeatCount
+  ) {
+    if (showError) {
+      setText(
+        "contractSettingsError",
+        `合計利用人数は現在利用中の${minimumSeatCount}人以上で入力してください。`
+      );
+    }
+    return null;
+  }
+
+  const connections = [];
+  for (const card of document.querySelectorAll(
+    "[data-contract-connection-id]"
+  )) {
+    const connectionId =
+      card.dataset.contractConnectionId;
+    const values = [
+      ...card.querySelectorAll(
+        ".contract-keyword-row input"
+      )
+    ].map((input) => input.value);
+    const validation =
+      keywordPolicy.validateKeywordList(
+        values
+      );
+    if (
+      !connectionId ||
+      !validation.valid ||
+      validation.keywords.length === 0
+    ) {
+      if (showError) {
+        setText(
+          "contractSettingsError",
+          validation.message ||
+            "各監視アカウントに通知キーワードを1件以上設定してください。"
+        );
+      }
+      return null;
+    }
+    connections.push({
+      connectionId,
+      keywords: validation.keywords
+    });
+  }
+  if (connections.length === 0) {
+    if (showError) {
+      setText(
+        "contractSettingsError",
+        "監視アカウントを1件以上設定してください。"
+      );
+    }
+    return null;
+  }
+  const billingKeywords =
+    mergeContractBillingKeywords(
+      connections.map(
+        (connection) =>
+          connection.keywords
+      )
+    );
+  return {
+    seatCount,
+    connections,
+    billingKeywords
+  };
+}
+
+function mergeContractBillingKeywords(
+  keywordSets
+) {
+  const merged = [];
+  const normalized = new Set();
+  keywordSets
+    .flat()
+    .forEach((keyword) => {
+      const key = keyword
+        .normalize("NFKC")
+        .toLocaleLowerCase("ja-JP");
+      if (normalized.has(key)) return;
+      normalized.add(key);
+      merged.push(keyword);
+    });
+  return merged;
+}
+
+function calculateContractSettingsPrice(
+  settings
+) {
+  return (
+    keywordPolicy.calculateAnnualPriceYen(
+      settings.billingKeywords.length
+    ) +
+    Math.max(
+      settings.seatCount - 1,
+      0
+    ) *
+      EXTRA_USER_PRICE
+  );
+}
+
+function updateContractSettingsPreview() {
+  const settings =
+    readContractSettingsForm(false);
+  setText(
+    "contractNextAnnualPrice",
+    settings
+      ? formatYen(
+          calculateContractSettingsPrice(
+            settings
+          )
+        )
+      : "―"
+  );
+}
+
+async function saveContractSettings() {
+  if (currentTeam?.role !== "OWNER")
+    return;
+  setText("contractSettingsError", "");
+  const settings =
+    readContractSettingsForm(true);
+  if (!settings) return;
+  const nextPrice =
+    calculateContractSettingsPrice(
+      settings
+    );
+  const confirmed =
+    await showAppConfirm(
+      `変更後の年額は${formatYen(nextPrice)}です。契約内容を保存しますか？\n\n現在は試作版のため、実際の決済は行われません。`,
+      {
+        title: "契約内容を変更する",
+        confirmText: "変更を保存",
+        tone: "warning"
+      }
+    );
+  if (!confirmed) return;
+  const button =
+    document.getElementById(
+      "saveContractSettingsButton"
+    );
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/contract-settings`
+      ),
+      {
+        method: "PUT",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type":
+            "application/json"
+        },
+        body: JSON.stringify({
+          seatCount: settings.seatCount,
+          connections:
+            settings.connections
+        })
+      }
+    );
+    const payload = await response
+      .json()
+      .catch(() => null);
+    if (!response.ok) {
+      throw new Error(
+        payload?.error?.message ||
+          "契約内容を保存できませんでした。"
+      );
+    }
+    const updatedTeam =
+      parseTeamContext(payload?.team);
+    if (!updatedTeam) {
+      throw new Error(
+        "契約内容を確認できませんでした。"
+      );
+    }
+    currentTeam = updatedTeam;
+    mailConnections =
+      await fetchMailConnections();
+    hydrateContractKeywordsFromServer();
+    synchronizeContractFromCurrentTeam();
+    renderTestKeywordCards();
+    renderContractInformation();
+    renderContractSettings();
+    await refreshNotificationMemberManagement();
+    await showAppAlert(
+      "契約内容を保存しました。"
+    );
+  } catch (error) {
+    setText(
+      "contractSettingsError",
+      error instanceof Error
+        ? error.message
+        : "契約内容を保存できませんでした。"
+    );
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function renderNotificationMemberManagement() {
   const card = document.getElementById(
     "notificationMemberManagementCard"
@@ -3856,7 +4339,15 @@ function renderNotificationMemberManagement() {
           <button type="button" class="btn outline" onclick="disableNotificationMember('${member.id}')">
             無効にする
           </button>
-        ` : ""}
+        ` : `
+          <button type="button"class="btn outline" onclick="reactivateNotificationMember('${member.id}')">
+            再び有効にする
+          </button>
+          <button type="button" class="btn outline danger-outline" onclick="deleteNotificationMember('${member.id}')">
+            削除する
+          </button>
+        `
+        }
       </div>
     `;
     list.appendChild(item);
@@ -4047,6 +4538,121 @@ async function disableNotificationMember(memberId) {
 }
 
 
+async function reactivateNotificationMember(
+  memberId
+) {
+  const confirmed =
+    await showAppConfirm(
+      "この参加者を再び有効にしますか？新しいパスワードを発行し、以前のパスワードは利用できないままになります。",
+      {
+        title: "参加者を再び有効にする",
+        confirmText: "再び有効にする",
+        tone: "warning"
+      }
+    );
+  if (
+    !confirmed ||
+    currentTeam?.role !== "OWNER"
+  )
+    return;
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/notification-members/${encodeURIComponent(memberId)}/reactivate`
+      ),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/json"
+        }
+      }
+    );
+    const payload = await response
+      .json()
+      .catch(() => null);
+    if (!response.ok) {
+      throw new Error(
+        payload?.error?.message ||
+          "参加者を再有効化できませんでした。"
+      );
+    }
+    await refreshNotificationMemberManagement();
+    currentTeam =
+      (await fetchCurrentTeamContext()) ||
+      currentTeam;
+    renderNotificationMemberManagement();
+    showNotificationMemberCredential(
+      payload,
+      "reactivate"
+    );
+  } catch (error) {
+    await showAppAlert(
+      error instanceof Error
+        ? error.message
+        : "参加者を再有効化できませんでした。",
+      {
+        title: "参加者の再有効化エラー"
+      }
+    );
+  }
+}
+
+async function deleteNotificationMember(
+  memberId
+) {
+  const confirmed =
+    await showAppConfirm(
+      "この参加者を削除しますか？参加者IDとパスワードは利用できなくなります。過去の通知履歴は保持されます。",
+      {
+        title: "参加者を削除する",
+        confirmText: "削除する",
+        tone: "danger"
+      }
+    );
+  if (
+    !confirmed ||
+    currentTeam?.role !== "OWNER"
+  )
+    return;
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/notification-members/${encodeURIComponent(memberId)}/record`
+      ),
+      {
+        method: "DELETE",
+        credentials: "include",
+        headers: {
+          Accept: "application/json"
+        }
+      }
+    );
+    const payload = await response
+      .json()
+      .catch(() => null);
+    if (!response.ok) {
+      throw new Error(
+        payload?.error?.message ||
+          "参加者を削除できませんでした。"
+      );
+    }
+    notificationMemberManagement =
+      payload;
+    notificationMemberManagementLoadState =
+      "ready";
+    closeNotificationMemberCredential();
+    renderNotificationMemberManagement();
+  } catch (error) {
+    await showAppAlert(
+      error instanceof Error
+        ? error.message
+        : "参加者を削除できませんでした。",
+      { title: "参加者の削除エラー" }
+    );
+  }
+}
+
 function showNotificationMemberCredential(
   payload,
   mode = "create"
@@ -4067,17 +4673,19 @@ function showNotificationMemberCredential(
     "notificationMemberCredentialTitle",
     mode === "reset"
       ? "新しいパスワードを発行しました"
-      : "参加者情報を発行しました"
+      : mode === "reactivate"
+        ? "参加者を再び有効にしました"
+        : "参加者情報を発行しました"
   );
   setText(
     "notificationMemberCredentialPasswordLabel",
-    mode === "reset"
+    mode !== "create"
       ? "新しいパスワード"
       : "初期パスワード"
   );
   setText(
     "notificationMemberCredentialWarning",
-    `${mode === "reset" ? "新しい" : "初期"}パスワードはこの画面を閉じると再表示できません。必要な場合は参加者へ共有するか、安全な場所に保存してください。`
+    `${mode !== "create" ? "新しい" : "初期"}パスワードはこの画面を閉じると再表示できません。必要な場合は参加者へ共有するか、安全な場所に保存してください。`
   );
   setText(
     "notificationMemberCredentialId",
@@ -4283,6 +4891,8 @@ function returnToContractPage() {
   renderTestKeywordCards();
 
   renderContractInformation();
+
+  renderContractSettings();
 
   showOnlyScreen(
     "appScreen"
@@ -4699,6 +5309,10 @@ function showAppPage(
     void refreshNotificationMemberManagement();
   }
 
+  if (pageId === "keywordPage") {
+    renderContractSettings();
+  }
+
   document
     .querySelectorAll(
       ".app-page"
@@ -5096,7 +5710,7 @@ function openAppDialog(options) {
     "hidden"
   );
 
-  return new Promise(resolve => {
+  return new Promise((resolve ) => {
     appDialogResolver =
       resolve;
 
@@ -5372,9 +5986,8 @@ async function unlockAlarmAudio() {
       context.currentTime + 0.01
     );
 
-    return (
-      context.state === "running"
-    );
+    return context.state === "running"
+    ;
   } catch (error) {
     console.warn(
       "通知音の再生準備に失敗しました。",
@@ -5442,7 +6055,7 @@ function scheduleAlarmTone(
     () => {
       alarmActiveNodes =
         alarmActiveNodes.filter(
-          node =>
+          (node ) =>
             node !== oscillator
         );
 
@@ -5593,7 +6206,7 @@ function stopAlarmSound() {
   }
 
   alarmActiveNodes.forEach(
-    oscillator => {
+    (oscillator ) => {
       try {
         oscillator.stop();
       } catch (error) {
@@ -5787,6 +6400,33 @@ function renderTestKeywordCards() {
   }
 
   container.innerHTML = "";
+
+  if (keywords.length === 0) {
+    const empty =
+      document.createElement("article");
+    empty.className =
+      "card test-empty-card";
+    const message =
+      document.createElement("p");
+    message.textContent =
+      "通知キーワードが設定されていません。";
+    const button =
+      document.createElement("button");
+    button.type = "button";
+    button.className = "btn primary";
+    button.textContent =
+      "契約内容を設定する";
+    button.addEventListener(
+      "click",
+      () => {
+        showAppPage("keywordPage");
+      }
+    );
+    empty.append(message, button);
+    container.appendChild(empty);
+    updateContractStatusUI();
+    return;
+  }
 
   keywords.forEach((keyword) => {
     const card =

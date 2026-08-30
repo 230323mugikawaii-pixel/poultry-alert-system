@@ -56,6 +56,7 @@ export class MemoryTeamRepository implements TeamRepository {
       teamName: input.name,
       membershipId,
       role: "OWNER",
+      keywords: [...input.keywords],
       seatSummary: calculateSeatSummary(input.seatLimit, 0),
       pendingSeatLimit: null,
       subscriptionStatus: "ACTIVE",
@@ -132,6 +133,37 @@ export class MemoryTeamRepository implements TeamRepository {
 
   public async listActiveMembers(): Promise<readonly TeamMemberRecord[]> {
     return this.members;
+  }
+
+  public async updateContractSettings(input: {
+    readonly teamId: string;
+    readonly actorUserId: string;
+    readonly seatLimit: number;
+    readonly keywords: readonly string[];
+    readonly currentTermAmountYen: number;
+  }): Promise<TeamContextRecord> {
+    if (!this.context || this.context.teamId !== input.teamId) {
+      throw new AppError("TEAM_NOT_FOUND", "missing", 404);
+    }
+    const requester = this.members.find(
+      ({ userId }) => userId === input.actorUserId
+    );
+    if (requester?.role !== "OWNER") {
+      throw new AppError("OWNER_REQUIRED", "owner only", 403);
+    }
+    const activeMemberCount = this.members.filter(
+      ({ role }) => role === "MEMBER"
+    ).length;
+    if (input.seatLimit < activeMemberCount) {
+      throw new AppError("SEAT_LIMIT_BELOW_OCCUPANCY", "occupied", 409);
+    }
+    this.context = {
+      ...this.context,
+      keywords: [...input.keywords],
+      currentTermAmountYen: input.currentTermAmountYen,
+      seatSummary: calculateSeatSummary(input.seatLimit, activeMemberCount)
+    };
+    return this.context;
   }
 
   public async requestSeatLimitChange(input: {

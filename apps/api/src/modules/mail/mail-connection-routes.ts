@@ -63,6 +63,7 @@ const ConnectionResponse = Type.Object({
     Type.Literal("REVOKED"),
     Type.Literal("ERROR")
   ]),
+  keywords: Type.Array(Type.String({ minLength: 1, maxLength: 100 })),
   grantedScopes: Type.Array(Type.String()),
   lastVerifiedAt: Type.Union([Type.String(), Type.Null()]),
   lastSyncAt: Type.Union([Type.String(), Type.Null()]),
@@ -586,6 +587,7 @@ function serializeConnection(connection: MailConnectionRecord) {
     email: connection.email,
     authorizationStatus: connection.authorizationStatus,
     connectionStatus: connection.connectionStatus,
+    keywords: [...connection.keywords],
     grantedScopes: [...connection.grantedScopes],
     lastVerifiedAt: connection.lastVerifiedAt?.toISOString() ?? null,
     lastSyncAt: connection.lastSyncAt?.toISOString() ?? null,

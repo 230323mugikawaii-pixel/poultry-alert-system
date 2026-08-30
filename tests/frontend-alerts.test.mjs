@@ -20,7 +20,10 @@ test("owner and notification member alert views use authenticated APIs", () => {
 });
 
 test("in-app alert updates use credentialed SSE and explicit acknowledgement", () => {
-  assert.match(appSource, /new EventSource\(apiUrl\(path\),\s*\{\s*withCredentials:\s*true/);
+  assert.match(
+    appSource,
+    /new EventSource\(\s*apiUrl\(path\),\s*\{\s*withCredentials:\s*true/
+  );
   assert.match(appSource, /\/alerts\/\$\{encodeURIComponent\(alertId\)\}\/acknowledge/);
   assert.match(appSource, /currentAlarmAlertContext/);
   assert.match(appSource, /void acknowledgeAlert\(/);

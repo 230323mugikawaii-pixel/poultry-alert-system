@@ -100,7 +100,10 @@ export class PrismaTeamRepository implements TeamRepository {
                   choice.status === "AUTHORIZED" && choice.mailAuthorizationId
               );
               if (
-                authorizedChoices.some((choice) => !choice.keywordsConfirmedAt)
+                authorizedChoices.some(
+                  (choice) =>
+                    !choice.keywordsConfirmedAt || choice.keywords.length === 0
+                )
               ) {
                 throw new AppError(
                   "OWNER_ONBOARDING_KEYWORDS_INCOMPLETE",
@@ -257,7 +260,12 @@ export class PrismaTeamRepository implements TeamRepository {
         team: { status: "ACTIVE" }
       },
       include: {
-        team: { include: { subscription: true } }
+        team: {
+          include: {
+            subscription: true,
+            keywords: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }
+          }
+        }
       }
     });
     if (!membership?.team.subscription) {
@@ -293,6 +301,165 @@ export class PrismaTeamRepository implements TeamRepository {
       role: membership.role,
       joinedAt: membership.joinedAt
     }));
+  }
+
+  public updateContractSettings(input: {
+    readonly teamId: string;
+    readonly actorUserId: string;
+    readonly seatLimit: number;
+    readonly keywords: readonly string[];
+    readonly connectionKeywords: readonly {
+      readonly connectionId: string;
+      readonly keywords: readonly string[];
+    }[];
+    readonly currentTermAmountYen: number;
+    readonly requestId: string | null;
+    readonly now: Date;
+  }): Promise<TeamContextRecord> {
+    return retrySerializableTransaction(
+      () =>
+        this.database.$transaction(
+          async (transaction) => {
+            const membership = await transaction.teamMembership.findFirst({
+              where: {
+                teamId: input.teamId,
+                userId: input.actorUserId,
+                role: "OWNER",
+                status: "ACTIVE",
+                team: { status: "ACTIVE" }
+              }
+            });
+            if (!membership) {
+              throw new AppError(
+                "OWNER_REQUIRED",
+                "この操作はチームの代表者だけが実行できます。",
+                403
+              );
+            }
+            const subscriptionIdentity =
+              await transaction.subscription.findUnique({
+                where: { teamId: input.teamId },
+                select: { id: true }
+              });
+            if (!subscriptionIdentity) {
+              throw new AppError(
+                "SUBSCRIPTION_NOT_FOUND",
+                "契約が見つかりません。",
+                404
+              );
+            }
+            await transaction.$queryRaw(
+              Prisma.sql`SELECT id FROM subscriptions WHERE id = ${subscriptionIdentity.id}::uuid FOR UPDATE`
+            );
+            const subscription =
+              await transaction.subscription.findUniqueOrThrow({
+                where: { id: subscriptionIdentity.id }
+              });
+            if (subscription.pendingSeatLimit !== null) {
+              throw new AppError(
+                "SUBSCRIPTION_CHANGE_PENDING",
+                "利用人数の変更処理中です。完了後にもう一度お試しください。",
+                409
+              );
+            }
+            const occupied = await countOccupiedAdditionalSeats(
+              transaction,
+              input.teamId
+            );
+            if (input.seatLimit < occupied) {
+              throw new AppError(
+                "SEAT_LIMIT_BELOW_OCCUPANCY",
+                "現在利用中の人数より少ない契約人数には変更できません。",
+                409
+              );
+            }
+            const connections = await transaction.mailConnection.findMany({
+              where: { teamId: input.teamId, status: { not: "REVOKED" } },
+              select: { id: true }
+            });
+            const expectedIds = new Set(
+              connections.map((connection) => connection.id)
+            );
+            if (
+              expectedIds.size !== input.connectionKeywords.length ||
+              input.connectionKeywords.some(
+                (connection) => !expectedIds.has(connection.connectionId)
+              )
+            ) {
+              throw new AppError(
+                "MAIL_CONNECTIONS_CHANGED",
+                "監視アカウントの状態が変更されました。画面を更新してください。",
+                409
+              );
+            }
+            for (const connection of input.connectionKeywords) {
+              await transaction.mailConnection.update({
+                where: { id: connection.connectionId },
+                data: { keywords: [...connection.keywords] }
+              });
+            }
+            await transaction.teamKeyword.deleteMany({
+              where: { teamId: input.teamId }
+            });
+            if (input.keywords.length > 0) {
+              await transaction.teamKeyword.createMany({
+                data: input.keywords.map((keyword, sortOrder) => ({
+                  teamId: input.teamId,
+                  keyword,
+                  normalized: keyword.normalize("NFKC").toLowerCase(),
+                  sortOrder
+                }))
+              });
+            }
+            const updatedSubscription = await transaction.subscription.update({
+              where: { id: subscription.id },
+              data: {
+                seatLimit: input.seatLimit,
+                currentTermAmountYen: input.currentTermAmountYen
+              }
+            });
+            await transaction.auditEvent.create({
+              data: {
+                teamId: input.teamId,
+                actorUserId: input.actorUserId,
+                action: "CONTRACT_SETTINGS_UPDATED",
+                targetType: "Subscription",
+                targetId: subscription.id,
+                requestId: input.requestId,
+                metadata: {
+                  previousSeatLimit: subscription.seatLimit,
+                  seatLimit: input.seatLimit,
+                  previousAnnualAmountYen: subscription.currentTermAmountYen,
+                  annualAmountYen: input.currentTermAmountYen,
+                  keywordCount: input.keywords.length,
+                  mailConnectionCount: input.connectionKeywords.length
+                }
+              }
+            });
+            const team = await transaction.team.findUniqueOrThrow({
+              where: { id: input.teamId },
+              include: {
+                keywords: {
+                  orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
+                }
+              }
+            });
+            return mapTeamContext({
+              team,
+              membership,
+              subscription: updatedSubscription,
+              activeMemberCount: occupied
+            });
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
+      () =>
+        new AppError(
+          "CONTRACT_SETTINGS_CONFLICT",
+          "契約内容の更新が競合しました。最新の状態を確認してください。",
+          409
+        )
+    );
   }
 
   public async requestSeatLimitChange(input: {
@@ -739,7 +906,14 @@ async function findCurrentTeam(
       team: { status: "ACTIVE" }
     },
     include: {
-      team: { include: { subscription: true } }
+      team: {
+        include: {
+          subscription: true,
+          keywords: {
+            orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
+          }
+        }
+      }
     },
     orderBy: { joinedAt: "asc" }
   });
@@ -784,9 +958,10 @@ async function createTeamInTransaction(
         }
       },
       keywords: {
-        create: input.keywords.map((keyword) => ({
+        create: input.keywords.map((keyword, sortOrder) => ({
           keyword,
-          normalized: keyword.normalize("NFKC").toLowerCase()
+          normalized: keyword.normalize("NFKC").toLowerCase(),
+          sortOrder
         }))
       }
     },
@@ -794,7 +969,8 @@ async function createTeamInTransaction(
       memberships: {
         where: { userId: input.ownerUserId, status: "ACTIVE" }
       },
-      subscription: true
+      subscription: true,
+      keywords: { orderBy: { sortOrder: "asc" } }
     }
   });
 
@@ -845,6 +1021,7 @@ function mapTeamContext(input: {
     readonly id: string;
     readonly publicCode: string;
     readonly name: string | null;
+    readonly keywords: readonly { readonly keyword: string }[];
   };
   readonly membership: {
     readonly id: string;
@@ -866,6 +1043,7 @@ function mapTeamContext(input: {
     teamName: input.team.name,
     membershipId: input.membership.id,
     role: input.membership.role,
+    keywords: input.team.keywords.map(({ keyword }) => keyword),
     seatSummary: calculateSeatSummary(
       input.subscription.seatLimit,
       input.activeMemberCount

@@ -246,4 +246,56 @@ describe("TeamService", () => {
       fixture.service.requestSeatLimitChange(memberId, 6)
     ).rejects.toMatchObject({ code: "OWNER_REQUIRED" });
   });
+
+  it("updates provider keywords and prices normalized cross-provider duplicates once", async () => {
+    const fixture = await createFixture(5);
+    const updated = await fixture.service.updateContractSettings({
+      userId: ownerUserId,
+      teamId: fixture.team.teamId,
+      seatCount: 100,
+      connections: [
+        {
+          connectionId: randomUUID(),
+          keywords: ["停電", "警報"]
+        },
+        {
+          connectionId: randomUUID(),
+          keywords: ["警報", "サーバー障害"]
+        }
+      ]
+    });
+
+    expect(updated.keywords).toEqual(["停電", "警報", "サーバー障害"]);
+    expect(updated.seatSummary.totalUserLimit).toBe(100);
+    expect(updated.currentTermAmountYen).toBe(15_900);
+  });
+
+  it("requires at least one keyword for every monitoring connection", async () => {
+    const fixture = await createFixture(1);
+    await expect(
+      fixture.service.updateContractSettings({
+        userId: ownerUserId,
+        teamId: fixture.team.teamId,
+        seatCount: 1,
+        connections: [{ connectionId: randomUUID(), keywords: [] }]
+      })
+    ).rejects.toMatchObject({ code: "MAIL_KEYWORDS_REQUIRED" });
+  });
+
+  it("rejects a contract seat count below active occupancy", async () => {
+    const fixture = await createFixture(3);
+    fixture.repository.addMember();
+    fixture.repository.addMember();
+    await expect(
+      fixture.service.updateContractSettings({
+        userId: ownerUserId,
+        teamId: fixture.team.teamId,
+        seatCount: 2,
+        connections: [{ connectionId: randomUUID(), keywords: ["停電"] }]
+      })
+    ).rejects.toMatchObject({
+      code: "SEAT_LIMIT_BELOW_OCCUPANCY",
+      statusCode: 409
+    });
+  });
 });

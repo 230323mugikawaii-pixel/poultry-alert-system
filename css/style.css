@@ -1331,6 +1331,149 @@ button {
 }
 
 
+.contract-settings-card {
+  display: grid;
+  gap: 24px;
+}
+
+.contract-settings-heading,
+.contract-provider-heading,
+.contract-price-preview {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.contract-settings-heading h2,
+.contract-settings-heading p,
+.contract-provider-heading h3,
+.contract-provider-heading p,
+.contract-provider-card h4 {
+  margin-top: 0;
+}
+
+.contract-settings-heading p,
+.contract-provider-heading p {
+  margin-bottom: 0;
+  color: var(--subtext);
+  overflow-wrap: anywhere;
+}
+
+.contract-provider-list,
+.contract-keyword-inputs {
+  display: grid;
+  gap: 12px;
+}
+
+.contract-provider-card {
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #f8fbff;
+}
+
+.contract-provider-status {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: #0862c7;
+  background: #e6f1ff;
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.contract-provider-card h4 {
+  margin-bottom: 10px;
+}
+
+.contract-keyword-row {
+  display: grid;
+  grid-template-columns: minmax(
+      0,
+      1fr
+    ) auto;
+  gap: 10px;
+}
+
+.contract-keyword-row input,
+.contract-seat-editor input {
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 14px;
+  border: 1px solid #bfd0e6;
+  border-radius: 12px;
+  color: #111827;
+  background: #fff;
+  font: inherit;
+}
+
+.contract-keyword-row input:focus,
+.contract-seat-editor input:focus {
+  border-color: #0862c7;
+  outline: none;
+  box-shadow: 0 0 0 4px
+    rgb(8 98 199 / 10%);
+}
+
+.contract-keyword-remove {
+  padding: 10px 14px;
+  border: 1px solid #efb2ae;
+  border-radius: 12px;
+  color: #b42318;
+  background: #fff5f4;
+  font: inherit;
+  font-weight: 800;
+}
+
+.contract-keyword-add {
+  margin-top: 12px;
+}
+
+.contract-seat-editor label {
+  display: grid;
+  gap: 8px;
+  font-weight: 900;
+}
+
+.contract-seat-editor input {
+  max-width: 220px;
+}
+
+.contract-price-preview {
+  padding: 18px;
+  border-radius: 14px;
+  background: var(--blue-light);
+}
+
+.contract-price-preview div {
+  display: grid;
+  gap: 6px;
+}
+
+.contract-price-preview div:last-child {
+  text-align: right;
+}
+
+.contract-price-preview span {
+  color: var(--subtext);
+  font-size: 0.9rem;
+}
+
+.contract-price-preview strong {
+  color: var(--blue);
+  font-size: 1.35rem;
+}
+
+.contract-provider-empty,
+.test-empty-card {
+  margin: 0;
+}
+
+.test-empty-card .btn {
+  margin-top: 12px;
+}
+
 /* ========================================
    保存キーワード
 ======================================== */
@@ -2402,6 +2545,15 @@ body.app-dialog-open {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+.btn.outline.danger-outline {
+  border-color: #d92d20;
+  color: #b42318;
+}
+
+.btn.outline.danger-outline:hover {
+  background: #fff5f4;
+}
+
 .setup-progress {
   display: flex;
   align-items: center;
@@ -2566,7 +2718,10 @@ body.app-dialog-open {
 
   .member-management-heading,
   .notification-member-item,
-  .alert-list-item {
+  .alert-list-item ,
+  .contract-settings-heading,
+  .contract-provider-heading,
+  .contract-price-preview {
     grid-template-columns: 1fr;
     display: grid;
   }
@@ -2581,6 +2736,21 @@ body.app-dialog-open {
 
   .notification-member-actions {
     flex-wrap: wrap;
+  }
+
+  .contract-keyword-row {
+    grid-template-columns: 1fr;
+  }
+
+  .contract-keyword-remove,
+  .contract-settings-heading > .btn,
+  .contract-keyword-add {
+    width: 100%;
+  }
+
+  .contract-price-preview
+    div:last-child {
+    text-align: left;
   }
 
   .alert-card-heading {

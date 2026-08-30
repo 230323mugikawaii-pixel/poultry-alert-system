@@ -9,6 +9,7 @@ export interface NotificationMemberRecord {
   readonly status: NotificationMemberStatus;
   readonly createdAt: Date;
   readonly disabledAt: Date | null;
+  readonly deletedAt: Date | null;
 }
 
 export interface NotificationMemberSessionRecord {
@@ -66,6 +67,20 @@ export interface NotificationMemberRepository {
     readonly teamId: string;
     readonly memberId: string;
     readonly actorUserId: string;
+    readonly now: Date;
+  }): Promise<NotificationMemberListResult>;
+  reactivate(input: {
+    readonly teamId: string;
+    readonly memberId: string;
+    readonly actorUserId: string;
+    readonly passwordHash: string;
+    readonly now: Date;
+  }): Promise<NotificationMemberRecord>;
+  softDelete(input: {
+    readonly teamId: string;
+    readonly memberId: string;
+    readonly actorUserId: string;
+    readonly replacementPasswordHash: string;
     readonly now: Date;
   }): Promise<NotificationMemberListResult>;
   findByCallNowId(callNowId: string): Promise<NotificationMemberRecord | null>;

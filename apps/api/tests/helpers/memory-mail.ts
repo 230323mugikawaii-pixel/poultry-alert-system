@@ -214,6 +214,7 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
       email: input.email,
       authorizationStatus: "ACTIVE",
       connectionStatus: "ACTIVE",
+      keywords: previousConnection?.keywords ?? [],
       grantedScopes: input.grantedScopes,
       lastVerifiedAt: input.now,
       lastSyncAt: null,

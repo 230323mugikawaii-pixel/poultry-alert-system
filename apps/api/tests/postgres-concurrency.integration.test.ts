@@ -1571,12 +1571,93 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     await expect(
       service.authenticate(replacementLogin.sessionToken)
     ).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+    const fillerService = new NotificationMemberService({
+      repository,
+      securityThrottle: new SecurityThrottleService(
+        new PrismaSecurityThrottleRepository(database),
+        testPepper,
+        () => clock.value
+      ),
+      tokenPepper: testPepper,
+      sessionIdleDays: 30,
+      sessionAbsoluteDays: 90,
+      maxActiveSessions: 5,
+      now: () => clock.value,
+      callNowIdGenerator: () => "CN-00000003"
+    });
+    const filler = await fillerService.create({
+      teamId: team.team.teamId,
+      actorUserId: owner.id
+    });
+    await expect(
+      service.reactivate({
+        teamId: team.team.teamId,
+        memberId: created.value.member.id,
+        actorUserId: owner.id
+      })
+    ).rejects.toMatchObject({
+      code: "MEMBER_CAPACITY_REACHED",
+      statusCode: 409
+    });
+    await fillerService.disable({
+      teamId: team.team.teamId,
+      memberId: filler.member.id,
+      actorUserId: owner.id
+    });
+    const reactivated = await service.reactivate({
+      teamId: team.team.teamId,
+      memberId: created.value.member.id,
+      actorUserId: owner.id
+    });
+    expect(reactivated.member.callNowId).toBe(created.value.member.callNowId);
+    await expect(
+      service.login({
+        callNowId: created.value.member.callNowId,
+        password: reset.initialPassword,
+        ipAddress: "198.51.100.73"
+      })
+    ).rejects.toMatchObject({ code: "NOTIFICATION_MEMBER_LOGIN_FAILED" });
+    const reactivatedLogin = await service.login({
+      callNowId: created.value.member.callNowId,
+      password: reactivated.initialPassword,
+      ipAddress: "198.51.100.74"
+    });
+    await service.disable({
+      teamId: team.team.teamId,
+      memberId: created.value.member.id,
+      actorUserId: owner.id
+    });
+    const afterDelete = await service.softDelete({
+      teamId: team.team.teamId,
+      memberId: created.value.member.id,
+      actorUserId: owner.id
+    });
+    expect(
+      afterDelete.members.some(({ id }) => id === created.value.member.id)
+    ).toBe(false);
+    expect(afterDelete.seats).toMatchObject({
+      occupiedAdditionalSeats: 0,
+      availableSeats: 1
+    });
+    await expect(
+      service.authenticate(reactivatedLogin.sessionToken)
+    ).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+    await expect(
+      service.login({
+        callNowId: created.value.member.callNowId,
+        password: reactivated.initialPassword,
+        ipAddress: "198.51.100.75"
+      })
+    ).rejects.toMatchObject({ code: "NOTIFICATION_MEMBER_LOGIN_FAILED" });
     const storedMember = await database.notificationMember.findUnique({
       where: { id: created.value.member.id },
-      select: { passwordHash: true }
+      select: { passwordHash: true, deletedAt: true }
     });
     expect(storedMember?.passwordHash).toMatch(/^\$argon2id\$/u);
-    expect(storedMember?.passwordHash).not.toContain(reset.initialPassword);
+    expect(storedMember?.passwordHash).not.toContain(
+      reactivated.initialPassword
+    );
+    expect(storedMember?.deletedAt).toEqual(clock.value);
     await expect(
       database.auditEvent.count({
         where: {
@@ -1585,12 +1666,106 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
             in: [
               "NOTIFICATION_MEMBER_CREATED",
               "NOTIFICATION_MEMBER_PASSWORD_RESET",
-              "NOTIFICATION_MEMBER_DISABLED"
+              "NOTIFICATION_MEMBER_DISABLED",
+              "NOTIFICATION_MEMBER_REACTIVATED",
+              "NOTIFICATION_MEMBER_DELETED"
             ]
           }
         }
       })
-    ).resolves.toBe(3);
+    ).resolves.toBe(8);
+  });
+
+  it("persists provider keywords and canonical contract pricing atomically", async () => {
+    const clock = { value: new Date("2026-08-30T08:00:00.000Z") };
+    const owner = await createUser("contract-settings-owner@example.com");
+    const services = createServices(clock, "482739");
+    const invitation = await prepareInvitationCredential({
+      now: clock.value,
+      ttlDays: 30
+    });
+    const team = await services.teamService.createTeam(
+      {
+        ownerUserId: owner.id,
+        seatLimit: 2,
+        keywords: ["設定前"]
+      },
+      invitation
+    );
+    const google = await createActiveMailConnection(
+      owner.id,
+      team.team.teamId,
+      "contract-google-subject"
+    );
+    const microsoftAuthorization = await database.mailAuthorization.create({
+      data: {
+        userId: owner.id,
+        provider: "MICROSOFT",
+        providerSubject: "tenant:contract-microsoft-subject",
+        email: "contract-microsoft@example.com",
+        grantedScopes: ["Mail.Read"],
+        status: "ACTIVE",
+        lastVerifiedAt: clock.value
+      }
+    });
+    const microsoft = await database.mailConnection.create({
+      data: {
+        teamId: team.team.teamId,
+        mailAuthorizationId: microsoftAuthorization.id,
+        status: "ACTIVE"
+      }
+    });
+
+    const updated = await services.teamService.updateContractSettings({
+      userId: owner.id,
+      teamId: team.team.teamId,
+      seatCount: 100,
+      connections: [
+        { connectionId: google.id, keywords: ["停電", "警報"] },
+        {
+          connectionId: microsoft.id,
+          keywords: ["警報", "サーバー障害"]
+        }
+      ],
+      requestId: "contract-settings-test"
+    });
+
+    expect(updated).toMatchObject({
+      keywords: ["停電", "警報", "サーバー障害"],
+      currentTermAmountYen: 15_900,
+      seatSummary: { seatLimit: 99, totalUserLimit: 100 }
+    });
+    await expect(
+      database.mailConnection.findMany({
+        where: { teamId: team.team.teamId },
+        orderBy: { id: "asc" },
+        select: { id: true, keywords: true }
+      })
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        { id: google.id, keywords: ["停電", "警報"] },
+        { id: microsoft.id, keywords: ["警報", "サーバー障害"] }
+      ])
+    );
+    await expect(
+      database.teamKeyword.findMany({
+        where: { teamId: team.team.teamId },
+        orderBy: { createdAt: "asc" },
+        select: { keyword: true }
+      })
+    ).resolves.toEqual([
+      { keyword: "停電" },
+      { keyword: "警報" },
+      { keyword: "サーバー障害" }
+    ]);
+    await expect(
+      database.auditEvent.count({
+        where: {
+          teamId: team.team.teamId,
+          action: "CONTRACT_SETTINGS_UPDATED"
+        }
+      })
+    ).resolves.toBe(1);
   });
 
   it("shares notification member management throttles across API instances", async () => {
@@ -1792,6 +1967,42 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     await expect(
       database.alertRecipient.count({
         where: { notificationMemberId: disabledMember.member.id }
+      })
+    ).resolves.toBe(0);
+
+    await memberService.disable({
+      teamId: team.team.teamId,
+      memberId: activeMember.member.id,
+      actorUserId: owner.id
+    });
+    await memberService.softDelete({
+      teamId: team.team.teamId,
+      memberId: activeMember.member.id,
+      actorUserId: owner.id
+    });
+    await expect(
+      database.alertRecipient.count({
+        where: {
+          alertId: first.alert.id,
+          notificationMemberId: activeMember.member.id
+        }
+      })
+    ).resolves.toBe(1);
+
+    const afterDelete = await alertService.ingest({
+      ...input,
+      sourceEventId: "gmail-history-1002"
+    });
+    expect(afterDelete).toMatchObject({
+      created: true,
+      alert: { recipientCount: 1 }
+    });
+    await expect(
+      database.alertRecipient.count({
+        where: {
+          alertId: afterDelete.alert.id,
+          notificationMemberId: activeMember.member.id
+        }
       })
     ).resolves.toBe(0);
   });

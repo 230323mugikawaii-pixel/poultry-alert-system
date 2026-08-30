@@ -14,7 +14,10 @@ import {
   calculateSeatSummary,
   DEFAULT_MAX_CONFIGURED_SEAT_COUNT
 } from "./seat-policy.js";
-import { normalizeTeamKeywords } from "./keyword-policy.js";
+import {
+  mergeTeamKeywordSets,
+  normalizeTeamKeywords
+} from "./keyword-policy.js";
 
 export interface TeamServiceOptions {
   readonly repository: TeamRepository;
@@ -179,6 +182,61 @@ export class TeamService {
   ): Promise<readonly TeamMemberRecord[]> {
     const context = await this.requireOwner(userId);
     return this.options.repository.listActiveMembers(context.teamId);
+  }
+
+  public async updateContractSettings(input: {
+    readonly userId: string;
+    readonly teamId: string;
+    readonly seatCount: number;
+    readonly connections: readonly {
+      readonly connectionId: string;
+      readonly keywords: readonly string[];
+    }[];
+    readonly requestId?: string;
+  }): Promise<TeamContextRecord> {
+    assertConfiguredSeatCount(input.seatCount, this.maxConfiguredSeatCount);
+    const seatLimit = input.seatCount - 1;
+    const connectionIds = new Set<string>();
+    const connections = input.connections.map((connection) => {
+      if (connectionIds.has(connection.connectionId)) {
+        throw new AppError(
+          "DUPLICATE_MAIL_CONNECTION",
+          "同じ監視アカウントが重複しています。",
+          400
+        );
+      }
+      connectionIds.add(connection.connectionId);
+      const keywords = normalizeTeamKeywords(connection.keywords);
+      if (keywords.length === 0) {
+        throw new AppError(
+          "MAIL_KEYWORDS_REQUIRED",
+          "各監視アカウントに通知キーワードを1件以上設定してください。",
+          400
+        );
+      }
+      return { connectionId: connection.connectionId, keywords };
+    });
+    if (connections.length === 0) {
+      throw new AppError(
+        "MAIL_CONNECTION_REQUIRED",
+        "監視アカウントを1件以上設定してください。",
+        400
+      );
+    }
+    const keywords = mergeTeamKeywordSets(
+      connections.map((connection) => connection.keywords)
+    );
+    const context = await this.requireOwnerForTeam(input.userId, input.teamId);
+    return this.options.repository.updateContractSettings({
+      teamId: context.teamId,
+      actorUserId: input.userId,
+      seatLimit,
+      keywords,
+      connectionKeywords: connections,
+      currentTermAmountYen: calculateAnnualPriceYen(seatLimit, keywords.length),
+      requestId: input.requestId ?? null,
+      now: this.now()
+    });
   }
 
   public async requestSeatLimitChange(

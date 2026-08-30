@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import type { AppEnvironment } from "../src/config/env.js";
@@ -73,12 +74,14 @@ interface TeamBootstrapResponse {
   readonly team: {
     readonly id: string;
     readonly role: "OWNER" | "MEMBER";
+    readonly keywords: readonly string[];
     readonly seats: {
       readonly seatLimit: number;
       readonly activeMemberCount: number;
     };
     readonly subscription: {
       readonly status: "ACTIVE" | "PAST_DUE" | "CANCELED";
+      readonly currentTermAmountYen: number;
     };
   };
 }
@@ -152,6 +155,55 @@ describe("team routes", () => {
     });
     expect(teamRepository.teamCreationCount).toBe(1);
 
+    const contractUrl = `/api/v1/teams/${firstPayload.team.id}/contract-settings`;
+    const contractPayload = {
+      seatCount: 100,
+      connections: [
+        { connectionId: randomUUID(), keywords: ["停電", "警報"] },
+        {
+          connectionId: randomUUID(),
+          keywords: ["警報", "サーバー障害"]
+        }
+      ]
+    };
+    const missingOrigin = await app.inject({
+      method: "PUT",
+      url: contractUrl,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`
+      },
+      payload: contractPayload
+    });
+    expect(missingOrigin.statusCode, missingOrigin.body).toBe(403);
+
+    const preflight = await app.inject({
+      method: "OPTIONS",
+      url: contractUrl,
+      headers: {
+        origin: environment.PUBLIC_ORIGIN,
+        "access-control-request-method": "PUT"
+      }
+    });
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers["access-control-allow-methods"]).toContain("PUT");
+
+    const updated = await app.inject({
+      method: "PUT",
+      url: contractUrl,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      },
+      payload: contractPayload
+    });
+    expect(updated.statusCode, updated.body).toBe(200);
+    expect(updated.json<TeamBootstrapResponse>().team).toMatchObject({
+      role: "OWNER",
+      keywords: ["停電", "警報", "サーバー障害"],
+      seats: { seatLimit: 99 },
+      subscription: { currentTermAmountYen: 15_900 }
+    });
+
     teamRepository.addMember(member.userId);
     const memberResponse = await app.inject({
       method: "POST",
@@ -168,6 +220,17 @@ describe("team routes", () => {
       role: "MEMBER"
     });
     expect(teamRepository.teamCreationCount).toBe(1);
+
+    const memberUpdate = await app.inject({
+      method: "PUT",
+      url: contractUrl,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${member.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      },
+      payload: contractPayload
+    });
+    expect(memberUpdate.statusCode).toBe(403);
   });
 
   it("returns member details to the owner but rejects a member with 403", async () => {

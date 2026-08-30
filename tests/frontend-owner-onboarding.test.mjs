@@ -63,7 +63,7 @@ test("setup exposes the compact three-step flow without a post-purchase confirma
 test("OAuth returns to provider setup and configured cards show an unambiguous state", () => {
   assert.match(
     appSource,
-    /ownerOnboarding\?\.status === "PENDING"[\s\S]*openOwnerSetup\(\)/
+    /ownerOnboarding\?\.status\s*===\s*"PENDING"[\s\S]*openOwnerSetup\(\)/
   );
   assert.match(appSource, /✓ 設定しました/);
   assert.match(appSource, /Googleアカウントを変更/);
@@ -163,7 +163,10 @@ test("an authorized provider enables usage setup and clears the missing-account 
 
 test("owner pricing counts each input as one keyword and additional users separately", () => {
   assert.match(appSource, /const EXTRA_USER_PRICE = 100/);
-  assert.match(appSource, /Math\.max\(ownerSetupSeatCount - 1, 0\)/);
+  assert.match(
+    appSource,
+    /Math\.max\(\s*ownerSetupSeatCount\s*-\s*1,\s*0\s*\)/
+  );
   assert.match(appSource, /keywordPolicy\.calculateAnnualPriceYen/);
   assert.match(htmlSource, /管理者1人を含む合計利用人数/);
 });

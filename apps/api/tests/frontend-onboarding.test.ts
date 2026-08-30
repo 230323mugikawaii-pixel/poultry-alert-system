@@ -42,17 +42,17 @@ describe("frontend onboarding order", () => {
       script.indexOf("function renderConnectedGoogleAccounts()")
     );
     expect(openApp).not.toContain("!hasActiveSubscription()");
-    expect(openApp).toContain('showOnlyScreen(\n    "appScreen"');
+    expect(openApp).toMatch(/showOnlyScreen\(\s*"appScreen"/u);
   });
 
   it("requires a server session before setup, payment, and app screens", () => {
-    expect(script).toContain('"setupScreen",\n    "paymentScreen"');
-    expect(script).toContain("authenticatedScreens.has(screenId)");
+    expect(script).toMatch(/"setupScreen",\s*"paymentScreen"/u);
+    expect(script).toMatch(/authenticatedScreens\.has\(\s*screenId\s*\)/u);
     expect(script).toContain('screenId === "googleScreen"');
     expect(script).toContain('googleScreenMode === "manage"');
     expect(script).toContain("if (!authenticatedUser)");
     expect(script).toContain("openOwnerSetup()");
-    expect(script).not.toContain('"landingScreen",\n    "setupScreen"');
+    expect(script).not.toMatch(/"landingScreen",\s*"setupScreen"/u);
   });
 
   it("authorizes monitoring before purchase and enters Home after the atomic purchase", () => {
@@ -74,7 +74,7 @@ describe("frontend onboarding order", () => {
 
   it("keeps login OAuth separate from monitoring OAuth", () => {
     expect(script).toContain("/api/v1/auth/${provider.toLowerCase()}/start");
-    expect(script).toMatch(/begin(?:Gmail|Mail)OAuth\("oauth\/start"/u);
+    expect(script).toMatch(/begin(?:Gmail|Mail)OAuth\(\s*"oauth\/start"/u);
     expect(script).not.toMatch(/auth\/google\/start[^\n]*gmail\.readonly/iu);
     expect(script).not.toMatch(/refresh[_-]?token/iu);
     expect(script).not.toMatch(/access[_-]?token/iu);

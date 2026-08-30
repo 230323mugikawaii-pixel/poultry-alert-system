@@ -334,12 +334,14 @@ model NotificationMember {
   createdAt         DateTime                    @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime                    @updatedAt @db.Timestamptz(3)
   disabledAt        DateTime?                   @db.Timestamptz(3)
+  deletedAt         DateTime?                   @db.Timestamptz(3)
   team              Team                        @relation(fields: [teamId], references: [id], onDelete: Cascade)
   sessions          NotificationMemberSession[]
   alertRecipients    AlertRecipient[]
   acknowledgedAlerts Alert[]                     @relation("AlertAcknowledgedByNotificationMember")
 
   @@index([teamId, status])
+  @@index([teamId, deletedAt])
   @@map("notification_members")
 }
 
@@ -426,10 +428,12 @@ model TeamKeyword {
   teamId     String   @db.Uuid
   keyword    String   @db.VarChar(100)
   normalized String   @db.VarChar(100)
+  sortOrder  Int      @default(0)
   createdAt  DateTime @default(now()) @db.Timestamptz(3)
   team       Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@unique([teamId, normalized])
+  @@index([teamId, sortOrder])
   @@map("team_keywords")
 }
 
