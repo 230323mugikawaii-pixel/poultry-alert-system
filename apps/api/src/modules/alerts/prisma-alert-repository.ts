@@ -84,7 +84,11 @@ export class PrismaAlertRepository implements AlertRepository {
                 select: { userId: true }
               }),
               transaction.notificationMember.findMany({
-                where: { teamId: input.teamId, status: "ACTIVE" },
+                where: {
+                  teamId: input.teamId,
+                  status: "ACTIVE",
+                  deletedAt: null
+                },
                 select: { id: true }
               })
             ]);

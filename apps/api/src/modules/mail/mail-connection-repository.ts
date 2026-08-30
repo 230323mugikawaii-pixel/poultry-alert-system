@@ -24,6 +24,7 @@ export interface MailConnectionRecord {
   readonly email: string;
   readonly authorizationStatus: MailAuthorizationState;
   readonly connectionStatus: MailConnectionState;
+  readonly keywords: readonly string[];
   readonly grantedScopes: readonly string[];
   readonly lastVerifiedAt: Date | null;
   readonly lastSyncAt: Date | null;

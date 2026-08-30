@@ -17,7 +17,7 @@ export class PrismaNotificationMemberRepository implements NotificationMemberRep
   public async list(teamId: string): Promise<NotificationMemberListResult> {
     const [members, subscription, occupied] = await Promise.all([
       this.database.notificationMember.findMany({
-        where: { teamId },
+        where: { teamId, deletedAt: null },
         orderBy: [{ status: "asc" }, { createdAt: "asc" }]
       }),
       this.database.subscription.findUnique({ where: { teamId } }),
@@ -118,7 +118,12 @@ export class PrismaNotificationMemberRepository implements NotificationMemberRep
     return this.database.$transaction(async (transaction) => {
       await requireOwner(transaction, input.teamId, input.actorUserId);
       const member = await transaction.notificationMember.findFirst({
-        where: { id: input.memberId, teamId: input.teamId, status: "ACTIVE" }
+        where: {
+          id: input.memberId,
+          teamId: input.teamId,
+          status: "ACTIVE",
+          deletedAt: null
+        }
       });
       if (!member) throw memberNotFoundError();
       const updated = await transaction.notificationMember.update({
@@ -153,7 +158,12 @@ export class PrismaNotificationMemberRepository implements NotificationMemberRep
         await requireOwner(transaction, input.teamId, input.actorUserId);
         const subscription = await lockSubscription(transaction, input.teamId);
         const member = await transaction.notificationMember.findFirst({
-          where: { id: input.memberId, teamId: input.teamId, status: "ACTIVE" }
+          where: {
+            id: input.memberId,
+            teamId: input.teamId,
+            status: "ACTIVE",
+            deletedAt: null
+          }
         });
         if (!member) throw memberNotFoundError();
         await transaction.notificationMember.update({
@@ -199,7 +209,7 @@ export class PrismaNotificationMemberRepository implements NotificationMemberRep
           }
         });
         const members = await transaction.notificationMember.findMany({
-          where: { teamId: input.teamId },
+          where: { teamId: input.teamId, deletedAt: null },
           orderBy: [{ status: "asc" }, { createdAt: "asc" }]
         });
         return {
@@ -215,11 +225,145 @@ export class PrismaNotificationMemberRepository implements NotificationMemberRep
     );
   }
 
+  public async reactivate(input: {
+    readonly teamId: string;
+    readonly memberId: string;
+    readonly actorUserId: string;
+    readonly passwordHash: string;
+    readonly now: Date;
+  }): Promise<NotificationMemberRecord> {
+    return retrySerializableTransaction(
+      () =>
+        this.database.$transaction(
+          async (transaction) => {
+            await requireOwner(transaction, input.teamId, input.actorUserId);
+            const subscription = await lockSubscription(
+              transaction,
+              input.teamId
+            );
+            if (subscription.pendingSeatLimit !== null) {
+              throw new AppError(
+                "SEAT_REDUCTION_PENDING",
+                "契約人数の変更中は参加者を再有効化できません。",
+                409
+              );
+            }
+            const member = await transaction.notificationMember.findFirst({
+              where: {
+                id: input.memberId,
+                teamId: input.teamId,
+                status: "DISABLED",
+                deletedAt: null
+              }
+            });
+            if (!member) throw memberNotFoundError();
+            const occupied = await countOccupiedAdditionalSeats(
+              transaction,
+              input.teamId
+            );
+            if (occupied >= subscription.seatLimit) {
+              throw new AppError(
+                "MEMBER_CAPACITY_REACHED",
+                "現在の利用人数上限に達しています。",
+                409
+              );
+            }
+            const updated = await transaction.notificationMember.update({
+              where: { id: member.id },
+              data: {
+                status: "ACTIVE",
+                passwordHash: input.passwordHash,
+                passwordUpdatedAt: input.now,
+                disabledAt: null
+              }
+            });
+            await transaction.notificationMemberSession.updateMany({
+              where: { notificationMemberId: member.id, revokedAt: null },
+              data: { revokedAt: input.now }
+            });
+            await transaction.auditEvent.create({
+              data: {
+                teamId: input.teamId,
+                actorUserId: input.actorUserId,
+                action: "NOTIFICATION_MEMBER_REACTIVATED",
+                targetType: "NotificationMember",
+                targetId: member.id
+              }
+            });
+            return mapMember(updated);
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
+      () =>
+        new AppError(
+          "MEMBER_CAPACITY_CONFLICT",
+          "現在の利用人数上限に達しました。最新の状態を確認してください。",
+          409
+        )
+    );
+  }
+
+  public async softDelete(input: {
+    readonly teamId: string;
+    readonly memberId: string;
+    readonly actorUserId: string;
+    readonly replacementPasswordHash: string;
+    readonly now: Date;
+  }): Promise<NotificationMemberListResult> {
+    return this.database.$transaction(async (transaction) => {
+      await requireOwner(transaction, input.teamId, input.actorUserId);
+      const subscription = await lockSubscription(transaction, input.teamId);
+      const member = await transaction.notificationMember.findFirst({
+        where: {
+          id: input.memberId,
+          teamId: input.teamId,
+          status: "DISABLED",
+          deletedAt: null
+        }
+      });
+      if (!member) throw memberNotFoundError();
+      await transaction.notificationMember.update({
+        where: { id: member.id },
+        data: {
+          passwordHash: input.replacementPasswordHash,
+          passwordUpdatedAt: input.now,
+          deletedAt: input.now
+        }
+      });
+      await transaction.notificationMemberSession.updateMany({
+        where: { notificationMemberId: member.id, revokedAt: null },
+        data: { revokedAt: input.now }
+      });
+      await transaction.auditEvent.create({
+        data: {
+          teamId: input.teamId,
+          actorUserId: input.actorUserId,
+          action: "NOTIFICATION_MEMBER_DELETED",
+          targetType: "NotificationMember",
+          targetId: member.id,
+          metadata: { deletionMode: "SOFT" }
+        }
+      });
+      const members = await transaction.notificationMember.findMany({
+        where: { teamId: input.teamId, deletedAt: null },
+        orderBy: [{ status: "asc" }, { createdAt: "asc" }]
+      });
+      const occupied = await countOccupiedAdditionalSeats(
+        transaction,
+        input.teamId
+      );
+      return {
+        members: members.map(mapMember),
+        seats: mapSeatSummary(subscription, occupied, members)
+      };
+    });
+  }
+
   public async findByCallNowId(
     callNowId: string
   ): Promise<NotificationMemberRecord | null> {
-    const member = await this.database.notificationMember.findUnique({
-      where: { callNowId }
+    const member = await this.database.notificationMember.findFirst({
+      where: { callNowId, deletedAt: null }
     });
     return member ? mapMember(member) : null;
   }
@@ -236,7 +380,7 @@ export class PrismaNotificationMemberRepository implements NotificationMemberRep
   }): Promise<NotificationMemberSessionRecord> {
     return this.database.$transaction(async (transaction) => {
       const member = await transaction.notificationMember.findFirst({
-        where: { id: input.memberId, status: "ACTIVE" },
+        where: { id: input.memberId, status: "ACTIVE", deletedAt: null },
         select: { id: true }
       });
       if (!member) throw unauthenticatedError();
@@ -284,7 +428,11 @@ export class PrismaNotificationMemberRepository implements NotificationMemberRep
         revokedAt: null,
         idleExpiresAt: { gt: now },
         expiresAt: { gt: now },
-        notificationMember: { status: "ACTIVE", team: { status: "ACTIVE" } }
+        notificationMember: {
+          status: "ACTIVE",
+          deletedAt: null,
+          team: { status: "ACTIVE" }
+        }
       },
       include: { notificationMember: { include: { team: true } } }
     });
@@ -362,7 +510,9 @@ export async function countOccupiedAdditionalSeats(
     database.teamMembership.count({
       where: { teamId, role: "MEMBER", status: "ACTIVE" }
     }),
-    database.notificationMember.count({ where: { teamId, status: "ACTIVE" } })
+    database.notificationMember.count({
+      where: { teamId, status: "ACTIVE", deletedAt: null }
+    })
   ]);
   return accountMembers + notificationMembers;
 }
@@ -402,6 +552,7 @@ function mapMember(member: {
   readonly status: "ACTIVE" | "DISABLED";
   readonly createdAt: Date;
   readonly disabledAt: Date | null;
+  readonly deletedAt: Date | null;
 }): NotificationMemberRecord {
   return { ...member };
 }

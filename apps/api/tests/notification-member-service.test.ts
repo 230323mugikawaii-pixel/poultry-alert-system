@@ -153,8 +153,9 @@ describe("NotificationMemberService", () => {
         expiresAt: new Date("2026-09-30T00:00:00.000Z")
       }
     );
+    const notificationRepository = createRepository(5);
     const memberService = createService(
-      createRepository(5),
+      notificationRepository,
       () => "CN-AB12CD34"
     );
     const app = await buildApp({
@@ -187,6 +188,69 @@ describe("NotificationMemberService", () => {
         pendingSeatCount: null
       }
     });
+
+    const createdMember = await app.inject({
+      method: "POST",
+      url: `/api/v1/teams/${created.team.teamId}/notification-members`,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      },
+      payload: { displayName: "参加者" }
+    });
+    expect(createdMember.statusCode, createdMember.body).toBe(201);
+    expect(createdMember.headers["cache-control"]).toBe("no-store");
+    const memberId = createdMember.json<{ member: { id: string } }>().member.id;
+    await app.inject({
+      method: "DELETE",
+      url: `/api/v1/teams/${created.team.teamId}/notification-members/${memberId}`,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      }
+    });
+
+    const crossSiteReactivation = await app.inject({
+      method: "POST",
+      url: `/api/v1/teams/${created.team.teamId}/notification-members/${memberId}/reactivate`,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`
+      }
+    });
+    expect(crossSiteReactivation.statusCode).toBe(403);
+
+    const reactivated = await app.inject({
+      method: "POST",
+      url: `/api/v1/teams/${created.team.teamId}/notification-members/${memberId}/reactivate`,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      }
+    });
+    expect(reactivated.statusCode, reactivated.body).toBe(200);
+    expect(reactivated.headers["cache-control"]).toBe("no-store");
+    expect(reactivated.json()).toMatchObject({
+      member: { id: memberId, callNowId: "CN-AB12CD34", status: "ACTIVE" }
+    });
+
+    await app.inject({
+      method: "DELETE",
+      url: `/api/v1/teams/${created.team.teamId}/notification-members/${memberId}`,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      }
+    });
+    const deleted = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/teams/${created.team.teamId}/notification-members/${memberId}/record`,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      }
+    });
+    expect(deleted.statusCode, deleted.body).toBe(200);
+    expect(deleted.json()).toMatchObject({ members: [] });
     await app.close();
   });
 });
@@ -216,20 +280,24 @@ interface TestNotificationMemberRepository extends NotificationMemberRepository 
 
 function createRepository(seatCount = 2): TestNotificationMemberRepository {
   let member: NotificationMemberRecord | null = null;
+  const list = (teamId: string) => {
+    const visibleMember = member?.teamId === teamId ? member : null;
+    const activeMemberCount = visibleMember?.status === "ACTIVE" ? 1 : 0;
+    return {
+      members: visibleMember ? [visibleMember] : [],
+      seats: {
+        seatCount,
+        additionalSeatLimit: seatCount - 1,
+        activeNotificationMemberCount: activeMemberCount,
+        occupiedAdditionalSeats: activeMemberCount,
+        availableSeats: seatCount - 1 - activeMemberCount,
+        pendingSeatCount: null
+      }
+    };
+  };
   return {
     passwordHash: null,
-    list: (teamId) =>
-      Promise.resolve({
-        members: member?.teamId === teamId ? [member] : [],
-        seats: {
-          seatCount,
-          additionalSeatLimit: seatCount - 1,
-          activeNotificationMemberCount: member ? 1 : 0,
-          occupiedAdditionalSeats: member ? 1 : 0,
-          availableSeats: member ? seatCount - 2 : seatCount - 1,
-          pendingSeatCount: null
-        }
-      }),
+    list: (teamId) => Promise.resolve(list(teamId)),
     create(input) {
       this.passwordHash = input.passwordHash;
       member = {
@@ -240,12 +308,51 @@ function createRepository(seatCount = 2): TestNotificationMemberRepository {
         passwordHash: input.passwordHash,
         status: "ACTIVE",
         createdAt: input.now,
-        disabledAt: null
+        disabledAt: null,
+        deletedAt: null
       };
       return Promise.resolve(member);
     },
     replacePassword: () => Promise.reject(new Error("not_implemented")),
-    disable: () => Promise.reject(new Error("not_implemented")),
+    disable: (input) => {
+      if (
+        !member ||
+        member.id !== input.memberId ||
+        member.status !== "ACTIVE"
+      ) {
+        return Promise.reject(new Error("member_not_found"));
+      }
+      member = { ...member, status: "DISABLED", disabledAt: input.now };
+      return Promise.resolve(list(input.teamId));
+    },
+    reactivate(input) {
+      if (
+        !member ||
+        member.id !== input.memberId ||
+        member.status !== "DISABLED"
+      ) {
+        return Promise.reject(new Error("member_not_found"));
+      }
+      this.passwordHash = input.passwordHash;
+      member = {
+        ...member,
+        passwordHash: input.passwordHash,
+        status: "ACTIVE",
+        disabledAt: null
+      };
+      return Promise.resolve(member);
+    },
+    softDelete: (input) => {
+      if (
+        !member ||
+        member.id !== input.memberId ||
+        member.status !== "DISABLED"
+      ) {
+        return Promise.reject(new Error("member_not_found"));
+      }
+      member = null;
+      return Promise.resolve(list(input.teamId));
+    },
     findByCallNowId: (callNowId) =>
       Promise.resolve(member?.callNowId === callNowId ? member : null),
     createSession: () => Promise.reject(new Error("not_implemented")),

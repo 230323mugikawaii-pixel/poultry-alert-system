@@ -130,7 +130,8 @@ describe("alert routes", () => {
           passwordHash: "not-returned",
           status: "ACTIVE" as const,
           createdAt: new Date(),
-          disabledAt: null
+          disabledAt: null,
+          deletedAt: null
         },
         session: {
           id: randomUUID(),

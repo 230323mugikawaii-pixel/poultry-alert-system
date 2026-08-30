@@ -9,6 +9,7 @@ export interface TeamContextRecord {
   readonly teamName: string | null;
   readonly membershipId: string;
   readonly role: TeamRole;
+  readonly keywords: readonly string[];
   readonly seatSummary: SeatSummary;
   readonly pendingSeatLimit: number | null;
   readonly subscriptionStatus: SubscriptionState;
@@ -80,6 +81,19 @@ export interface TeamRepository {
     teamId: string
   ): Promise<TeamContextRecord | null>;
   listActiveMembers(teamId: string): Promise<readonly TeamMemberRecord[]>;
+  updateContractSettings(input: {
+    readonly teamId: string;
+    readonly actorUserId: string;
+    readonly seatLimit: number;
+    readonly keywords: readonly string[];
+    readonly connectionKeywords: readonly {
+      readonly connectionId: string;
+      readonly keywords: readonly string[];
+    }[];
+    readonly currentTermAmountYen: number;
+    readonly requestId: string | null;
+    readonly now: Date;
+  }): Promise<TeamContextRecord>;
   requestSeatLimitChange(input: {
     readonly teamId: string;
     readonly requestedByUserId: string;

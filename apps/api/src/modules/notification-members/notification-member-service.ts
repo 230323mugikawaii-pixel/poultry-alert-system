@@ -50,7 +50,8 @@ export class NotificationMemberService {
   }
 
   public consumeManagementAttempt(input: {
-    readonly operation: "CREATE" | "RESET_PASSWORD" | "DISABLE";
+    readonly operation:
+      "CREATE" | "RESET_PASSWORD" | "DISABLE" | "REACTIVATE" | "DELETE";
     readonly actorUserId: string;
     readonly teamId: string;
     readonly ipAddress: string;
@@ -148,6 +149,36 @@ export class NotificationMemberService {
     readonly actorUserId: string;
   }): Promise<NotificationMemberListResult> {
     return this.options.repository.disable({ ...input, now: this.now() });
+  }
+
+  public async reactivate(input: {
+    readonly teamId: string;
+    readonly memberId: string;
+    readonly actorUserId: string;
+  }): Promise<{
+    readonly member: NotificationMemberRecord;
+    readonly initialPassword: string;
+  }> {
+    const initialPassword = generateInvitationPassword();
+    const member = await this.options.repository.reactivate({
+      ...input,
+      passwordHash: await hashInvitationPassword(initialPassword),
+      now: this.now()
+    });
+    return { member, initialPassword };
+  }
+
+  public async softDelete(input: {
+    readonly teamId: string;
+    readonly memberId: string;
+    readonly actorUserId: string;
+  }): Promise<NotificationMemberListResult> {
+    const discardedPassword = generateInvitationPassword();
+    return this.options.repository.softDelete({
+      ...input,
+      replacementPasswordHash: await hashInvitationPassword(discardedPassword),
+      now: this.now()
+    });
   }
 
   public async login(input: {

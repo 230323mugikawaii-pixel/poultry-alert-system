@@ -223,7 +223,9 @@ export class OwnerOnboardingService {
     );
     if (
       choices.length === 0 ||
-      choices.some((choice) => !choice.keywordsConfirmedAt)
+      choices.some(
+        (choice) => !choice.keywordsConfirmedAt || choice.keywords.length === 0
+      )
     ) {
       throw onboardingNotReadyError();
     }

@@ -206,6 +206,75 @@ export function createNotificationMemberRoutes(
     );
 
     app.post(
+      "/api/v1/teams/:teamId/notification-members/:memberId/reactivate",
+      {
+        schema: {
+          params: Type.Object({
+            teamId: Type.String({ pattern: UUID_PATTERN }),
+            memberId: Type.String({ pattern: UUID_PATTERN })
+          }),
+          response: { 200: CredentialResponse }
+        }
+      },
+      async (request, reply) => {
+        requireSameOrigin(request);
+        const actorUserId = await authenticateOwner(
+          request,
+          request.params.teamId
+        );
+        await memberService.consumeManagementAttempt({
+          operation: "REACTIVATE",
+          actorUserId,
+          teamId: request.params.teamId,
+          ipAddress: request.ip
+        });
+        const result = await memberService.reactivate({
+          teamId: request.params.teamId,
+          memberId: request.params.memberId,
+          actorUserId
+        });
+        reply.header("Cache-Control", "no-store");
+        return {
+          member: serializeMember(result.member),
+          initialPassword: result.initialPassword
+        };
+      }
+    );
+
+    app.delete(
+      "/api/v1/teams/:teamId/notification-members/:memberId/record",
+      {
+        schema: {
+          params: Type.Object({
+            teamId: Type.String({ pattern: UUID_PATTERN }),
+            memberId: Type.String({ pattern: UUID_PATTERN })
+          }),
+          response: { 200: ListResponse }
+        }
+      },
+      async (request) => {
+        requireSameOrigin(request);
+        const actorUserId = await authenticateOwner(
+          request,
+          request.params.teamId
+        );
+        await memberService.consumeManagementAttempt({
+          operation: "DELETE",
+          actorUserId,
+          teamId: request.params.teamId,
+          ipAddress: request.ip
+        });
+        return serializeList(
+          await memberService.softDelete({
+            teamId: request.params.teamId,
+            memberId: request.params.memberId,
+            actorUserId
+          })
+        );
+      }
+    );
+
+    app.post(
       "/api/v1/notification-members/login",
       {
         config: { rateLimit: { max: 30, timeWindow: "15 minutes" } },

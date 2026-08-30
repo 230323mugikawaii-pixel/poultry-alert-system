@@ -8,6 +8,9 @@ import type { TeamContextRecord } from "./team-repository.js";
 import type { TeamService } from "./team-service.js";
 import { DEFAULT_MAX_CONFIGURED_SEAT_COUNT } from "./seat-policy.js";
 
+const UUID_PATTERN =
+  "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
+
 const SeatSummaryResponse = Type.Object({
   seatLimit: Type.Integer({ minimum: 0 }),
   activeMemberCount: Type.Integer({ minimum: 0 }),
@@ -21,6 +24,7 @@ const TeamResponse = Type.Object({
   teamCode: Type.String({ pattern: "^[0-9]{6}$" }),
   name: Type.Union([Type.String(), Type.Null()]),
   role: Type.Union([Type.Literal("OWNER"), Type.Literal("MEMBER")]),
+  keywords: Type.Array(Type.String({ minLength: 1, maxLength: 100 })),
   representativeCount: Type.Literal(1),
   seats: SeatSummaryResponse,
   pendingSeatLimit: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
@@ -177,6 +181,52 @@ export function createTeamRoutes(
       }
     );
 
+    app.put(
+      "/api/v1/teams/:teamId/contract-settings",
+      {
+        config: { rateLimit: { max: 30, timeWindow: "15 minutes" } },
+        schema: {
+          params: Type.Object({
+            teamId: Type.String({ pattern: UUID_PATTERN })
+          }),
+          body: Type.Object({
+            seatCount: Type.Integer({
+              minimum: 1,
+              maximum: maximumSeatCount
+            }),
+            connections: Type.Array(
+              Type.Object({
+                connectionId: Type.String({ pattern: UUID_PATTERN }),
+                keywords: Type.Array(
+                  Type.String({ minLength: 1, maxLength: 100 }),
+                  { minItems: 1, maxItems: 100 }
+                )
+              }),
+              { minItems: 1, maxItems: 20 }
+            )
+          }),
+          response: {
+            200: Type.Object({ team: TeamResponse })
+          }
+        }
+      },
+      async (request) => {
+        requireSameOrigin(request);
+        const userId = await authenticateUserId(request);
+        return {
+          team: serializeTeam(
+            await teamService.updateContractSettings({
+              userId,
+              teamId: request.params.teamId,
+              seatCount: request.body.seatCount,
+              connections: request.body.connections,
+              requestId: request.id
+            })
+          )
+        };
+      }
+    );
+
     app.get(
       "/api/v1/teams/current/members",
       {
@@ -290,6 +340,7 @@ function serializeTeam(team: TeamContextRecord) {
     teamCode: team.teamCode,
     name: team.teamName,
     role: team.role,
+    keywords: [...team.keywords],
     representativeCount: 1 as const,
     seats: team.seatSummary,
     pendingSeatLimit: team.pendingSeatLimit,

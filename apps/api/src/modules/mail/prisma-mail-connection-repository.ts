@@ -690,6 +690,7 @@ function mapConnection(connection: {
   readonly teamId: string;
   readonly mailAuthorizationId: string;
   readonly status: MailConnectionRecord["connectionStatus"];
+  readonly keywords: readonly string[];
   readonly lastSyncAt: Date | null;
   readonly lastErrorCode: string | null;
   readonly mailAuthorization: {
@@ -708,6 +709,7 @@ function mapConnection(connection: {
     email: connection.mailAuthorization.email,
     authorizationStatus: connection.mailAuthorization.status,
     connectionStatus: connection.status,
+    keywords: [...connection.keywords],
     grantedScopes: connection.mailAuthorization.grantedScopes,
     lastVerifiedAt: connection.mailAuthorization.lastVerifiedAt,
     lastSyncAt: connection.lastSyncAt,

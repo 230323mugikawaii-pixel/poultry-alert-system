@@ -93,7 +93,7 @@ export async function buildApp(
   await app.register(cors, {
     origin: options.environment.PUBLIC_ORIGIN,
     credentials: true,
-    methods: ["GET", "HEAD", "POST", "DELETE", "OPTIONS"]
+    methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"]
   });
   await app.register(helmet, {
     contentSecurityPolicy: false

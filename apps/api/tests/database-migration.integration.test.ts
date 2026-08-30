@@ -101,6 +101,13 @@ const userCommunicationMigration = readFileSync(
   ),
   "utf8"
 );
+const notificationMemberSoftDeleteMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260830000100_notification_member_soft_delete/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 const migration =
   baseMigration +
   gmailMigration +
@@ -111,7 +118,8 @@ const migration =
   alertMigration +
   ownerOnboardingMigration +
   providerKeywordMigration +
-  userCommunicationMigration;
+  userCommunicationMigration +
+  notificationMemberSoftDeleteMigration;
 
 const databases: PGlite[] = [];
 
@@ -240,6 +248,24 @@ describe("PostgreSQL migrations", () => {
       { table_name: "notification_member_sessions" },
       { table_name: "notification_members" }
     ]);
+
+    const memberColumns = await database.query<{ column_name: string }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'notification_members';
+    `);
+    expect(memberColumns.rows).toContainEqual({ column_name: "deletedAt" });
+
+    const teamKeywordColumns = await database.query<{ column_name: string }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'team_keywords';
+    `);
+    expect(teamKeywordColumns.rows).toContainEqual({
+      column_name: "sortOrder"
+    });
 
     const alertTables = await database.query<{ table_name: string }>(`
       SELECT table_name
