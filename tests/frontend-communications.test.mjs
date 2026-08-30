@@ -51,6 +51,10 @@ test("feedback is a simple private submission with no fake response", () => {
   assert.doesNotMatch(feedbackPage, /チャット|スレッド|返信例/);
 
   assert.match(appSource, /apiUrl\("\/api\/v1\/feedback"\)/);
+  assert.match(appSource, /ご意見・フィードバックの内容を入力してください。/);
+  assert.match(appSource, /clearFeedbackError/);
+  assert.match(htmlSource, /id="notificationCenterError"/);
+  assert.match(appSource, /通知を既読にできませんでした。/);
   assert.match(
     appSource,
     /送信しました。返信がある場合は通知でお知らせします。/
