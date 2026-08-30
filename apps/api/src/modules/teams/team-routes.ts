@@ -35,9 +35,38 @@ const TeamResponse = Type.Object({
       Type.Literal("CANCELED")
     ]),
     currentTermAmountYen: Type.Integer({ minimum: 6000 }),
+    renewalAmountYen: Type.Integer({ minimum: 6000 }),
     currentTermStartedAt: Type.String(),
     currentTermEndsAt: Type.String()
   })
+});
+
+const ContractSettingsBody = Type.Object({
+  seatCount: Type.Integer({ minimum: 1 }),
+  connections: Type.Array(
+    Type.Object({
+      connectionId: Type.String({ pattern: UUID_PATTERN }),
+      keywords: Type.Array(Type.String({ minLength: 1, maxLength: 100 }), {
+        minItems: 1,
+        maxItems: 100
+      })
+    }),
+    { minItems: 1, maxItems: 20 }
+  ),
+  idempotencyKey: Type.String({ minLength: 16, maxLength: 100 })
+});
+
+const ContractChangeQuoteResponse = Type.Object({
+  id: Type.String({ format: "uuid" }),
+  status: Type.Union([Type.Literal("PENDING"), Type.Literal("APPLIED")]),
+  previousAnnualAmountYen: Type.Integer({ minimum: 6000 }),
+  nextAnnualAmountYen: Type.Integer({ minimum: 6000 }),
+  additionalChargeYen: Type.Integer({ minimum: 0 }),
+  requiresCheckout: Type.Boolean(),
+  seatCount: Type.Integer({ minimum: 1 }),
+  keywordCount: Type.Integer({ minimum: 0 }),
+  mailConnectionCount: Type.Integer({ minimum: 1 }),
+  expiresAt: Type.String()
 });
 
 const IssuedInvitationResponse = Type.Object({
@@ -181,48 +210,82 @@ export function createTeamRoutes(
       }
     );
 
-    app.put(
-      "/api/v1/teams/:teamId/contract-settings",
+    app.post(
+      "/api/v1/teams/:teamId/contract-settings/quote",
       {
         config: { rateLimit: { max: 30, timeWindow: "15 minutes" } },
         schema: {
           params: Type.Object({
             teamId: Type.String({ pattern: UUID_PATTERN })
           }),
+          body: Type.Intersect([
+            ContractSettingsBody,
+            Type.Object({
+              seatCount: Type.Integer({
+                minimum: 1,
+                maximum: maximumSeatCount
+              })
+            })
+          ]),
+          response: {
+            201: Type.Object({ quote: ContractChangeQuoteResponse })
+          }
+        }
+      },
+      async (request, reply) => {
+        requireSameOrigin(request);
+        const userId = await authenticateUserId(request);
+        const quote = await teamService.createContractChangeQuote({
+          userId,
+          teamId: request.params.teamId,
+          seatCount: request.body.seatCount,
+          connections: request.body.connections,
+          idempotencyKey: request.body.idempotencyKey
+        });
+        await reply.status(201).send({ quote: serializeContractQuote(quote) });
+      }
+    );
+
+    app.post(
+      "/api/v1/teams/:teamId/contract-settings/quotes/:quoteId/apply",
+      {
+        config: { rateLimit: { max: 30, timeWindow: "15 minutes" } },
+        schema: {
+          params: Type.Object({
+            teamId: Type.String({ pattern: UUID_PATTERN }),
+            quoteId: Type.String({ pattern: UUID_PATTERN })
+          }),
           body: Type.Object({
-            seatCount: Type.Integer({
-              minimum: 1,
-              maximum: maximumSeatCount
-            }),
-            connections: Type.Array(
-              Type.Object({
-                connectionId: Type.String({ pattern: UUID_PATTERN }),
-                keywords: Type.Array(
-                  Type.String({ minLength: 1, maxLength: 100 }),
-                  { minItems: 1, maxItems: 100 }
-                )
-              }),
-              { minItems: 1, maxItems: 20 }
-            )
+            idempotencyKey: Type.String({ minLength: 16, maxLength: 100 }),
+            expectedPreviousAnnualAmountYen: Type.Integer({ minimum: 6000 }),
+            expectedNextAnnualAmountYen: Type.Integer({ minimum: 6000 }),
+            expectedAdditionalChargeYen: Type.Integer({ minimum: 0 })
           }),
           response: {
-            200: Type.Object({ team: TeamResponse })
+            200: Type.Object({
+              quote: ContractChangeQuoteResponse,
+              team: TeamResponse
+            })
           }
         }
       },
       async (request) => {
         requireSameOrigin(request);
         const userId = await authenticateUserId(request);
+        const applied = await teamService.applyContractChangeQuote({
+          userId,
+          teamId: request.params.teamId,
+          quoteId: request.params.quoteId,
+          idempotencyKey: request.body.idempotencyKey,
+          expectedPreviousAnnualAmountYen:
+            request.body.expectedPreviousAnnualAmountYen,
+          expectedNextAnnualAmountYen: request.body.expectedNextAnnualAmountYen,
+          expectedAdditionalChargeYen: request.body.expectedAdditionalChargeYen,
+          requestId: request.id
+        });
         return {
-          team: serializeTeam(
-            await teamService.updateContractSettings({
-              userId,
-              teamId: request.params.teamId,
-              seatCount: request.body.seatCount,
-              connections: request.body.connections,
-              requestId: request.id
-            })
-          )
+          quote: serializeContractQuote(applied.quote),
+          team: serializeTeam(applied.team)
         };
       }
     );
@@ -347,8 +410,34 @@ function serializeTeam(team: TeamContextRecord) {
     subscription: {
       status: team.subscriptionStatus,
       currentTermAmountYen: team.currentTermAmountYen,
+      renewalAmountYen: team.renewalAmountYen,
       currentTermStartedAt: team.currentTermStartedAt.toISOString(),
       currentTermEndsAt: team.currentTermEndsAt.toISOString()
     }
+  };
+}
+
+function serializeContractQuote(quote: {
+  readonly id: string;
+  readonly status: "PENDING" | "APPLIED";
+  readonly previousAnnualAmountYen: number;
+  readonly nextAnnualAmountYen: number;
+  readonly additionalChargeYen: number;
+  readonly seatCount: number;
+  readonly keywordCount: number;
+  readonly mailConnectionCount: number;
+  readonly expiresAt: Date;
+}) {
+  return {
+    id: quote.id,
+    status: quote.status,
+    previousAnnualAmountYen: quote.previousAnnualAmountYen,
+    nextAnnualAmountYen: quote.nextAnnualAmountYen,
+    additionalChargeYen: quote.additionalChargeYen,
+    requiresCheckout: quote.additionalChargeYen > 0,
+    seatCount: quote.seatCount,
+    keywordCount: quote.keywordCount,
+    mailConnectionCount: quote.mailConnectionCount,
+    expiresAt: quote.expiresAt.toISOString()
   };
 }

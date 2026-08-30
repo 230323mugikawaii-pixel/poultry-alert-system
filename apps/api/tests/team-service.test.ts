@@ -270,6 +270,103 @@ describe("TeamService", () => {
     expect(updated.currentTermAmountYen).toBe(15_900);
   });
 
+  it("quotes an increase without mutating and applies it once after confirmation", async () => {
+    const fixture = await createFixture(11);
+    expect(fixture.team.currentTermAmountYen).toBe(7_100);
+    const connectionId = randomUUID();
+    const quote = await fixture.service.createContractChangeQuote({
+      userId: ownerUserId,
+      teamId: fixture.team.teamId,
+      seatCount: 13,
+      connections: [{ connectionId, keywords: ["停電", "通電", "警報"] }],
+      idempotencyKey: "contract-quote-service-0001"
+    });
+
+    expect(quote).toMatchObject({
+      previousAnnualAmountYen: 7_100,
+      nextAnnualAmountYen: 7_200,
+      additionalChargeYen: 100,
+      seatCount: 13
+    });
+    expect(fixture.repository.context?.seatSummary.totalUserLimit).toBe(12);
+
+    const applyInput = {
+      userId: ownerUserId,
+      teamId: fixture.team.teamId,
+      quoteId: quote.id,
+      idempotencyKey: "contract-apply-service-0001",
+      expectedPreviousAnnualAmountYen: quote.previousAnnualAmountYen,
+      expectedNextAnnualAmountYen: quote.nextAnnualAmountYen,
+      expectedAdditionalChargeYen: quote.additionalChargeYen
+    };
+    const applied = await fixture.service.applyContractChangeQuote(applyInput);
+    const repeated = await fixture.service.applyContractChangeQuote(applyInput);
+
+    expect(applied.team).toMatchObject({
+      currentTermAmountYen: 7_200,
+      renewalAmountYen: 7_200,
+      seatSummary: { totalUserLimit: 13 }
+    });
+    expect(repeated.quote.id).toBe(applied.quote.id);
+    expect(fixture.repository.contractQuotes).toHaveLength(1);
+  });
+
+  it("applies a downgrade without changing the paid current-term amount", async () => {
+    const fixture = await createFixture(11);
+    const quote = await fixture.service.createContractChangeQuote({
+      userId: ownerUserId,
+      teamId: fixture.team.teamId,
+      seatCount: 10,
+      connections: [
+        {
+          connectionId: randomUUID(),
+          keywords: ["停電", "通電", "警報"]
+        }
+      ],
+      idempotencyKey: "contract-quote-service-0002"
+    });
+    expect(quote.additionalChargeYen).toBe(0);
+
+    const applied = await fixture.service.applyContractChangeQuote({
+      userId: ownerUserId,
+      teamId: fixture.team.teamId,
+      quoteId: quote.id,
+      idempotencyKey: "contract-apply-service-0002",
+      expectedPreviousAnnualAmountYen: quote.previousAnnualAmountYen,
+      expectedNextAnnualAmountYen: quote.nextAnnualAmountYen,
+      expectedAdditionalChargeYen: quote.additionalChargeYen
+    });
+    expect(applied.team.currentTermAmountYen).toBe(7_100);
+    expect(applied.team.renewalAmountYen).toBe(6_900);
+  });
+
+  it("rejects stale confirmation amounts", async () => {
+    const fixture = await createFixture(11);
+    const quote = await fixture.service.createContractChangeQuote({
+      userId: ownerUserId,
+      teamId: fixture.team.teamId,
+      seatCount: 13,
+      connections: [
+        {
+          connectionId: randomUUID(),
+          keywords: ["停電", "通電", "警報"]
+        }
+      ],
+      idempotencyKey: "contract-quote-service-0003"
+    });
+    await expect(
+      fixture.service.applyContractChangeQuote({
+        userId: ownerUserId,
+        teamId: fixture.team.teamId,
+        quoteId: quote.id,
+        idempotencyKey: "contract-apply-service-0003",
+        expectedPreviousAnnualAmountYen: quote.previousAnnualAmountYen,
+        expectedNextAnnualAmountYen: quote.nextAnnualAmountYen,
+        expectedAdditionalChargeYen: 0
+      })
+    ).rejects.toMatchObject({ code: "CONTRACT_SETTINGS_CONFLICT" });
+  });
+
   it("requires at least one keyword for every monitoring connection", async () => {
     const fixture = await createFixture(1);
     await expect(

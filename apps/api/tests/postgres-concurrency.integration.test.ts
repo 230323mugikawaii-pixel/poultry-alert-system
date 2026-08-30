@@ -74,6 +74,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
         sessions,
         devices,
         subscription_changes,
+        contract_change_quotes,
         team_keywords,
         subscriptions,
         team_memberships,
@@ -1716,7 +1717,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       }
     });
 
-    const updated = await services.teamService.updateContractSettings({
+    const quote = await services.teamService.createContractChangeQuote({
       userId: owner.id,
       teamId: team.team.teamId,
       seatCount: 100,
@@ -1727,14 +1728,49 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
           keywords: ["警報", "サーバー障害"]
         }
       ],
-      requestId: "contract-settings-test"
+      idempotencyKey: "contract-settings-quote-test"
     });
+
+    expect(quote).toMatchObject({
+      previousAnnualAmountYen: 6_200,
+      nextAnnualAmountYen: 15_900,
+      additionalChargeYen: 9_700
+    });
+    await expect(
+      database.subscription.findUniqueOrThrow({
+        where: { teamId: team.team.teamId },
+        select: { seatLimit: true, currentTermAmountYen: true }
+      })
+    ).resolves.toEqual({ seatLimit: 2, currentTermAmountYen: 6_200 });
+
+    const applyInput = {
+      userId: owner.id,
+      teamId: team.team.teamId,
+      quoteId: quote.id,
+      idempotencyKey: "contract-settings-apply-test",
+      expectedPreviousAnnualAmountYen: quote.previousAnnualAmountYen,
+      expectedNextAnnualAmountYen: quote.nextAnnualAmountYen,
+      expectedAdditionalChargeYen: quote.additionalChargeYen,
+      requestId: "contract-settings-test"
+    };
+    const updated = (
+      await services.teamService.applyContractChangeQuote(applyInput)
+    ).team;
+    const repeated =
+      await services.teamService.applyContractChangeQuote(applyInput);
 
     expect(updated).toMatchObject({
       keywords: ["停電", "警報", "サーバー障害"],
       currentTermAmountYen: 15_900,
+      renewalAmountYen: 15_900,
       seatSummary: { seatLimit: 99, totalUserLimit: 100 }
     });
+    expect(repeated.quote.id).toBe(quote.id);
+    await expect(
+      database.contractChangeQuote.count({
+        where: { teamId: team.team.teamId, status: "APPLIED" }
+      })
+    ).resolves.toBe(1);
     await expect(
       database.mailConnection.findMany({
         where: { teamId: team.team.teamId },
@@ -1762,7 +1798,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       database.auditEvent.count({
         where: {
           teamId: team.team.teamId,
-          action: "CONTRACT_SETTINGS_UPDATED"
+          action: "CONTRACT_CHANGE_APPLIED"
         }
       })
     ).resolves.toBe(1);
