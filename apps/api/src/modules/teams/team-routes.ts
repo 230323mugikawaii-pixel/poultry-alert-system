@@ -6,6 +6,7 @@ import type { AuthService } from "../auth/auth-service.js";
 import type { InvitationService } from "../invitations/invitation-service.js";
 import type { TeamContextRecord } from "./team-repository.js";
 import type { TeamService } from "./team-service.js";
+import { DEFAULT_MAX_CONFIGURED_SEAT_COUNT } from "./seat-policy.js";
 
 const SeatSummaryResponse = Type.Object({
   seatLimit: Type.Integer({ minimum: 0 }),
@@ -49,6 +50,8 @@ export function createTeamRoutes(
   environment: AppEnvironment,
   invitationService?: InvitationService
 ): FastifyPluginAsyncTypebox {
+  const maximumSeatCount =
+    environment.MAX_CONFIGURED_SEAT_COUNT ?? DEFAULT_MAX_CONFIGURED_SEAT_COUNT;
   return async (app) => {
     const authenticateUserId = async (request: {
       readonly cookies: Readonly<Record<string, string | undefined>>;
@@ -106,7 +109,10 @@ export function createTeamRoutes(
         schema: {
           body: Type.Object({
             name: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
-            seatLimit: Type.Integer({ minimum: 0, maximum: 100 }),
+            seatLimit: Type.Integer({
+              minimum: 0,
+              maximum: maximumSeatCount - 1
+            }),
             keywords: Type.Optional(
               Type.Array(Type.String({ minLength: 1, maxLength: 100 }), {
                 maxItems: 100
@@ -222,7 +228,10 @@ export function createTeamRoutes(
       {
         schema: {
           body: Type.Object({
-            seatLimit: Type.Integer({ minimum: 0, maximum: 100 })
+            seatLimit: Type.Integer({
+              minimum: 0,
+              maximum: maximumSeatCount - 1
+            })
           }),
           response: {
             202: Type.Object({

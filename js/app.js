@@ -189,7 +189,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-29.5";
+  "2026-08-30.1";
 
 let alarmAudioContext = null;
 let alarmRepeatTimer = null;
@@ -237,6 +237,7 @@ const ownerSetupKeywordDirty = {
   MICROSOFT: false
 };
 let notificationMemberManagement = null;
+let notificationMemberManagementLoadState = "idle";
 let notificationMemberCredential = null;
 let ownerAlerts = [];
 let userNotifications = [];
@@ -282,12 +283,11 @@ function openAuthenticatedStartupDestination() {
   ) {
     openOwnerSetup();
   } else if (
-    destination ===
-    ownerOnboardingRouting.destinations.MONITORING_CONFIRMATION
+    destination === ownerOnboardingRouting.destinations.APP
   ) {
-    openMonitoringConfirmation();
-  } else {
     openApp();
+  } else {
+    openOwnerSetup();
   }
 
   return destination;
@@ -342,8 +342,7 @@ async function initializeApplication() {
       mailConnections =
         await fetchMailConnections();
       if (currentTeam?.role === "OWNER") {
-        notificationMemberManagement =
-          await fetchNotificationMembers();
+        await refreshNotificationMemberManagement();
         ownerAlerts =
           await fetchOwnerAlerts();
       }
@@ -952,6 +951,25 @@ async function fetchNotificationMembers() {
     );
     return null;
   }
+}
+
+
+async function refreshNotificationMemberManagement() {
+  if (currentTeam?.role !== "OWNER") {
+    notificationMemberManagement = null;
+    notificationMemberManagementLoadState = "idle";
+    renderNotificationMemberManagement();
+    return null;
+  }
+  notificationMemberManagementLoadState = "loading";
+  renderNotificationMemberManagement();
+  const result = await fetchNotificationMembers();
+  notificationMemberManagement = result;
+  notificationMemberManagementLoadState = result
+    ? "ready"
+    : "error";
+  renderNotificationMemberManagement();
+  return result;
 }
 
 
@@ -2405,7 +2423,7 @@ function updateOwnerSeatCount() {
     document.getElementById("ownerSeatCount")?.value
   );
   ownerSetupSeatCount =
-    Number.isInteger(value) && value >= 1 && value <= 10
+    Number.isInteger(value) && value >= 1
       ? value
       : 1;
   updatePrice();
@@ -2899,7 +2917,12 @@ ${formatYen(totalPrice)}
     }
     synchronizeContractFromCurrentTeam();
     saveData();
-    openMonitoringConfirmation();
+    await refreshNotificationMemberManagement();
+    mailProviderAvailability =
+      await fetchMailProviderAvailability();
+    mailConnections = await fetchMailConnections();
+    ownerAlerts = await fetchOwnerAlerts();
+    openApp();
   } catch (error) {
     await showAppAlert(
       error instanceof Error
@@ -2910,151 +2933,6 @@ ${formatYen(totalPrice)}
   } finally {
     if (button) button.disabled = false;
   }
-}
-
-
-function openMonitoringConfirmation() {
-  if (
-    !authenticatedUser ||
-    !currentTeam ||
-    !ownerOnboarding ||
-    !["PURCHASED", "COMPLETED"].includes(
-      ownerOnboarding.status
-    )
-  ) {
-    if (authenticatedUser && currentTeam) {
-      openApp();
-    } else {
-      openOwnerSetup();
-    }
-    return;
-  }
-  showOnlyScreen("monitoringConfirmationScreen");
-  setText("monitoringConfirmationError", "");
-  renderMonitoringConfirmation();
-  window.scrollTo({ top: 0 });
-}
-
-
-function renderMonitoringConfirmation() {
-  const container =
-    document.getElementById("monitoringConfirmationList");
-  const finishButton =
-    document.getElementById(
-      "finishMonitoringConfirmationButton"
-    );
-  if (!container || !finishButton) return;
-  const choices =
-    ownerOnboarding?.choices?.filter(
-      (choice) => choice.email && choice.status !== "SKIPPED"
-    ) ?? [];
-  container.innerHTML = choices
-    .map((choice) => {
-      const isActivated = choice.status === "ACTIVATED";
-      const isDeferred = choice.status === "DEFERRED";
-      const question =
-        choice.provider === "MICROSOFT"
-          ? "このMicrosoft 365アカウントを監視しますか？"
-          : "このGmailアカウントを監視しますか？";
-      return `
-        <article class="monitoring-confirmation-card">
-          <p class="small-label">${escapeHtml(mailProviderLabel(choice.provider))}</p>
-          <h2>${question}</h2>
-          <p class="confirmation-email">${escapeHtml(choice.email)}</p>
-          <p class="input-help">設定完了後も変更できます。</p>
-          <div class="monitoring-provider-actions">
-            <button
-              type="button"
-              class="btn primary"
-              onclick="activateOwnerMonitoringChoice('${choice.id}')"
-              ${isActivated ? "disabled" : ""}
-            >${isActivated ? "監視設定済み" : "このアカウントを監視する"}</button>
-            <button
-              type="button"
-              class="btn outline"
-              onclick="deferOwnerMonitoringChoice('${choice.id}')"
-              ${isActivated || isDeferred ? "disabled" : ""}
-            >${isDeferred ? "あとで変更を選択済み" : "あとで変更"}</button>
-          </div>
-        </article>
-      `;
-    })
-    .join("");
-  finishButton.disabled = choices.some(
-    (choice) => choice.status === "AUTHORIZED"
-  );
-}
-
-
-async function updateOwnerMonitoringChoice(choiceId, action) {
-  if (
-    !ownerOnboarding ||
-    !["activate", "defer"].includes(action)
-  ) {
-    return;
-  }
-  setText("monitoringConfirmationError", "");
-  try {
-    const response = await fetch(
-      apiUrl(
-        `/api/v1/owner-onboarding/choices/${encodeURIComponent(choiceId)}/${action}`
-      ),
-      {
-        method: "POST",
-        credentials: "include",
-        headers: { Accept: "application/json" }
-      }
-    );
-    const result = await response.json().catch(() => null);
-    if (!response.ok || !isOwnerOnboarding(result)) {
-      throw new Error(
-        result?.error?.message ||
-          "監視アカウントの設定を保存できませんでした。"
-      );
-    }
-    ownerOnboarding = result;
-    renderMonitoringConfirmation();
-  } catch (error) {
-    setText(
-      "monitoringConfirmationError",
-      error instanceof Error
-        ? error.message
-        : "監視アカウントの設定を保存できませんでした。"
-    );
-  }
-}
-
-
-function activateOwnerMonitoringChoice(choiceId) {
-  return updateOwnerMonitoringChoice(choiceId, "activate");
-}
-
-
-function deferOwnerMonitoringChoice(choiceId) {
-  return updateOwnerMonitoringChoice(choiceId, "defer");
-}
-
-
-async function finishOwnerOnboarding() {
-  if (
-    ownerOnboarding?.choices?.some(
-      (choice) => choice.status === "AUTHORIZED"
-    )
-  ) {
-    setText(
-      "monitoringConfirmationError",
-      "各アカウントで、監視を始めるかあとで変更するかを選んでください。"
-    );
-    return;
-  }
-  mailProviderAvailability =
-    await fetchMailProviderAvailability();
-  mailConnections =
-    await fetchMailConnections();
-  notificationMemberManagement =
-    await fetchNotificationMembers();
-  ownerAlerts = await fetchOwnerAlerts();
-  openApp();
 }
 
 
@@ -3519,6 +3397,40 @@ function renderDeferredMailChoice(choice) {
 }
 
 
+async function updateOwnerMonitoringChoice(choiceId, action) {
+  if (!ownerOnboarding || action !== "activate") return null;
+  try {
+    const response = await fetch(
+      apiUrl(
+        `/api/v1/owner-onboarding/choices/${encodeURIComponent(choiceId)}/${action}`
+      ),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { Accept: "application/json" }
+      }
+    );
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !isOwnerOnboarding(result)) {
+      throw new Error(
+        result?.error?.message ||
+          "監視を開始できませんでした。"
+      );
+    }
+    ownerOnboarding = result;
+    return result;
+  } catch (error) {
+    await showAppAlert(
+      error instanceof Error
+        ? error.message
+        : "監視を開始できませんでした。",
+      { title: "監視設定のエラー" }
+    );
+    return null;
+  }
+}
+
+
 async function activateDeferredOwnerMonitoring(choiceId) {
   await updateOwnerMonitoringChoice(choiceId, "activate");
   mailConnections = await fetchMailConnections();
@@ -3875,7 +3787,9 @@ function renderNotificationMemberManagement() {
   const members = notificationMemberManagement?.members ?? [];
   if (!seats) {
     summary.textContent =
-      "参加者情報を読み込めませんでした。";
+      notificationMemberManagementLoadState === "error"
+        ? "参加者情報を読み込めませんでした。契約画面を開き直してください。"
+        : "参加者情報を読み込んでいます。";
     list.replaceChildren();
     createButton.disabled = true;
     openCreateButton.disabled = true;
@@ -3884,15 +3798,15 @@ function renderNotificationMemberManagement() {
   }
   summary.innerHTML = `
     <div class="member-seat-item">
-      <span>契約利用人数</span>
-      <strong>${seats.seatCount}人</strong>
+      <span>利用人数</span>
+      <strong>${1 + seats.occupiedAdditionalSeats}/${seats.seatCount}人</strong>
     </div>
     <div class="member-seat-item">
       <span>参加者</span>
       <strong>${seats.activeNotificationMemberCount}人</strong>
     </div>
     <div class="member-seat-item">
-      <span>空き人数</span>
+      <span>追加可能</span>
       <strong>${seats.availableSeats}人</strong>
     </div>
   `;
@@ -3961,8 +3875,9 @@ function openNotificationMemberCreateForm() {
     seats.pendingSeatCount !== null
   ) {
     if (capacityMessage) {
-      capacityMessage.textContent =
-        seats?.pendingSeatCount !== null &&
+      capacityMessage.textContent = !seats
+        ? "参加者情報を読み込んでいます。少し待ってからもう一度お試しください。"
+        : seats?.pendingSeatCount !== null &&
         seats?.pendingSeatCount !== undefined &&
         seats?.availableSeats > 0
           ? "利用人数の変更が完了するまで参加者を追加できません。"
@@ -4021,9 +3936,7 @@ async function createNotificationMember() {
           "参加者を追加できませんでした。"
       );
     }
-    notificationMemberManagement =
-      await fetchNotificationMembers();
-    renderNotificationMemberManagement();
+    await refreshNotificationMemberManagement();
     closeNotificationMemberCreateForm();
     showNotificationMemberCredential(payload, "create");
   } catch (error) {
@@ -4119,6 +4032,7 @@ async function disableNotificationMember(memberId) {
       );
     }
     notificationMemberManagement = payload;
+    notificationMemberManagementLoadState = "ready";
     currentTeam =
       (await fetchCurrentTeamContext()) || currentTeam;
     renderNotificationMemberManagement();
@@ -4778,6 +4692,13 @@ function showAppPage(
     closeNotificationMemberCredential();
   }
 
+  if (
+    pageId === "contractPage" &&
+    currentTeam?.role === "OWNER"
+  ) {
+    void refreshNotificationMemberManagement();
+  }
+
   document
     .querySelectorAll(
       ".app-page"
@@ -4915,6 +4836,7 @@ async function performLogout() {
   };
   resetOwnerOnboardingClientState();
   notificationMemberManagement = null;
+  notificationMemberManagementLoadState = "idle";
   closeNotificationMemberCreateForm();
   closeNotificationMemberCredential();
   ownerAlerts = [];
@@ -6263,7 +6185,6 @@ function showOnlyScreen(screenId) {
   const authenticatedScreens = new Set([
     "setupScreen",
     "paymentScreen",
-    "monitoringConfirmationScreen",
     "renewalCompleteScreen",
     "appScreen"
   ]);
@@ -6300,7 +6221,6 @@ function showOnlyScreen(screenId) {
     "notificationMemberAppScreen",
     "setupScreen",
     "paymentScreen",
-    "monitoringConfirmationScreen",
     "renewalCompleteScreen",
     "googleScreen",
     "appScreen"

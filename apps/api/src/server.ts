@@ -27,6 +27,7 @@ import { NotificationMemberService } from "./modules/notification-members/notifi
 import { PrismaNotificationMemberRepository } from "./modules/notification-members/prisma-notification-member-repository.js";
 import { PrismaInvitationRepository } from "./modules/invitations/prisma-invitation-repository.js";
 import { PrismaTeamRepository } from "./modules/teams/prisma-team-repository.js";
+import { DEFAULT_MAX_CONFIGURED_SEAT_COUNT } from "./modules/teams/seat-policy.js";
 import { TeamService } from "./modules/teams/team-service.js";
 import { PrismaSecurityThrottleRepository } from "./modules/security/prisma-security-throttle-repository.js";
 import { SecurityThrottleService } from "./modules/security/security-throttle-service.js";
@@ -116,7 +117,9 @@ const primaryAuthService = new PrimaryAuthService({
   }
 });
 const teamService = new TeamService({
-  repository: new PrismaTeamRepository(database)
+  repository: new PrismaTeamRepository(database),
+  maxConfiguredSeatCount:
+    environment.MAX_CONFIGURED_SEAT_COUNT ?? DEFAULT_MAX_CONFIGURED_SEAT_COUNT
 });
 const mailProviderAdapters: MailProviderAdapter[] = [
   new GoogleMailProvider({

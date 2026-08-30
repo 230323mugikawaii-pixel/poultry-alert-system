@@ -778,37 +778,40 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       })
     ).resolves.toBe(1);
     await expect(database.subscription.count()).resolves.toBe(1);
-    await expect(database.mailConnection.count()).resolves.toBe(0);
+    await expect(database.mailConnection.count()).resolves.toBe(2);
 
     const purchasedOnboarding = await service.getCurrent(userId);
-    const googleChoice = purchasedOnboarding?.choices.find(
-      ({ provider }) => provider === "GOOGLE"
-    );
-    const microsoftChoice = purchasedOnboarding?.choices.find(
-      ({ provider }) => provider === "MICROSOFT"
-    );
-    await service.activateChoice({
-      userId,
-      choiceId: googleChoice?.id ?? "",
-      requestId: "postgres-owner-activate"
+    expect(purchasedOnboarding).toMatchObject({
+      status: "COMPLETED",
+      teamId: purchased.team.teamId,
+      choices: [{ status: "ACTIVATED" }, { status: "ACTIVATED" }]
     });
-    const completed = await service.deferChoice(
-      userId,
-      microsoftChoice?.id ?? ""
-    );
-    expect(completed.status).toBe("COMPLETED");
     await expect(
       database.mailConnection.findMany({
-        select: { status: true, keywords: true },
-        orderBy: { createdAt: "asc" }
+        select: {
+          status: true,
+          keywords: true,
+          mailAuthorization: { select: { provider: true } }
+        }
       })
-    ).resolves.toEqual([
-      { status: "ACTIVE", keywords: ["停電のお知らせ", "Call Now"] }
-    ]);
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        {
+          status: "ACTIVE",
+          keywords: ["停電のお知らせ", "Call Now"],
+          mailAuthorization: { provider: "GOOGLE" }
+        },
+        {
+          status: "ACTIVE",
+          keywords: ["Call Now"],
+          mailAuthorization: { provider: "MICROSOFT" }
+        }
+      ])
+    );
     await expect(
       service.completeDemoPurchase({
         userId,
-        onboardingId: completed.id,
+        onboardingId: purchasedOnboarding?.id ?? "",
         seatCount: 9
       })
     ).resolves.toMatchObject({

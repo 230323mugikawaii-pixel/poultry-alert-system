@@ -4,6 +4,7 @@ export const BASE_ANNUAL_PRICE_YEN = 6_000;
 export const ADDITIONAL_MEMBER_ANNUAL_PRICE_YEN = 100;
 export const INCLUDED_KEYWORD_COUNT = 3;
 export const EXTRA_KEYWORD_ANNUAL_PRICE_YEN = 100;
+export const DEFAULT_MAX_CONFIGURED_SEAT_COUNT = 1_000_000;
 
 export interface SeatSummary {
   readonly seatLimit: number;
@@ -34,6 +35,23 @@ export function canAddMember(
   activeMemberCount: number
 ): boolean {
   return calculateSeatSummary(seatLimit, activeMemberCount).availableSeats > 0;
+}
+
+export function assertConfiguredSeatCount(
+  seatCount: number,
+  maximumSeatCount = DEFAULT_MAX_CONFIGURED_SEAT_COUNT
+): void {
+  if (
+    !Number.isInteger(seatCount) ||
+    seatCount < 1 ||
+    seatCount > maximumSeatCount
+  ) {
+    throw new AppError(
+      "INVALID_SEAT_CONFIGURATION",
+      "利用人数を正しく入力してください。",
+      400
+    );
+  }
 }
 
 export function calculateAnnualPriceYen(

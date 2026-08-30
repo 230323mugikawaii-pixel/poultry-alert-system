@@ -19,15 +19,22 @@ describe("additional member seat policy", () => {
   });
 
   it.each([
-    { seatLimit: 0, keywords: 3, expected: 6000 },
-    { seatLimit: 5, keywords: 3, expected: 6500 },
-    { seatLimit: 5, keywords: 4, expected: 6600 }
+    { seatCount: 1, keywords: 3, expected: 6000 },
+    { seatCount: 2, keywords: 3, expected: 6100 },
+    { seatCount: 10, keywords: 3, expected: 6900 },
+    { seatCount: 11, keywords: 3, expected: 7000 },
+    { seatCount: 25, keywords: 3, expected: 8400 },
+    { seatCount: 100, keywords: 3, expected: 15900 },
+    { seatCount: 6, keywords: 4, expected: 6600 }
   ])(
-    "calculates the annual price for $seatLimit seats and $keywords keywords",
+    "calculates the annual price for $seatCount people and $keywords keywords",
     (testCase) => {
       expect(
-        calculateAnnualPriceYen(testCase.seatLimit, testCase.keywords)
+        calculateAnnualPriceYen(testCase.seatCount - 1, testCase.keywords)
       ).toBe(testCase.expected);
+      expect(calculateSeatSummary(testCase.seatCount - 1, 0)).toMatchObject({
+        totalUserLimit: testCase.seatCount
+      });
     }
   );
 });

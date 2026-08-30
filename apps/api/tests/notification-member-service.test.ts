@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { buildApp } from "../src/app.js";
+import { loadEnvironment } from "../src/config/env.js";
+import { AuthService } from "../src/modules/auth/auth-service.js";
 import { verifyInvitationPassword } from "../src/modules/invitations/invitation-credential.js";
 import type {
   NotificationMemberRecord,
@@ -10,7 +13,13 @@ import {
   NotificationMemberService
 } from "../src/modules/notification-members/notification-member-service.js";
 import { SecurityThrottleService } from "../src/modules/security/security-throttle-service.js";
+import { TeamService } from "../src/modules/teams/team-service.js";
+import {
+  MemoryAuthRepository,
+  MemoryMagicLinkEmailSender
+} from "./helpers/memory-auth.js";
 import { MemorySecurityThrottleRepository } from "./helpers/memory-security-throttle.js";
+import { MemoryTeamRepository } from "./helpers/memory-team.js";
 
 const tokenPepper = "test-token-pepper-at-least-thirty-two-characters";
 
@@ -110,6 +119,76 @@ describe("NotificationMemberService", () => {
       expect(generateCallNowId()).toMatch(/^CN-[0-9A-HJKMNP-TV-Z]{8}$/u);
     }
   });
+
+  it("returns HTTP 200 with seat data when an owner has no participants", async () => {
+    const environment = loadEnvironment({
+      APP_ENV: "test",
+      LOG_LEVEL: "silent",
+      PUBLIC_ORIGIN: "https://test.call-now.example",
+      COOKIE_NAME: "callnow_notification_member_test",
+      AUTH_TOKEN_PEPPER: tokenPepper
+    });
+    const authRepository = new MemoryAuthRepository();
+    const emailSender = new MemoryMagicLinkEmailSender();
+    const authService = new AuthService({
+      repository: authRepository,
+      emailSender,
+      publicOrigin: environment.PUBLIC_ORIGIN,
+      tokenPepper: environment.AUTH_TOKEN_PEPPER,
+      magicLinkTtlMinutes: environment.MAGIC_LINK_TTL_MINUTES,
+      sessionIdleDays: environment.SESSION_IDLE_DAYS,
+      sessionAbsoluteDays: environment.SESSION_ABSOLUTE_DAYS,
+      maxActiveSessions: environment.MAX_ACTIVE_SESSIONS
+    });
+    const owner = await login(authService, emailSender, "owner@example.com");
+    const teamRepository = new MemoryTeamRepository();
+    const teamService = new TeamService({
+      repository: teamRepository,
+      teamCodeGenerator: () => "482731"
+    });
+    const created = await teamService.createTeam(
+      { ownerUserId: owner.userId, seatLimit: 4 },
+      {
+        passwordHash: "$argon2id$fixture",
+        expiresAt: new Date("2026-09-30T00:00:00.000Z")
+      }
+    );
+    const memberService = createService(
+      createRepository(5),
+      () => "CN-AB12CD34"
+    );
+    const app = await buildApp({
+      environment,
+      authService,
+      teamService,
+      notificationMemberService: memberService,
+      securityThrottleService: new SecurityThrottleService(
+        new MemorySecurityThrottleRepository(),
+        tokenPepper
+      ),
+      logger: false
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/v1/teams/${created.team.teamId}/notification-members`,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`
+      }
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toEqual({
+      members: [],
+      seats: {
+        seatCount: 5,
+        additionalSeatLimit: 4,
+        activeNotificationMemberCount: 0,
+        occupiedAdditionalSeats: 0,
+        availableSeats: 4,
+        pendingSeatCount: null
+      }
+    });
+    await app.close();
+  });
 });
 
 function createService(
@@ -135,7 +214,7 @@ interface TestNotificationMemberRepository extends NotificationMemberRepository 
   passwordHash: string | null;
 }
 
-function createRepository(): TestNotificationMemberRepository {
+function createRepository(seatCount = 2): TestNotificationMemberRepository {
   let member: NotificationMemberRecord | null = null;
   return {
     passwordHash: null,
@@ -143,11 +222,11 @@ function createRepository(): TestNotificationMemberRepository {
       Promise.resolve({
         members: member?.teamId === teamId ? [member] : [],
         seats: {
-          seatCount: 2,
-          additionalSeatLimit: 1,
+          seatCount,
+          additionalSeatLimit: seatCount - 1,
           activeNotificationMemberCount: member ? 1 : 0,
           occupiedAdditionalSeats: member ? 1 : 0,
-          availableSeats: member ? 0 : 1,
+          availableSeats: member ? seatCount - 2 : seatCount - 1,
           pendingSeatCount: null
         }
       }),
@@ -174,4 +253,17 @@ function createRepository(): TestNotificationMemberRepository {
     touchSession: () => Promise.resolve(),
     revokeSession: () => Promise.resolve()
   };
+}
+
+async function login(
+  authService: AuthService,
+  emailSender: MemoryMagicLinkEmailSender,
+  email: string
+): Promise<{ readonly userId: string; readonly sessionToken: string }> {
+  await authService.requestMagicLink(email);
+  const token = new URL(
+    emailSender.messages.at(-1)?.magicLink ?? ""
+  ).searchParams.get("token");
+  const result = await authService.consumeMagicLink(token ?? "", {});
+  return { userId: result.user.id, sessionToken: result.sessionToken };
 }

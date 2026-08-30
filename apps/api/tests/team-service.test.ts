@@ -31,6 +31,34 @@ async function createFixture(seatLimit = 5) {
 }
 
 describe("TeamService", () => {
+  it.each([1, 2, 10, 11, 25, 100])(
+    "purchases a %i-person plan with the owner included in seatCount",
+    async (seatCount) => {
+      const repository = new MemoryTeamRepository();
+      const service = new TeamService({
+        repository,
+        now: () => new Date("2026-08-30T00:00:00.000Z"),
+        teamCodeGenerator: () => "482731"
+      });
+
+      const result = await service.completeOwnerOnboardingPurchase({
+        userId: ownerUserId,
+        onboardingId: randomUUID(),
+        keywords: ["停電", "通電", "警報"],
+        seatCount
+      });
+
+      expect(result.team.seatSummary).toMatchObject({
+        seatLimit: seatCount - 1,
+        totalUserLimit: seatCount,
+        availableSeats: seatCount - 1
+      });
+      expect(result.team.currentTermAmountYen).toBe(
+        6_000 + (seatCount - 1) * 100
+      );
+    }
+  );
+
   it("bootstraps one owner workspace and reuses it across repeated initialization", async () => {
     const repository = new MemoryTeamRepository();
     const service = new TeamService({

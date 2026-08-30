@@ -8,6 +8,7 @@ import type { MailProviderId } from "../mail/mail-provider.js";
 import type { SecurityThrottleService } from "../security/security-throttle-service.js";
 import type { OwnerOnboardingRecord } from "./owner-onboarding-repository.js";
 import type { OwnerOnboardingService } from "./owner-onboarding-service.js";
+import { DEFAULT_MAX_CONFIGURED_SEAT_COUNT } from "../teams/seat-policy.js";
 
 const ProviderParams = Type.Object({
   provider: Type.Union([Type.Literal("google"), Type.Literal("microsoft")])
@@ -55,6 +56,8 @@ export function createOwnerOnboardingRoutes(
   securityThrottle: SecurityThrottleService,
   environment: AppEnvironment
 ): FastifyPluginAsyncTypebox {
+  const maximumSeatCount =
+    environment.MAX_CONFIGURED_SEAT_COUNT ?? DEFAULT_MAX_CONFIGURED_SEAT_COUNT;
   return async (app) => {
     if (!app.hasContentTypeParser("application/x-www-form-urlencoded")) {
       app.addContentTypeParser(
@@ -213,7 +216,10 @@ export function createOwnerOnboardingRoutes(
         schema: {
           body: Type.Object({
             onboardingId: Type.String({ pattern: UUID_PATTERN }),
-            seatCount: Type.Integer({ minimum: 1, maximum: 101 })
+            seatCount: Type.Integer({
+              minimum: 1,
+              maximum: maximumSeatCount
+            })
           }),
           response: {
             200: Type.Object({

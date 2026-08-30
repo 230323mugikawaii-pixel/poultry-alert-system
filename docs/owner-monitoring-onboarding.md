@@ -18,9 +18,9 @@
 1. 最初のメール監視 OAuth 成功時に User、ExternalIdentity、Session、User 単位の MailAuthorization、PENDING の OwnerOnboarding を作成します。
 2. 2 つ目の Provider は、既存 Session で認証された同じ User へ追加します。
 3. 購入前は Team、OWNER Membership、Subscription、MailConnection を作成しません。
-4. 試作版の購入操作で Team、OWNER Membership、Subscription、Keyword、OwnerOnboarding の PURCHASED 化を 1 つの DB transaction で行います。
-5. 購入後に利用者が「このアカウントを監視する」を選んだときだけ MailConnection を ACTIVE にします。「あとで変更」は DEFERRED として保持します。
-6. すべての対象を ACTIVATED または DEFERRED にすると OwnerOnboarding は COMPLETED になります。
+4. 試作版の購入操作で Team、OWNER Membership、Subscription、Keyword、選択済み MailConnection、OwnerOnboarding の COMPLETED 化を 1 つの DB transaction で行います。
+5. 購入成功後は追加の監視確認画面を挟まずホームへ進みます。同じ購入操作を再送しても Team、Subscription、MailConnection を重複作成しません。
+6. 購入後の監視停止、再開、再認証、解除は通常の監視アカウント管理画面で行います。
 
 ## 未完了設定の保持期限
 
