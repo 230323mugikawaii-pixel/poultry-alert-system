@@ -84,6 +84,9 @@ const EnvironmentSchema = Type.Object({
   SESSION_IDLE_DAYS: Type.Integer({ minimum: 1, maximum: 90 }),
   SESSION_ABSOLUTE_DAYS: Type.Integer({ minimum: 1, maximum: 365 }),
   MAX_ACTIVE_SESSIONS: Type.Integer({ minimum: 1, maximum: 20 }),
+  MAX_CONFIGURED_SEAT_COUNT: Type.Optional(
+    Type.Integer({ minimum: 100, maximum: 1_000_000 })
+  ),
   INVITATION_TTL_DAYS: Type.Integer({ minimum: 1, maximum: 365 }),
   JOIN_GRANT_TTL_MINUTES: Type.Integer({ minimum: 5, maximum: 60 }),
   LINE_LINK_TTL_HOURS: Type.Integer({ minimum: 1, maximum: 168 }),
@@ -186,6 +189,9 @@ export function loadEnvironment(
     SESSION_IDLE_DAYS: Number(source.SESSION_IDLE_DAYS ?? "30"),
     SESSION_ABSOLUTE_DAYS: Number(source.SESSION_ABSOLUTE_DAYS ?? "90"),
     MAX_ACTIVE_SESSIONS: Number(source.MAX_ACTIVE_SESSIONS ?? "5"),
+    MAX_CONFIGURED_SEAT_COUNT: Number(
+      source.MAX_CONFIGURED_SEAT_COUNT ?? "1000000"
+    ),
     INVITATION_TTL_DAYS: Number(source.INVITATION_TTL_DAYS ?? "30"),
     JOIN_GRANT_TTL_MINUTES: Number(source.JOIN_GRANT_TTL_MINUTES ?? "15"),
     LINE_LINK_TTL_HOURS: Number(source.LINE_LINK_TTL_HOURS ?? "24"),

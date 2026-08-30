@@ -2418,20 +2418,17 @@ body.app-dialog-open {
   color: #0862c7;
 }
 
-.monitoring-setup-container,
-.monitoring-confirmation-container {
+.monitoring-setup-container {
   width: min(100%, 840px);
 }
 
-.monitoring-provider-grid,
-.monitoring-confirmation-list {
+.monitoring-provider-grid {
   display: grid;
   gap: 18px;
   margin: 28px 0;
 }
 
 .monitoring-provider-card,
-.monitoring-confirmation-card,
 .seat-setup-card {
   padding: 24px;
   border: 1px solid #d8e2ef;
@@ -2441,7 +2438,6 @@ body.app-dialog-open {
 }
 
 .monitoring-provider-card h2,
-.monitoring-confirmation-card h2,
 .seat-setup-card h2 {
   margin: 4px 0 10px;
 }
@@ -2457,8 +2453,7 @@ body.app-dialog-open {
   display: block;
 }
 
-.monitoring-provider-status strong,
-.completion-mark {
+.monitoring-provider-status strong {
   color: #087a42;
   font-weight: 800;
 }
@@ -2549,26 +2544,15 @@ body.app-dialog-open {
   font-weight: 800;
 }
 
-.seat-count-field select {
+.seat-count-field input {
   min-width: 130px;
   min-height: 48px;
-  padding: 10px 38px 10px 14px;
+  padding: 10px 14px;
   border: 1px solid #b9cbe2;
   border-radius: 12px;
   color: #111827;
   background: #fff;
   font: inherit;
-}
-
-.completion-mark {
-  margin: 22px 0 8px;
-}
-
-.confirmation-email {
-  overflow-wrap: anywhere;
-  color: #0862c7;
-  font-size: 1.05rem;
-  font-weight: 800;
 }
 
 .mail-connection-item.deferred {
@@ -2619,7 +2603,6 @@ body.app-dialog-open {
   }
 
   .monitoring-provider-card,
-  .monitoring-confirmation-card,
   .seat-setup-card {
     padding: 20px;
   }
@@ -2634,7 +2617,7 @@ body.app-dialog-open {
     display: grid;
   }
 
-  .seat-count-field select {
+  .seat-count-field input {
     width: 100%;
   }
 }

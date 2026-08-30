@@ -14,7 +14,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=24">
+    <link rel="stylesheet" href="css/style.css?v=25">
 </head>
 
 <body>
@@ -308,18 +308,16 @@
         </div>
         <label class="seat-count-field">
           <span>合計利用人数</span>
-          <select id="ownerSeatCount" onchange="updateOwnerSeatCount()">
-            <option value="1">1人</option>
-            <option value="2">2人</option>
-            <option value="3">3人</option>
-            <option value="4">4人</option>
-            <option value="5">5人</option>
-            <option value="6">6人</option>
-            <option value="7">7人</option>
-            <option value="8">8人</option>
-            <option value="9">9人</option>
-            <option value="10">10人</option>
-          </select>
+          <input
+            id="ownerSeatCount"
+            type="number"
+            min="1"
+            step="1"
+            inputmode="numeric"
+            value="1"
+            onchange="updateOwnerSeatCount()"
+            oninput="updateOwnerSeatCount()"
+          >
         </label>
       </div>
 
@@ -680,27 +678,6 @@
     </div>
 
   </section>
-
-  <section id="monitoringConfirmationScreen" class="flow-screen hidden">
-    <div class="flow-container monitoring-confirmation-container">
-      <p class="completion-mark">✓ 購入手続き完了</p>
-      <h1>監視アカウント確認</h1>
-      <p class="description">
-        監視を開始するアカウントを確認してください。
-      </p>
-      <div id="monitoringConfirmationList" class="monitoring-confirmation-list"></div>
-      <p id="monitoringConfirmationError" class="error-message" aria-live="polite"></p>
-      <button
-        id="finishMonitoringConfirmationButton"
-        type="button"
-        class="btn primary full-width"
-        onclick="finishOwnerOnboarding()"
-        disabled
-      >ホームへ進む</button>
-    </div>
-  </section>
-
-
 
   <!-- ========================================
        契約更新完了画面
@@ -1445,8 +1422,8 @@
   <!-- 動作用JavaScript -->
 
     <script src="js/keyword-policy.js?v=2"></script>
-    <script src="js/owner-onboarding-routing.js?v=1"></script>
-    <script src="js/app.js?v=26"></script>
+    <script src="js/owner-onboarding-routing.js?v=2"></script>
+    <script src="js/app.js?v=27"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";

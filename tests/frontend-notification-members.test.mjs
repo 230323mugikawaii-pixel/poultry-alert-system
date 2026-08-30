@@ -22,6 +22,10 @@ test("owner participant management keeps the simple add and list flow", () => {
   assert.match(management, /参加者一覧/);
   assert.match(appSource, /currentTeam\?\.role === "OWNER"/);
   assert.match(appSource, /現在の利用人数上限に達しています。/);
+  assert.match(appSource, /refreshNotificationMemberManagement/);
+  assert.match(appSource, /参加者はまだ登録されていません。/);
+  assert.match(appSource, /1 \+ seats\.occupiedAdditionalSeats/);
+  assert.match(appSource, /pageId === "contractPage"/);
 });
 
 test("credentials are one-time, copyable, and kept out of browser storage", () => {

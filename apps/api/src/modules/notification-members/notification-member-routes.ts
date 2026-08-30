@@ -15,6 +15,9 @@ import type {
 } from "./notification-member-repository.js";
 import type { NotificationMemberService } from "./notification-member-service.js";
 
+const UUID_PATTERN =
+  "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
+
 const NotificationMemberResponse = Type.Object({
   id: Type.String({ format: "uuid" }),
   callNowId: Type.String({ pattern: "^CN-[0-9A-HJKMNP-TV-Z]{8}$" }),
@@ -79,7 +82,9 @@ export function createNotificationMemberRoutes(
       "/api/v1/teams/:teamId/notification-members",
       {
         schema: {
-          params: Type.Object({ teamId: Type.String({ format: "uuid" }) }),
+          params: Type.Object({
+            teamId: Type.String({ pattern: UUID_PATTERN })
+          }),
           response: { 200: ListResponse }
         }
       },
@@ -93,7 +98,9 @@ export function createNotificationMemberRoutes(
       "/api/v1/teams/:teamId/notification-members",
       {
         schema: {
-          params: Type.Object({ teamId: Type.String({ format: "uuid" }) }),
+          params: Type.Object({
+            teamId: Type.String({ pattern: UUID_PATTERN })
+          }),
           body: Type.Object({
             displayName: Type.Optional(
               Type.String({ minLength: 1, maxLength: 120 })
@@ -134,8 +141,8 @@ export function createNotificationMemberRoutes(
       {
         schema: {
           params: Type.Object({
-            teamId: Type.String({ format: "uuid" }),
-            memberId: Type.String({ format: "uuid" })
+            teamId: Type.String({ pattern: UUID_PATTERN }),
+            memberId: Type.String({ pattern: UUID_PATTERN })
           }),
           response: { 200: CredentialResponse }
         }
@@ -170,8 +177,8 @@ export function createNotificationMemberRoutes(
       {
         schema: {
           params: Type.Object({
-            teamId: Type.String({ format: "uuid" }),
-            memberId: Type.String({ format: "uuid" })
+            teamId: Type.String({ pattern: UUID_PATTERN }),
+            memberId: Type.String({ pattern: UUID_PATTERN })
           }),
           response: { 200: ListResponse }
         }

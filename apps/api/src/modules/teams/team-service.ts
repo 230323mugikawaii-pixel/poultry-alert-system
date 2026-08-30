@@ -9,8 +9,10 @@ import type {
   TeamRepository
 } from "./team-repository.js";
 import {
+  assertConfiguredSeatCount,
   calculateAnnualPriceYen,
-  calculateSeatSummary
+  calculateSeatSummary,
+  DEFAULT_MAX_CONFIGURED_SEAT_COUNT
 } from "./seat-policy.js";
 import { normalizeTeamKeywords } from "./keyword-policy.js";
 
@@ -18,15 +20,19 @@ export interface TeamServiceOptions {
   readonly repository: TeamRepository;
   readonly now?: () => Date;
   readonly teamCodeGenerator?: () => string;
+  readonly maxConfiguredSeatCount?: number;
 }
 
 export class TeamService {
   private readonly now: () => Date;
   private readonly teamCodeGenerator: () => string;
+  private readonly maxConfiguredSeatCount: number;
 
   public constructor(private readonly options: TeamServiceOptions) {
     this.now = options.now ?? (() => new Date());
     this.teamCodeGenerator = options.teamCodeGenerator ?? generateTeamCode;
+    this.maxConfiguredSeatCount =
+      options.maxConfiguredSeatCount ?? DEFAULT_MAX_CONFIGURED_SEAT_COUNT;
   }
 
   public async createTeam(
@@ -38,6 +44,7 @@ export class TeamService {
     },
     initialInvitation: InvitationDraft | null = null
   ): Promise<TeamCreationResult> {
+    assertConfiguredSeatCount(input.seatLimit + 1, this.maxConfiguredSeatCount);
     calculateSeatSummary(input.seatLimit, 0);
     if (input.seatLimit > 0 && !initialInvitation) {
       throw new AppError(
@@ -123,17 +130,7 @@ export class TeamService {
     readonly keywords: readonly string[];
     readonly seatCount: number;
   }): Promise<TeamCreationResult> {
-    if (
-      !Number.isInteger(input.seatCount) ||
-      input.seatCount < 1 ||
-      input.seatCount > 101
-    ) {
-      throw new AppError(
-        "INVALID_SEAT_CONFIGURATION",
-        "利用人数は1〜101人で設定してください。",
-        400
-      );
-    }
+    assertConfiguredSeatCount(input.seatCount, this.maxConfiguredSeatCount);
     const seatLimit = input.seatCount - 1;
     calculateSeatSummary(seatLimit, 0);
     const keywords = normalizeTeamKeywords(input.keywords);
@@ -189,6 +186,10 @@ export class TeamService {
     requestedSeatLimit: number,
     replacementInvitation: InvitationDraft | null = null
   ): Promise<SeatLimitChangeResult> {
+    assertConfiguredSeatCount(
+      requestedSeatLimit + 1,
+      this.maxConfiguredSeatCount
+    );
     calculateSeatSummary(requestedSeatLimit, 0);
     const context = await this.requireOwner(userId);
     return this.options.repository.requestSeatLimitChange({

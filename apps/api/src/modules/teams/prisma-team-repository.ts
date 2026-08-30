@@ -49,7 +49,9 @@ export class PrismaTeamRepository implements TeamRepository {
             async (transaction) => {
               const onboarding = await transaction.ownerOnboarding.findFirst({
                 where: { id: input.onboardingId, userId: input.ownerUserId },
-                include: { choices: true }
+                include: {
+                  choices: { include: { mailAuthorization: true } }
+                }
               });
               if (!onboarding) throw onboardingNotAvailableError();
               await transaction.$queryRaw(
@@ -58,13 +60,22 @@ export class PrismaTeamRepository implements TeamRepository {
               const locked =
                 await transaction.ownerOnboarding.findUniqueOrThrow({
                   where: { id: onboarding.id },
-                  include: { choices: true }
+                  include: {
+                    choices: { include: { mailAuthorization: true } }
+                  }
                 });
               if (
                 (locked.status === "PURCHASED" ||
                   locked.status === "COMPLETED") &&
                 locked.teamId
               ) {
+                await activatePurchasedMonitoringChoices(transaction, {
+                  onboardingId: locked.id,
+                  teamId: locked.teamId,
+                  ownerUserId: input.ownerUserId,
+                  choices: locked.choices,
+                  now: input.currentTermStartedAt
+                });
                 const existing = await findCurrentTeam(
                   transaction,
                   input.ownerUserId
@@ -138,6 +149,13 @@ export class PrismaTeamRepository implements TeamRepository {
                   keywords: lockedKeywords,
                   purchasedAt: input.currentTermStartedAt
                 }
+              });
+              await activatePurchasedMonitoringChoices(transaction, {
+                onboardingId: locked.id,
+                teamId: created.team.teamId,
+                ownerUserId: input.ownerUserId,
+                choices: locked.choices,
+                now: input.currentTermStartedAt
               });
               return created;
             },
@@ -616,6 +634,82 @@ export class PrismaTeamRepository implements TeamRepository {
       throw error;
     }
   }
+}
+
+async function activatePurchasedMonitoringChoices(
+  transaction: Prisma.TransactionClient,
+  input: {
+    readonly onboardingId: string;
+    readonly teamId: string;
+    readonly ownerUserId: string;
+    readonly choices: readonly {
+      readonly id: string;
+      readonly provider: "GOOGLE" | "MICROSOFT";
+      readonly status: string;
+      readonly mailAuthorizationId: string | null;
+      readonly keywords: readonly string[];
+      readonly mailAuthorization: {
+        readonly status: string;
+        readonly encryptedRefreshToken: string | null;
+      } | null;
+    }[];
+    readonly now: Date;
+  }
+): Promise<void> {
+  for (const choice of input.choices) {
+    if (choice.status !== "AUTHORIZED") continue;
+    if (
+      !choice.mailAuthorizationId ||
+      choice.mailAuthorization?.status !== "ACTIVE" ||
+      !choice.mailAuthorization.encryptedRefreshToken
+    ) {
+      throw new AppError(
+        "MAIL_REAUTHORIZATION_REQUIRED",
+        "監視アカウントをもう一度設定してください。",
+        409
+      );
+    }
+    const connection = await transaction.mailConnection.upsert({
+      where: {
+        teamId_mailAuthorizationId: {
+          teamId: input.teamId,
+          mailAuthorizationId: choice.mailAuthorizationId
+        }
+      },
+      create: {
+        teamId: input.teamId,
+        mailAuthorizationId: choice.mailAuthorizationId,
+        status: "ACTIVE",
+        keywords: [...choice.keywords]
+      },
+      update: {
+        status: "ACTIVE",
+        keywords: [...choice.keywords],
+        providerCursor: null,
+        lastErrorCode: null,
+        revokedAt: null
+      }
+    });
+    await transaction.onboardingMailChoice.update({
+      where: { id: choice.id },
+      data: { status: "ACTIVATED" }
+    });
+    await transaction.auditEvent.create({
+      data: {
+        teamId: input.teamId,
+        actorUserId: input.ownerUserId,
+        action: "ONBOARDING_MAIL_MONITORING_ACTIVATED",
+        targetType: "MailConnection",
+        targetId: connection.id,
+        metadata: { provider: choice.provider }
+      }
+    });
+  }
+
+  await transaction.ownerOnboarding.update({
+    where: { id: input.onboardingId },
+    data: { status: "COMPLETED", completedAt: input.now }
+  });
 }
 
 function sameKeywordSet(

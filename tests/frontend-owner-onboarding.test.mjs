@@ -41,10 +41,6 @@ test("owner setup uses one provider OAuth ceremony and server-side onboarding st
   );
   assert.match(appSource, /\/api\/v1\/owner-onboarding\/current/);
   assert.match(appSource, /\/api\/v1\/owner-onboarding\/demo-purchase/);
-  assert.match(
-    appSource,
-    /\/api\/v1\/owner-onboarding\/choices\/\$\{encodeURIComponent\(choiceId\)\}\/\$\{action\}/
-  );
   assert.doesNotMatch(
     appSource.match(
       /function startOwnerMonitoringOAuth[\s\S]*?\n}/
@@ -53,15 +49,15 @@ test("owner setup uses one provider OAuth ceremony and server-side onboarding st
   );
 });
 
-test("setup exposes the compact three-step flow and explicit final actions", () => {
+test("setup exposes the compact three-step flow without a post-purchase confirmation", () => {
   assert.match(
     htmlSource,
     /1 監視アカウント[\s\S]*2 利用設定[\s\S]*3 購入/
   );
-  assert.match(appSource, /このアカウントを監視する/);
-  assert.match(appSource, /あとで変更/);
-  assert.match(appSource, /このGmailアカウントを監視しますか/);
-  assert.match(appSource, /このMicrosoft 365アカウントを監視しますか/);
+  assert.doesNotMatch(htmlSource, /監視アカウント確認/);
+  assert.doesNotMatch(appSource, /openMonitoringConfirmation/);
+  assert.match(htmlSource, /type="number"[\s\S]*min="1"/);
+  assert.doesNotMatch(htmlSource, /id="ownerSeatCount"[\s\S]*max="10"/);
 });
 
 test("OAuth returns to provider setup and configured cards show an unambiguous state", () => {
@@ -100,8 +96,8 @@ test("server-side onboarding state takes priority over an existing team", () => 
   );
   assert.equal(
     select({ onboardingStatus: "PURCHASED", hasCurrentTeam: true }),
-    "MONITORING_CONFIRMATION",
-    "D: purchased onboarding opens monitoring confirmation"
+    "APP",
+    "D: a legacy purchased onboarding resumes the app while the server settles monitoring"
   );
   assert.equal(
     select({ onboardingStatus: "PENDING", hasCurrentTeam: true }),

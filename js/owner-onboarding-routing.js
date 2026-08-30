@@ -20,7 +20,6 @@
   () => {
     const destinations = Object.freeze({
       OWNER_SETUP: "OWNER_SETUP",
-      MONITORING_CONFIRMATION: "MONITORING_CONFIRMATION",
       APP: "APP"
     });
 
@@ -31,9 +30,7 @@
         return destinations.OWNER_SETUP;
       }
 
-      if (onboardingStatus === "PURCHASED") {
-        return destinations.MONITORING_CONFIRMATION;
-      }
+      if (onboardingStatus === "PURCHASED") return destinations.APP;
 
       return input?.hasCurrentTeam
         ? destinations.APP

@@ -15,7 +15,8 @@ describe("loadEnvironment", () => {
       MICROSOFT_OAUTH_REDIRECT_URI:
         "http://127.0.0.1:8080/api/v1/auth/mail/microsoft/callback",
       MICROSOFT_OAUTH_TENANT: "common",
-      MAIL_TOKEN_ENCRYPTION_PROVIDER: "local"
+      MAIL_TOKEN_ENCRYPTION_PROVIDER: "local",
+      MAX_CONFIGURED_SEAT_COUNT: 1_000_000
     });
   });
 
@@ -128,6 +129,16 @@ describe("loadEnvironment", () => {
 
   it("rejects invalid ports", () => {
     expect(() => loadEnvironment({ PORT: "70000" })).toThrow(
+      "Invalid environment configuration"
+    );
+  });
+
+  it("keeps the technical seat guard configurable without a customer-facing cap", () => {
+    expect(
+      loadEnvironment({ MAX_CONFIGURED_SEAT_COUNT: "250000" })
+        .MAX_CONFIGURED_SEAT_COUNT
+    ).toBe(250_000);
+    expect(() => loadEnvironment({ MAX_CONFIGURED_SEAT_COUNT: "99" })).toThrow(
       "Invalid environment configuration"
     );
   });
