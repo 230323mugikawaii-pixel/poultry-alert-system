@@ -1266,6 +1266,69 @@
           </div>
 
           <section
+            id="notificationMemberLoginInfoPanel"
+            class="member-login-info-panel hidden"
+            aria-live="polite"
+            aria-labelledby="notificationMemberLoginInfoTitle"
+          >
+            <div class="member-create-panel-heading">
+              <div>
+                <p class="member-credential-eyebrow">ログイン情報</p>
+                <h3 id="notificationMemberLoginInfoTitle">参加者ログイン情報</h3>
+              </div>
+              <button
+                type="button"
+                class="text-button"
+                onclick="closeNotificationMemberLoginInfo()"
+              >
+                閉じる
+              </button>
+            </div>
+            <div class="member-login-info-grid">
+              <div class="member-login-info-value">
+                <span>表示名</span>
+                <strong id="notificationMemberLoginInfoName"></strong>
+              </div>
+              <div class="member-login-info-value">
+                <span>参加者ID</span>
+                <code id="notificationMemberLoginInfoId"></code>
+                <button
+                  type="button"
+                  class="btn outline"
+                  onclick="copyNotificationMemberLoginId()"
+                >
+                  IDをコピー
+                </button>
+              </div>
+            </div>
+            <div class="member-login-info-password">
+              <strong>パスワード</strong>
+              <p>
+                安全のため、発行済みパスワードは再表示できません。<br>
+                分からなくなった場合は、新しいパスワードを発行してください。
+              </p>
+              <button
+                type="button"
+                class="btn primary"
+                onclick="resetNotificationMemberPassword()"
+              >
+                新しいパスワードを発行して表示
+              </button>
+            </div>
+            <p
+              id="notificationMemberLoginInfoError"
+              class="form-error member-login-info-error"
+              role="alert"
+              aria-live="polite"
+            ></p>
+            <p
+              id="notificationMemberLoginInfoCopyStatus"
+              class="member-copy-status"
+              aria-live="polite"
+            ></p>
+          </section>
+
+          <section
             id="notificationMemberCredentialPanel"
             class="member-credential-panel hidden"
             aria-live="polite"

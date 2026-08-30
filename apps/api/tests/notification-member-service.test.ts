@@ -201,6 +201,44 @@ describe("NotificationMemberService", () => {
     expect(createdMember.statusCode, createdMember.body).toBe(201);
     expect(createdMember.headers["cache-control"]).toBe("no-store");
     const memberId = createdMember.json<{ member: { id: string } }>().member.id;
+    const listedMember = await app.inject({
+      method: "GET",
+      url: `/api/v1/teams/${created.team.teamId}/notification-members`,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`
+      }
+    });
+    expect(listedMember.statusCode, listedMember.body).toBe(200);
+    expect(listedMember.body).not.toContain("initialPassword");
+    expect(listedMember.body).not.toContain("passwordHash");
+    expect(listedMember.body).not.toContain("$argon2id$");
+
+    const crossSiteReset = await app.inject({
+      method: "POST",
+      url: `/api/v1/teams/${created.team.teamId}/notification-members/${memberId}/password-reset`,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`
+      }
+    });
+    expect(crossSiteReset.statusCode).toBe(403);
+
+    const resetPassword = await app.inject({
+      method: "POST",
+      url: `/api/v1/teams/${created.team.teamId}/notification-members/${memberId}/password-reset`,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      }
+    });
+    expect(resetPassword.statusCode, resetPassword.body).toBe(200);
+    expect(resetPassword.headers["cache-control"]).toBe("no-store");
+    expect(resetPassword.json()).toMatchObject({
+      member: { id: memberId, callNowId: "CN-AB12CD34", status: "ACTIVE" }
+    });
+    expect(
+      resetPassword.json<{ initialPassword: string }>().initialPassword
+    ).toHaveLength(24);
+    expect(resetPassword.body).not.toContain("passwordHash");
     await app.inject({
       method: "DELETE",
       url: `/api/v1/teams/${created.team.teamId}/notification-members/${memberId}`,
@@ -313,7 +351,19 @@ function createRepository(seatCount = 2): TestNotificationMemberRepository {
       };
       return Promise.resolve(member);
     },
-    replacePassword: () => Promise.reject(new Error("not_implemented")),
+    replacePassword(input) {
+      if (
+        !member ||
+        member.id !== input.memberId ||
+        member.teamId !== input.teamId ||
+        member.status !== "ACTIVE"
+      ) {
+        return Promise.reject(new Error("member_not_found"));
+      }
+      this.passwordHash = input.passwordHash;
+      member = { ...member, passwordHash: input.passwordHash };
+      return Promise.resolve(member);
+    },
     disable: (input) => {
       if (
         !member ||
