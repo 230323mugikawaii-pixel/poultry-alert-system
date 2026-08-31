@@ -31,7 +31,7 @@ test("alert views live only in the authenticated notification centers", () => {
   assert.doesNotMatch(appSource, /currentTeam\.teamId/);
 });
 
-test("in-app alert updates use credentialed SSE without acknowledgement UI", () => {
+test("in-app alert updates use credentialed SSE without shared response UI", () => {
   assert.match(
     appSource,
     /new EventSource\(\s*apiUrl\(path\),\s*\{\s*withCredentials:\s*true/,
@@ -41,8 +41,11 @@ test("in-app alert updates use credentialed SSE without acknowledgement UI", () 
   assert.doesNotMatch(appSource, /\/alerts\/[^\s]*\/acknowledge/);
   assert.doesNotMatch(appSource, /対応を開始/);
   assert.doesNotMatch(htmlSource, /対応を開始/);
-  assert.match(appSource, /resolveAlert/);
-  assert.match(appSource, /対応完了にする/);
+  assert.doesNotMatch(appSource, /resolveAlert|\/alerts\/[^\s]*\/resolve/);
+  assert.doesNotMatch(appSource, /対応完了にする/);
+  assert.doesNotMatch(htmlSource, /対応完了にする/);
+  assert.doesNotMatch(appSource, /対応中|対応完了|未対応|対応者/);
+  assert.doesNotMatch(htmlSource, /対応中|対応完了|未対応|対応者/);
   assert.doesNotMatch(appSource, /serviceWorker\.register/);
 });
 
@@ -50,7 +53,7 @@ test("local alarm stop is the only alarm modal action", () => {
   assert.match(htmlSource, /id="stopAlarmButton"/);
   assert.match(htmlSource, /この端末の通知音を停止/);
   assert.doesNotMatch(htmlSource, /id="acknowledgeAlarmButton"/);
-  assert.match(htmlSource, /代表者が対応完了にするまで残ります/);
+  assert.match(htmlSource, /ほかの利用者の通知には影響しません/);
 
   const localStopFunction = appSource.match(
     /function stopCurrentAlarmLocally\(\) \{[\s\S]*?\n\}/,
@@ -102,7 +105,7 @@ test("REAL and TEST alerts share the separated modal actions", () => {
 
 test("sound-off alerts update the bell and badge without opening the alarm", () => {
   const updateFunction = appSource.match(
-    /function applyAlertUpdate\([\s\S]*?\n}\n\nasync function resolveAlert/,
+    /function applyAlertUpdate\([\s\S]*?\n}\n\nfunction openSetupForAuthenticatedUser/,
   )?.[0];
   assert.ok(updateFunction, "alert update handler should be present");
   assert.match(updateFunction, /renderEmergencyNotifications/);
@@ -110,6 +113,10 @@ test("sound-off alerts update the bell and badge without opening the alarm", () 
   assert.match(updateFunction, /if \(alarmSoundEnabled\)/);
   assert.match(updateFunction, /showAlarmNotification/);
   assert.match(updateFunction, /rememberNotifiedAlert\(nextAlert\.id\)/);
+  assert.match(
+    updateFunction,
+    /currentAlarmAlertContext\?\.audience === audience && !current/,
+  );
 });
 
 test("owner and participant bells keep recipient read state separate", () => {
@@ -179,7 +186,7 @@ test("SSE reconnects with list refresh, fallback polling, and alert-id deduplica
   assert.match(appSource, /handleAlertSessionEnded/);
 });
 
-test("notification details are data-minimized and keep resolve owner-only", () => {
+test("notification details are data-minimized without shared response state", () => {
   const renderFunction = appSource.match(
     /function createEmergencyAlertDetails\([\s\S]*?\n}\n\n+function appendNotificationDetail/,
   )?.[0];
@@ -190,8 +197,11 @@ test("notification details are data-minimized and keep resolve owner-only", () =
   );
   assert.match(renderFunction, /matchedKeyword/);
   assert.match(renderFunction, /detectedAt/);
-  assert.match(renderFunction, /audience === "OWNER"/);
-  assert.match(renderFunction, /対応完了にする/);
+  assert.match(renderFunction, /配信について/);
+  assert.doesNotMatch(
+    renderFunction,
+    /status|acknowledged|resolved|対応|未対応/iu,
+  );
 });
 
 test("notification selection supports safe individual and bulk deletion", () => {
@@ -205,8 +215,9 @@ test("notification selection supports safe individual and bulk deletion", () => 
   assert.match(appSource, /function selectAllNotifications/);
   assert.match(appSource, /function clearNotificationSelection/);
   assert.match(appSource, /function deleteSelectedNotifications/);
-  assert.match(appSource, /alert\.status === "RESOLVED"/);
-  assert.match(appSource, /対応完了後に削除できます/);
+  assert.doesNotMatch(appSource, /alert\.status === "RESOLVED"/);
+  assert.doesNotMatch(appSource, /対応完了後に削除できます/);
+  assert.doesNotMatch(appSource, /checkbox\.disabled/);
   assert.match(appSource, /items\.length > 100/);
   assert.match(appSource, /一度に削除できるお知らせは100件までです。/);
   assert.match(appSource, /\/api\/v1\/notification-center\/delete/);
@@ -214,7 +225,13 @@ test("notification selection supports safe individual and bulk deletion", () => 
     appSource,
     /\/api\/v1\/notification-members\/notification-center\/delete/,
   );
-  assert.match(appSource, /ほかの利用者の通知や共有Alertには影響しません。/);
+  assert.match(appSource, /未読の緊急通知を削除しますか/);
+  assert.match(appSource, /未読の緊急通知が\$\{unreadEmergencyCount\}件含まれています/);
+  assert.match(appSource, /ほかの利用者の通知や共有データには影響しません。/);
+  assert.match(
+    appSource,
+    /currentAlarmAlertContext\?\.audience === audience[\s\S]*?closeAlarmNotification\(\)/,
+  );
 });
 
 test("notification details no longer navigate to removed Home alert lists", () => {

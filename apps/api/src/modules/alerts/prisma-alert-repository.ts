@@ -306,8 +306,7 @@ export class PrismaAlertRepository implements AlertRepository {
               select: {
                 id: true,
                 alertId: true,
-                dismissedAt: true,
-                alert: { select: { status: true } }
+                dismissedAt: true
               }
             })
           : Promise.resolve([]),
@@ -325,10 +324,6 @@ export class PrismaAlertRepository implements AlertRepository {
       ) {
         throw notificationNotFoundError();
       }
-      if (alertRecipients.some(({ alert }) => alert.status !== "RESOLVED")) {
-        throw notificationNotResolvedError();
-      }
-
       const [dismissedAlerts, deletedNotifications] = await Promise.all([
         transaction.alertRecipient.updateMany({
           where: {
@@ -390,17 +385,12 @@ export class PrismaAlertRepository implements AlertRepository {
         select: {
           id: true,
           alertId: true,
-          dismissedAt: true,
-          alert: { select: { status: true } }
+          dismissedAt: true
         }
       });
       if (recipients.length !== input.alertIds.length) {
         throw notificationNotFoundError();
       }
-      if (recipients.some(({ alert }) => alert.status !== "RESOLVED")) {
-        throw notificationNotResolvedError();
-      }
-
       const dismissed = await transaction.alertRecipient.updateMany({
         where: {
           id: { in: recipients.map(({ id }) => id) },
@@ -676,13 +666,5 @@ function notificationNotFoundError(): AppError {
     "NOTIFICATION_NOT_FOUND",
     "削除するお知らせが見つかりません。",
     404
-  );
-}
-
-function notificationNotResolvedError(): AppError {
-  return new AppError(
-    "NOTIFICATION_NOT_RESOLVED",
-    "対応完了後に削除できます。",
-    409
   );
 }

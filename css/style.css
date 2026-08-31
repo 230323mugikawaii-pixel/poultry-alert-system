@@ -1847,13 +1847,6 @@ textarea[aria-invalid="true"] {
   accent-color: var(--blue);
 }
 
-.notification-delete-restriction {
-  margin: 10px 0 0;
-  color: var(--subtext);
-  font-size: 13px;
-  font-weight: 800;
-}
-
 .emergency-notification-heading {
   display: flex;
   flex-wrap: wrap;
@@ -1874,15 +1867,10 @@ textarea[aria-invalid="true"] {
   overflow-wrap: anywhere;
 }
 
-.emergency-notification-item time,
-.emergency-notification-status {
+.emergency-notification-item time {
   color: var(--subtext);
   font-size: 13px;
   font-weight: 700;
-}
-
-.emergency-notification-status {
-  margin: 8px 0 0;
 }
 
 .emergency-notification-details {
