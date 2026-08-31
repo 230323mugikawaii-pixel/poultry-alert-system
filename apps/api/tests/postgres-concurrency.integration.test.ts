@@ -2194,6 +2194,48 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       ])
     );
     await expect(
+      alertService.listForOwner(team.team.teamId, owner.id)
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: testAlert.id, kind: "TEST" })
+      ])
+    );
+    await expect(
+      alertService.listForNotificationMember(
+        team.team.teamId,
+        activeMember.member.id
+      )
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: testAlert.id, kind: "TEST" })
+      ])
+    );
+
+    const acknowledgement = await alertService.acknowledgeByNotificationMember({
+      teamId: team.team.teamId,
+      alertId: testAlert.id,
+      memberId: activeMember.member.id
+    });
+    expect(acknowledgement).toMatchObject({
+      alreadyAcknowledged: false,
+      alert: {
+        id: testAlert.id,
+        kind: "TEST",
+        status: "ACKNOWLEDGED",
+        acknowledgedBy: "NOTIFICATION_MEMBER"
+      }
+    });
+
+    const resolution = await alertService.resolveByOwner({
+      teamId: team.team.teamId,
+      alertId: testAlert.id,
+      userId: owner.id
+    });
+    expect(resolution).toMatchObject({
+      alreadyResolved: false,
+      alert: { id: testAlert.id, kind: "TEST", status: "RESOLVED" }
+    });
+    await expect(
       database.auditEvent.count({
         where: {
           teamId: team.team.teamId,
@@ -2207,6 +2249,16 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
         }
       })
     ).resolves.toBe(3);
+    await expect(
+      database.auditEvent.count({
+        where: {
+          teamId: team.team.teamId,
+          targetType: "Alert",
+          targetId: testAlert.id,
+          action: { in: ["ALERT_ACKNOWLEDGED", "ALERT_RESOLVED"] }
+        }
+      })
+    ).resolves.toBe(2);
 
     const expiring = await service.start({
       teamId: team.team.teamId,

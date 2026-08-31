@@ -14,7 +14,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=27"/>
+    <link rel="stylesheet" href="css/style.css?v=28"/>
 </head>
 
 <body>
@@ -165,9 +165,22 @@
   <section id="notificationMemberAppScreen" class="app-screen hidden">
     <header class="app-header">
       <div class="app-logo">🔔 Call Now</div>
-      <button type="button" class="logout-button" onclick="logoutNotificationMember()">
-        ログアウト
-      </button>
+      <div class="app-actions">
+        <button
+          id="notificationMemberSoundToggleButton"
+          type="button"
+          class="sound-toggle-button"
+          aria-label="通知音を切り替える"
+          title="通知音を切り替える"
+          onclick="toggleAlarmSoundPreference('NOTIFICATION_MEMBER')"
+        >
+          <span aria-hidden="true">🔊</span>
+          <span class="sound-toggle-label">通知音 ON</span>
+        </button>
+        <button type="button" class="logout-button" onclick="logoutNotificationMember()">
+          ログアウト
+        </button>
+      </div>
     </header>
     <main class="member-app-main">
       <h1>通知ホーム</h1>
@@ -1020,6 +1033,17 @@
 
       <div class="app-actions">
         <button
+          id="ownerSoundToggleButton"
+          type="button"
+          class="sound-toggle-button"
+          aria-label="通知音を切り替える"
+          title="通知音を切り替える"
+          onclick="toggleAlarmSoundPreference('OWNER')"
+        >
+          <span aria-hidden="true">🔊</span>
+          <span class="sound-toggle-label">通知音 ON</span>
+        </button>
+        <button
           id="notificationCenterButton"
           type="button"
           class="notification-bell-button"
@@ -1711,7 +1735,7 @@
 
     <script src="js/keyword-policy.js?v=2"></script>
     <script src="js/owner-onboarding-routing.js?v=2"></script>
-    <script src="js/app.js?v=29"></script>
+    <script src="js/app.js?v=30"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";

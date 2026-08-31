@@ -1005,6 +1005,35 @@ textarea[aria-invalid="true"] {
   gap: 10px;
 }
 
+.sound-toggle-button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.sound-toggle-button:hover,
+.sound-toggle-button:focus-visible {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.sound-toggle-button.off {
+  color: #e6edf7;
+  background: rgba(15, 38, 70, 0.42);
+}
+
+.sound-toggle-button.needs-gesture {
+  border-color: #ffe29c;
+}
+
 .notification-bell-button {
   position: relative;
   display: grid;
@@ -2215,6 +2244,23 @@ body.app-dialog-open {
     gap: 5px;
   }
 
+  .sound-toggle-button {
+    width: 42px;
+    min-width: 42px;
+    padding: 7px;
+  }
+
+  .sound-toggle-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
   .logout-button,
   .app-status {
     padding:
@@ -2349,6 +2395,20 @@ body.app-dialog-open {
 .alert-audio-readiness.ready {
   border-color: #b7dfc7;
   background: #f1fbf5;
+}
+
+.alert-audio-readiness.off {
+  border-color: #cdd6e2;
+  background: #f4f6f9;
+}
+
+.alert-audio-readiness.error {
+  border-color: #f2b7b7;
+  background: #fff8f8;
+}
+
+.alert-audio-readiness.error p {
+  color: #b42318;
 }
 
 .alert-list {

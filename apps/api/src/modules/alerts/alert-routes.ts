@@ -116,8 +116,9 @@ export function createAlertRoutes(
       "/api/v1/teams/:teamId/alerts/events",
       { schema: { params: TeamParams } },
       async (request, reply) => {
+        requireSameOrigin(request);
         await authenticateOwner(request, request.params.teamId);
-        startAlertStream(request, reply, async () => {
+        startAlertStream(request, reply, environment, async () => {
           const userId = await authenticateOwner(
             request,
             request.params.teamId
@@ -192,8 +193,9 @@ export function createAlertRoutes(
     app.get(
       "/api/v1/notification-members/alerts/events",
       async (request, reply) => {
+        requireSameOrigin(request);
         await authenticateMember(request);
-        startAlertStream(request, reply, async () => {
+        startAlertStream(request, reply, environment, async () => {
           const authenticated = await authenticateMember(request);
           return serializeAlerts(
             await alertService.listForNotificationMember(
@@ -233,11 +235,15 @@ export function createAlertRoutes(
 function startAlertStream(
   request: FastifyRequest,
   reply: FastifyReply,
+  environment: AppEnvironment,
   load: () => Promise<ReturnType<typeof serializeAlerts>>
 ): void {
   reply.hijack();
   const response = reply.raw;
   response.statusCode = 200;
+  response.setHeader("Access-Control-Allow-Origin", environment.PUBLIC_ORIGIN);
+  response.setHeader("Access-Control-Allow-Credentials", "true");
+  response.setHeader("Vary", "Origin");
   response.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   response.setHeader("Cache-Control", "no-cache, no-transform");
   response.setHeader("Connection", "keep-alive");
@@ -259,10 +265,20 @@ function startAlertStream(
       } else {
         response.write(": keep-alive\n\n");
       }
-    } catch {
-      response.write(
-        'event: session-ended\ndata: {"reason":"UNAUTHENTICATED"}\n\n'
-      );
+    } catch (error) {
+      if (isSessionEndedError(error)) {
+        response.write(
+          'event: session-ended\ndata: {"reason":"UNAUTHENTICATED"}\n\n'
+        );
+      } else {
+        request.log.error(
+          { err: error, requestId: request.id },
+          "Alert stream polling failed"
+        );
+        response.write(
+          'event: stream-error\ndata: {"reason":"TEMPORARY_UNAVAILABLE"}\n\n'
+        );
+      }
       response.end();
     } finally {
       pollRunning = false;
@@ -274,6 +290,13 @@ function startAlertStream(
     closed = true;
     clearInterval(timer);
   });
+}
+
+function isSessionEndedError(error: unknown): boolean {
+  return (
+    error instanceof AppError &&
+    (error.code === "UNAUTHENTICATED" || error.statusCode === 401)
+  );
 }
 
 function serializeAlerts(alerts: readonly AlertRecord[]) {

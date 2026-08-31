@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import type { AppEnvironment } from "../src/config/env.js";
+import { AppError } from "../src/lib/app-error.js";
 import type { AlertRecord } from "../src/modules/alerts/alert-repository.js";
 import type { AlertService } from "../src/modules/alerts/alert-service.js";
 import { AuthService } from "../src/modules/auth/auth-service.js";
@@ -218,14 +219,137 @@ describe("alert routes", () => {
   });
 });
 
-function createAlert(teamId: string): AlertRecord {
+describe("alert SSE routes", () => {
+  it("streams member alerts with exact credentialed CORS headers", async () => {
+    const alert = createAlert(randomUUID(), "TEST");
+    const memberService = createStreamingMemberService();
+    const alertService = {
+      listForOwner: async () => [alert],
+      listForNotificationMember: async () => [alert]
+    } as unknown as AlertService;
+    const app = await buildStreamingApp(memberService, alertService);
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const controller = new AbortController();
+    const response = await fetch(
+      `${address}/api/v1/notification-members/alerts/events`,
+      {
+        headers: {
+          cookie: `${environment.COOKIE_NAME}_member=member-token`,
+          origin: environment.PUBLIC_ORIGIN
+        },
+        signal: controller.signal
+      }
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    expect(response.headers.get("cache-control")).toBe(
+      "no-cache, no-transform"
+    );
+    expect(response.headers.get("connection")).toBe("keep-alive");
+    expect(response.headers.get("x-accel-buffering")).toBe("no");
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      environment.PUBLIC_ORIGIN
+    );
+    expect(response.headers.get("access-control-allow-credentials")).toBe(
+      "true"
+    );
+    expect(response.headers.get("vary")).toContain("Origin");
+    const body = await readStreamUntil(response, '"kind":"TEST"');
+    expect(body).toContain("retry: 5000");
+    expect(body).toContain("event: alerts");
+    expect(body).toContain('"kind":"TEST"');
+    controller.abort();
+
+    const wrongOrigin = await fetch(
+      `${address}/api/v1/notification-members/alerts/events`,
+      {
+        headers: {
+          cookie: `${environment.COOKIE_NAME}_member=member-token`,
+          origin: "https://unexpected.example"
+        }
+      }
+    );
+    expect(wrongOrigin.status).toBe(403);
+
+    const invalidSession = await fetch(
+      `${address}/api/v1/notification-members/alerts/events`,
+      {
+        headers: {
+          cookie: `${environment.COOKIE_NAME}_member=invalid-token`,
+          origin: environment.PUBLIC_ORIGIN
+        }
+      }
+    );
+    expect(invalidSession.status).toBe(401);
+  });
+
+  it("ends only invalid sessions and reconnects after transient load errors", async () => {
+    let authenticationCount = 0;
+    const endedMemberService = createStreamingMemberService(async () => {
+      authenticationCount += 1;
+      if (authenticationCount > 1) {
+        throw new AppError("UNAUTHENTICATED", "ログインが必要です。", 401);
+      }
+    });
+    const endedApp = await buildStreamingApp(endedMemberService, {
+      listForOwner: async () => [],
+      listForNotificationMember: async () => []
+    } as unknown as AlertService);
+    const endedAddress = await endedApp.listen({
+      host: "127.0.0.1",
+      port: 0
+    });
+    const endedResponse = await fetch(
+      `${endedAddress}/api/v1/notification-members/alerts/events`,
+      {
+        headers: {
+          cookie: `${environment.COOKIE_NAME}_member=member-token`,
+          origin: environment.PUBLIC_ORIGIN
+        }
+      }
+    );
+    expect(await endedResponse.text()).toContain("event: session-ended");
+
+    const transientApp = await buildStreamingApp(
+      createStreamingMemberService(),
+      {
+        listForOwner: async () => [],
+        listForNotificationMember: async () => {
+          throw new Error("temporary database failure");
+        }
+      } as unknown as AlertService
+    );
+    const transientAddress = await transientApp.listen({
+      host: "127.0.0.1",
+      port: 0
+    });
+    const transientResponse = await fetch(
+      `${transientAddress}/api/v1/notification-members/alerts/events`,
+      {
+        headers: {
+          cookie: `${environment.COOKIE_NAME}_member=member-token`,
+          origin: environment.PUBLIC_ORIGIN
+        }
+      }
+    );
+    const transientBody = await transientResponse.text();
+    expect(transientBody).toContain("event: stream-error");
+    expect(transientBody).not.toContain("event: session-ended");
+  });
+});
+
+function createAlert(
+  teamId: string,
+  kind: "REAL" | "TEST" = "REAL"
+): AlertRecord {
   const now = new Date("2026-08-28T09:00:00.000Z");
   return {
     id: randomUUID(),
     teamId,
     sourceMailConnectionId: randomUUID(),
     sourceProvider: "GOOGLE",
-    kind: "REAL",
+    kind,
     status: "ACTIVE",
     detectedAt: now,
     matchedKeyword: "停電のお知らせ",
@@ -237,6 +361,87 @@ function createAlert(teamId: string): AlertRecord {
     updatedAt: now,
     recipientCount: 2
   };
+}
+
+function createStreamingMemberService(
+  beforeAuthenticate?: () => Promise<void>
+): NotificationMemberService {
+  return {
+    authenticate: async (token: string) => {
+      if (token !== "member-token") {
+        throw new AppError("UNAUTHENTICATED", "ログインが必要です。", 401);
+      }
+      await beforeAuthenticate?.();
+      return {
+        member: {
+          id: randomUUID(),
+          teamId: randomUUID(),
+          callNowId: "CN-ABCD1234",
+          displayName: "通知担当",
+          passwordHash: "not-returned",
+          status: "ACTIVE" as const,
+          createdAt: new Date(),
+          disabledAt: null,
+          deletedAt: null
+        },
+        session: {
+          id: randomUUID(),
+          notificationMemberId: randomUUID(),
+          createdAt: new Date(),
+          lastSeenAt: new Date(),
+          idleExpiresAt: new Date(Date.now() + 60_000),
+          expiresAt: new Date(Date.now() + 120_000),
+          revokedAt: null
+        },
+        team: { id: randomUUID(), publicCode: "482731", name: null }
+      };
+    }
+  } as unknown as NotificationMemberService;
+}
+
+async function buildStreamingApp(
+  memberService: NotificationMemberService,
+  alertService: AlertService
+) {
+  const app = await buildApp({
+    environment,
+    authService: {
+      authenticate: async () => {
+        throw new AppError("UNAUTHENTICATED", "ログインが必要です。", 401);
+      }
+    } as unknown as AuthService,
+    teamService: {
+      requireOwnerForTeam: async () => {
+        throw new AppError("OWNER_REQUIRED", "代表者権限が必要です。", 403);
+      }
+    } as unknown as TeamService,
+    notificationMemberService: memberService,
+    alertService,
+    securityThrottleService: new SecurityThrottleService(
+      new MemorySecurityThrottleRepository(),
+      environment.AUTH_TOKEN_PEPPER
+    ),
+    logger: false
+  });
+  apps.push(app);
+  return app;
+}
+
+async function readStreamUntil(
+  response: Response,
+  marker: string
+): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("SSE response body is unavailable");
+  const decoder = new TextDecoder();
+  let output = "";
+  for (let index = 0; index < 10 && !output.includes(marker); index += 1) {
+    const result = await reader.read();
+    if (result.done) break;
+    output += decoder.decode(result.value, { stream: true });
+  }
+  await reader.cancel();
+  return output;
 }
 
 async function login(
