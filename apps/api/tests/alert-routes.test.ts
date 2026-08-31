@@ -119,6 +119,11 @@ describe("alert routes", () => {
       acknowledgeByNotificationMember: async () => ({
         alert: { ...alert, status: "ACKNOWLEDGED" as const },
         alreadyAcknowledged: false
+      }),
+      markReadByOwner: async () => ({ ...alert, readAt: new Date() }),
+      markReadByNotificationMember: async () => ({
+        ...alert,
+        readAt: new Date()
       })
     } as unknown as AlertService;
     const memberService = {
@@ -216,6 +221,35 @@ describe("alert routes", () => {
       }
     });
     expect(memberAcknowledge.statusCode, memberAcknowledge.body).toBe(200);
+
+    const blockedCrossOriginRead = await app.inject({
+      method: "POST",
+      url: `/api/v1/teams/${team.team.teamId}/alerts/${alert.id}/read`,
+      headers: { cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}` }
+    });
+    expect(blockedCrossOriginRead.statusCode).toBe(403);
+
+    const ownerRead = await app.inject({
+      method: "POST",
+      url: `/api/v1/teams/${team.team.teamId}/alerts/${alert.id}/read`,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      }
+    });
+    expect(ownerRead.statusCode, ownerRead.body).toBe(200);
+    expect(ownerRead.json<{ readAt: string | null }>().readAt).not.toBeNull();
+
+    const memberRead = await app.inject({
+      method: "POST",
+      url: `/api/v1/notification-members/alerts/${alert.id}/read`,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}_member=member-token`,
+        origin: environment.PUBLIC_ORIGIN
+      }
+    });
+    expect(memberRead.statusCode, memberRead.body).toBe(200);
+    expect(memberRead.json<{ readAt: string | null }>().readAt).not.toBeNull();
   });
 });
 
@@ -356,6 +390,7 @@ function createAlert(
     acknowledgedAt: null,
     acknowledgedBy: null,
     acknowledgedByName: null,
+    readAt: null,
     resolvedAt: null,
     createdAt: now,
     updatedAt: now,

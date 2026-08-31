@@ -186,6 +186,7 @@ function createAlert(test: NotificationTestRecord, now: Date): AlertRecord {
     acknowledgedAt: null,
     acknowledgedBy: null,
     acknowledgedByName: null,
+    readAt: null,
     resolvedAt: null,
     createdAt: now,
     updatedAt: now,

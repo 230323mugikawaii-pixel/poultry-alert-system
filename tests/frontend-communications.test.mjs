@@ -39,7 +39,25 @@ test("owner header uses a private notification center without normal logout UI",
   assert.match(appSource, /\/api\/v1\/notifications/);
   assert.match(appSource, /\/read`/);
   assert.match(appSource, /notification\.readAt/);
+  assert.match(htmlSource, /id="ownerEmergencyNotificationList"/);
+  assert.match(htmlSource, />緊急通知</);
+  assert.match(htmlSource, />お知らせ</);
+  assert.match(appSource, /countUnreadAlerts\(ownerAlerts\)/);
   assert.match(appSource, /\/api\/v1\/auth\/logout/);
+});
+
+test("notification members have a private emergency notification bell", () => {
+  assert.match(
+    htmlSource,
+    /id="notificationMemberNotificationCenterButton"/,
+  );
+  assert.match(htmlSource, /id="notificationMemberUnreadBadge"/);
+  assert.match(
+    htmlSource,
+    /id="notificationMemberEmergencyNotificationList"/,
+  );
+  assert.match(appSource, /openNotificationMemberNotificationCenter/);
+  assert.match(appSource, /countUnreadAlerts\(notificationMemberAlerts\)/);
 });
 
 test("feedback is a simple private submission with no fake response", () => {

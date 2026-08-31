@@ -39,6 +39,7 @@ const AlertResponse = Type.Object({
     Type.String({ minLength: 1, maxLength: 100 }),
     Type.Null()
   ]),
+  readAt: Type.Union([Type.String(), Type.Null()]),
   resolvedAt: Type.Union([Type.String(), Type.Null()]),
   recipientCount: Type.Integer({ minimum: 1 }),
   updatedAt: Type.String()
@@ -176,6 +177,27 @@ export function createAlertRoutes(
       }
     );
 
+    app.post(
+      "/api/v1/teams/:teamId/alerts/:alertId/read",
+      {
+        schema: {
+          params: AlertParams,
+          response: { 200: AlertResponse }
+        }
+      },
+      async (request) => {
+        requireSameOrigin(request);
+        const userId = await authenticateOwner(request, request.params.teamId);
+        return serializeAlert(
+          await alertService.markReadByOwner({
+            teamId: request.params.teamId,
+            alertId: request.params.alertId,
+            userId
+          })
+        );
+      }
+    );
+
     app.get(
       "/api/v1/notification-members/alerts",
       { schema: { response: { 200: AlertListResponse } } },
@@ -227,6 +249,27 @@ export function createAlertRoutes(
           alert: serializeAlert(result.alert),
           alreadyAcknowledged: result.alreadyAcknowledged
         };
+      }
+    );
+
+    app.post(
+      "/api/v1/notification-members/alerts/:alertId/read",
+      {
+        schema: {
+          params: MemberAlertParams,
+          response: { 200: AlertResponse }
+        }
+      },
+      async (request) => {
+        requireSameOrigin(request);
+        const authenticated = await authenticateMember(request);
+        return serializeAlert(
+          await alertService.markReadByNotificationMember({
+            teamId: authenticated.team.id,
+            alertId: request.params.alertId,
+            memberId: authenticated.member.id
+          })
+        );
       }
     );
   };
@@ -317,6 +360,7 @@ function serializeAlert(alert: AlertRecord) {
     acknowledgedAt: alert.acknowledgedAt?.toISOString() ?? null,
     acknowledgedBy: alert.acknowledgedBy,
     acknowledgedByName: alert.acknowledgedByName,
+    readAt: alert.readAt?.toISOString() ?? null,
     resolvedAt: alert.resolvedAt?.toISOString() ?? null,
     recipientCount: alert.recipientCount,
     updatedAt: alert.updatedAt.toISOString()

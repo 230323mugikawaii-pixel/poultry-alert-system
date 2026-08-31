@@ -122,6 +122,13 @@ const notificationTestAlertMigration = readFileSync(
   ),
   "utf8"
 );
+const alertRecipientReadStateMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260831000200_alert_recipient_read_state/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 const migration =
   baseMigration +
   gmailMigration +
@@ -135,7 +142,8 @@ const migration =
   userCommunicationMigration +
   notificationMemberSoftDeleteMigration +
   contractChangeQuoteMigration +
-  notificationTestAlertMigration;
+  notificationTestAlertMigration +
+  alertRecipientReadStateMigration;
 
 const databases: PGlite[] = [];
 

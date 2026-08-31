@@ -262,7 +262,6 @@ let alertFallbackInterval = null;
 let alertLongDisconnectTimer = null;
 let activeAlertAudience = null;
 let currentAlarmAlertContext = null;
-const acknowledgingAlertIds = new Set();
 const notifiedAlertIds =
   loadNotifiedAlertIds();
 let legacyGoogleAccountsFallbackBackup =
@@ -1723,14 +1722,50 @@ function openNotificationMemberApp() {
     notificationMemberSession.team.name ||
       `通知グループ ${notificationMemberSession.team.teamCode}`
   );
+  showNotificationMemberHome();
   renderAlertList(
     "notificationMemberAlertList",
     notificationMemberAlerts,
     "NOTIFICATION_MEMBER"
   );
+  renderEmergencyNotifications(
+    "notificationMemberEmergencyNotificationList",
+    notificationMemberAlerts,
+    "NOTIFICATION_MEMBER"
+  );
+  renderNotificationBadge();
   void refreshNotificationMemberAlerts();
   startNotificationMemberAlertStream();
   updateAlarmAudioReadiness("NOTIFICATION_MEMBER");
+  window.scrollTo({ top: 0 });
+}
+
+
+function showNotificationMemberHome() {
+  document
+    .getElementById("notificationMemberHomePage")
+    ?.classList.remove("hidden");
+  document
+    .getElementById("notificationMemberNotificationCenterPage")
+    ?.classList.add("hidden");
+  window.scrollTo({ top: 0 });
+}
+
+
+function openNotificationMemberNotificationCenter() {
+  document
+    .getElementById("notificationMemberHomePage")
+    ?.classList.add("hidden");
+  document
+    .getElementById("notificationMemberNotificationCenterPage")
+    ?.classList.remove("hidden");
+  setText("notificationMemberNotificationCenterError", "");
+  renderEmergencyNotifications(
+    "notificationMemberEmergencyNotificationList",
+    notificationMemberAlerts,
+    "NOTIFICATION_MEMBER"
+  );
+  void refreshNotificationMemberAlerts();
   window.scrollTo({ top: 0 });
 }
 
@@ -1753,6 +1788,7 @@ async function logoutNotificationMember() {
   }
   notificationMemberSession = null;
   notificationMemberAlerts = [];
+  renderNotificationBadge();
   stopAlertEventStream();
   openGuestHome();
 }
@@ -1968,6 +2004,14 @@ function applyAlertUpdate(alerts, audience) {
     audience === "OWNER" ? "ownerAlertList" : "notificationMemberAlertList",
     alerts,
     audience);
+  renderEmergencyNotifications(
+    audience === "OWNER"
+      ? "ownerEmergencyNotificationList"
+      : "notificationMemberEmergencyNotificationList",
+    alerts,
+    audience
+  );
+  renderNotificationBadge();
   const current = currentAlarmAlertContext
     ? alerts.find((alert) => alert.id === currentAlarmAlertContext.alertId)
     : null;
@@ -1975,13 +2019,18 @@ function applyAlertUpdate(alerts, audience) {
     closeAlarmNotification();
   }
   const nextAlert = alerts.find(
-    (alert) => alert.status === "ACTIVE" && !notifiedAlertIds.has(alert.id));
+    (alert) =>
+      alert.status === "ACTIVE" &&
+      !alert.readAt &&
+      !notifiedAlertIds.has(alert.id));
   if (nextAlert) {
     rememberNotifiedAlert(nextAlert.id);
-    showAlarmNotification(nextAlert.matchedKeyword, nextAlert.detectedAt, {
-      alertId: nextAlert.id,
-      audience,
-      kind: nextAlert.kind || "REAL"});
+    if (alarmSoundEnabled) {
+      showAlarmNotification(nextAlert.matchedKeyword, nextAlert.detectedAt, {
+        alertId: nextAlert.id,
+        audience,
+        kind: nextAlert.kind || "REAL"});
+    }
   }
 }
 
@@ -2001,13 +2050,12 @@ function renderAlertList(containerId, alerts, audience) {
         alert.acknowledgedByName ||
         (alert.acknowledgedBy === "OWNER" ? "代表者" : "通知メンバー");
       const statusText = active
-        ? "未対応"
+        ? "対応中"
         : acknowledged
           ? `${acknowledgedByName}さんが対応中`
           : "対応完了";
-      const actions = active
-        ? `<button type="button" class="btn primary" onclick="acknowledgeAlert('${escapeHtml(alert.id)}', '${audience}')">対応を開始</button>`
-        : audience === "OWNER" && acknowledged
+      const actions =
+        audience === "OWNER" && (active || acknowledged)
           ? `<button type="button" class="btn outline" onclick="resolveAlert('${escapeHtml(alert.id)}')">対応完了にする</button>`
           : "";
       const isTest = alert.kind === "TEST";
@@ -2028,47 +2076,6 @@ function renderAlertList(containerId, alerts, audience) {
       `;
     })
     .join("");
-}
-
-async function acknowledgeAlert(alertId, audience) {
-  if (acknowledgingAlertIds.has(alertId)) {
-    return false;
-  }
-  acknowledgingAlertIds.add(alertId);
-  const path =
-    audience === "OWNER"
-      ? `/api/v1/teams/${encodeURIComponent(currentTeam?.id || "")}/alerts/${encodeURIComponent(alertId)}/acknowledge`
-      : `/api/v1/notification-members/alerts/${encodeURIComponent(alertId)}/acknowledge`;
-  try {
-    const response = await fetch(apiUrl(path), {
-      method: "POST",
-      credentials: "include",
-      headers: { Accept: "application/json" }});
-    if (!response.ok) throw new Error("alert_acknowledge_failed");
-    const result = await response.json();
-    if (audience === "OWNER") {
-      await refreshOwnerAlerts();
-    } else {
-      await refreshNotificationMemberAlerts();
-    }
-    closeAlarmNotification();
-    if (result.alreadyAcknowledged) {
-      const acknowledgedByName =
-        result.alert?.acknowledgedByName ||
-        (result.alert?.acknowledgedBy === "OWNER" ? "代表者" : "通知メンバー");
-      await showAppAlert(
-        `すでに${acknowledgedByName}さんが対応を開始しています。`,
-        { title: "対応開始済み" });
-    }
-    return true;
-  } catch {
-    await showAppAlert(
-      "対応開始を記録できませんでした。通信状態を確認して、もう一度お試しください。",
-      { title: "対応開始エラー" });
-    return false;
-  } finally {
-    acknowledgingAlertIds.delete(alertId);
-  }
 }
 
 async function resolveAlert(alertId) {
@@ -5528,35 +5535,182 @@ async function refreshUserNotifications() {
 
 
 function renderNotificationBadge() {
-  const badge =
-    document.getElementById(
-      "notificationUnreadBadge"
-    );
-  const button =
-    document.getElementById(
-      "notificationCenterButton"
-    );
-  if (!badge || !button) return;
+  const ownerUnread =
+    notificationUnreadCount + countUnreadAlerts(ownerAlerts);
+  updateNotificationBadge(
+    "notificationUnreadBadge",
+    "notificationCenterButton",
+    ownerUnread,
+    "通知を開く"
+  );
+  updateNotificationBadge(
+    "notificationMemberUnreadBadge",
+    "notificationMemberNotificationCenterButton",
+    countUnreadAlerts(notificationMemberAlerts),
+    "緊急通知を開く"
+  );
+}
 
-  const hasUnread =
-    notificationUnreadCount > 0;
+
+function countUnreadAlerts(alerts) {
+  return alerts.filter((alert) => !alert.readAt).length;
+}
+
+
+function updateNotificationBadge(badgeId, buttonId, unreadCount, label) {
+  const badge = document.getElementById(badgeId);
+  const button = document.getElementById(buttonId);
+  if (!badge || !button) return;
+  const hasUnread = unreadCount > 0;
   badge.classList.toggle("hidden", !hasUnread);
   badge.textContent = hasUnread
-    ? String(Math.min(notificationUnreadCount, 99))
+    ? unreadCount > 99
+      ? "99+"
+      : String(unreadCount)
     : "";
   button.setAttribute(
     "aria-label",
-    hasUnread
-      ? `通知を開く（未読${notificationUnreadCount}件）`
-      : "通知を開く"
+    hasUnread ? `${label}（未読${unreadCount}件）` : label
   );
 }
 
 
 async function openNotificationCenter() {
   showAppPage("notificationCenterPage");
+  setText("notificationCenterError", "");
+  renderEmergencyNotifications(
+    "ownerEmergencyNotificationList",
+    ownerAlerts,
+    "OWNER"
+  );
   renderUserNotifications();
-  await refreshUserNotifications();
+  await Promise.all([
+    refreshUserNotifications(),
+    refreshOwnerAlerts()
+  ]);
+}
+
+
+function renderEmergencyNotifications(containerId, alerts, audience) {
+  const list = document.getElementById(containerId);
+  if (!list) return;
+  list.replaceChildren();
+
+  if (alerts.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "notification-empty";
+    empty.textContent = "緊急通知はありません。";
+    list.appendChild(empty);
+    return;
+  }
+
+  alerts.forEach((alert) => {
+    const item = document.createElement("article");
+    item.className = `emergency-notification-item${alert.readAt ? "" : " unread"}`;
+
+    const heading = document.createElement("div");
+    heading.className = "emergency-notification-heading";
+    const readState = document.createElement("span");
+    readState.className = "notification-read-state";
+    readState.textContent = alert.readAt ? "既読" : "未読";
+    const kind = document.createElement("span");
+    kind.className = `alert-kind-badge${alert.kind === "TEST" ? " test" : ""}`;
+    kind.textContent = alert.kind === "TEST" ? "テスト通知" : "緊急通知";
+    heading.append(readState, kind);
+
+    const title = document.createElement("h3");
+    title.textContent = `「${String(alert.matchedKeyword || "キーワード")}」を検知しました`;
+    const date = document.createElement("time");
+    date.dateTime = String(alert.detectedAt || "");
+    date.textContent = formatNotificationDate(alert.detectedAt);
+    const status = document.createElement("p");
+    status.className = "emergency-notification-status";
+    status.textContent = `状態：${formatEmergencyAlertStatus(alert)}`;
+    const details = document.createElement("button");
+    details.type = "button";
+    details.className = "notification-read-button";
+    details.textContent = "詳細を開く";
+    details.addEventListener("click", () => {
+      void openEmergencyAlertDetails(alert.id, audience);
+    });
+    item.append(heading, title, date, status, details);
+    list.appendChild(item);
+  });
+}
+
+
+function formatEmergencyAlertStatus(alert) {
+  if (alert.status === "RESOLVED") return "対応完了";
+  if (alert.status === "ACKNOWLEDGED") {
+    const name = alert.acknowledgedByName || "担当者";
+    return `${name}さんが対応中`;
+  }
+  return "対応中";
+}
+
+
+async function openEmergencyAlertDetails(alertId, audience) {
+  const alerts =
+    audience === "OWNER" ? ownerAlerts : notificationMemberAlerts;
+  const alert = alerts.find((candidate) => candidate.id === alertId);
+  if (!alert) return;
+  if (!alert.readAt) {
+    const marked = await markEmergencyAlertRead(alertId, audience);
+    if (!marked) return;
+  }
+  if (audience === "OWNER") {
+    showAppPage("homePage");
+    document.getElementById("ownerAlertList")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start"
+    });
+  } else {
+    showNotificationMemberHome();
+    document.getElementById("notificationMemberAlertList")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start"
+    });
+  }
+}
+
+
+async function markEmergencyAlertRead(alertId, audience) {
+  const owner = audience === "OWNER";
+  const errorId = owner
+    ? "notificationCenterError"
+    : "notificationMemberNotificationCenterError";
+  setText(errorId, "");
+  if (owner && (!currentTeam || currentTeam.role !== "OWNER")) return false;
+  const path = owner
+    ? `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/alerts/${encodeURIComponent(alertId)}/read`
+    : `/api/v1/notification-members/alerts/${encodeURIComponent(alertId)}/read`;
+  try {
+    const response = await fetch(apiUrl(path), {
+      method: "POST",
+      credentials: "include",
+      headers: { Accept: "application/json" }
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.id) {
+      throw new Error(
+        payload?.error?.message ||
+          "緊急通知を既読にできませんでした。もう一度お試しください。"
+      );
+    }
+    const alerts = owner ? ownerAlerts : notificationMemberAlerts;
+    const index = alerts.findIndex((alert) => alert.id === payload.id);
+    if (index >= 0) alerts[index] = payload;
+    applyAlertUpdate(alerts, audience);
+    return true;
+  } catch (error) {
+    setText(
+      errorId,
+      error instanceof Error
+        ? error.message
+        : "緊急通知を既読にできませんでした。もう一度お試しください。"
+    );
+    return false;
+  }
 }
 
 
@@ -5756,6 +5910,12 @@ function openApp() {
   renderConnectedGoogleAccounts();
 
   renderNotificationBadge();
+
+  renderEmergencyNotifications(
+    "ownerEmergencyNotificationList",
+    ownerAlerts,
+    "OWNER"
+  );
 
   renderUserNotifications();
 
@@ -6552,11 +6712,6 @@ function initializeAlarmNotification() {
       "restartAlarmButton"
     );
 
-  const acknowledgeButton =
-    document.getElementById(
-      "acknowledgeAlarmButton"
-    );
-
   const modal =
     document.getElementById(
       "alarmModal"
@@ -6566,15 +6721,6 @@ function initializeAlarmNotification() {
     stopButton.addEventListener(
       "click",
       stopCurrentAlarmLocally
-    );
-  }
-
-  if (acknowledgeButton) {
-    acknowledgeButton.addEventListener(
-      "click",
-      () => {
-        void acknowledgeCurrentAlarm();
-      }
     );
   }
 
@@ -6597,8 +6743,7 @@ function initializeAlarmNotification() {
     alarmSoundEnabled = loadAlarmSoundPreference();
     alarmSoundError = "";
     if (!alarmSoundEnabled) {
-      stopAlarmSound();
-      updateAlarmModalSoundStatus();
+      closeAlarmNotification();
     }
     updateAllAlarmSoundControls();
   });
@@ -6609,32 +6754,6 @@ function initializeAlarmNotification() {
 
 function stopCurrentAlarmLocally() {
   closeAlarmNotification();
-}
-
-
-async function acknowledgeCurrentAlarm() {
-  const context = currentAlarmAlertContext;
-  if (!context) return false;
-
-  const button =
-    document.getElementById(
-      "acknowledgeAlarmButton"
-    );
-  if (button) button.disabled = true;
-
-  try {
-    return await acknowledgeAlert(
-      context.alertId,
-      context.audience
-    );
-  } finally {
-    if (
-      button &&
-      currentAlarmAlertContext?.alertId === context.alertId
-    ) {
-      button.disabled = false;
-    }
-  }
 }
 
 
@@ -6757,8 +6876,7 @@ async function toggleAlarmSoundPreference(audience) {
   if (alarmSoundEnabled) {
     saveAlarmSoundPreference(false);
     alarmSoundError = "";
-    stopAlarmSound();
-    updateAlarmModalSoundStatus();
+    closeAlarmNotification();
     updateAllAlarmSoundControls();
     return;
   }
@@ -6820,9 +6938,9 @@ function updateAlarmAudioReadiness(audience) {
   status.textContent = alarmSoundError
     ? alarmSoundError
     : !alarmSoundEnabled
-      ? "通知音はOFFです。画面通知は受信します。"
+      ? "通知音はOFFです。緊急通知はベルから確認できます。"
       : unavailable
-        ? "このブラウザでは通知音を利用できません。画面通知は受信します。"
+        ? "このブラウザでは通知音を利用できません。緊急通知はベルから確認できます。"
         : ready
           ? "通知音を受け取る準備ができています。"
           : "ブラウザの制限により、最初に一度だけ通知音を有効にしてください。";
@@ -7058,7 +7176,7 @@ function updateAlarmModalSoundStatus() {
 
   if (!alarmSoundEnabled) {
     status.textContent =
-      "通知音はOFFです。画面通知は受信しています。";
+      "通知音はOFFです。緊急通知はベルから確認できます。";
     restartButton.textContent =
       "通知音をONにする";
     restartButton.classList.remove(
@@ -7157,11 +7275,6 @@ function showAlarmNotification(
       "stopAlarmButton"
     );
 
-  const acknowledgeButton =
-    document.getElementById(
-      "acknowledgeAlarmButton"
-    );
-
   alarmFocusBeforeOpen =
     document.activeElement;
   currentAlarmAlertContext =
@@ -7225,14 +7338,6 @@ function showAlarmNotification(
     stopButton.focus();
   }
 
-  if (acknowledgeButton) {
-    acknowledgeButton.classList.toggle(
-      "hidden",
-      !alertContext
-    );
-    acknowledgeButton.disabled = false;
-  }
-
   if (alarmSoundEnabled) {
     void startAlarmSound();
   } else {
@@ -7259,11 +7364,6 @@ function closeAlarmNotification() {
       "restartAlarmButton"
     );
 
-  const acknowledgeButton =
-    document.getElementById(
-      "acknowledgeAlarmButton"
-    );
-
   if (modal) {
     modal.classList.add(
       "hidden"
@@ -7274,10 +7374,6 @@ function closeAlarmNotification() {
     restartButton.classList.add(
       "hidden"
     );
-  }
-
-  if (acknowledgeButton) {
-    acknowledgeButton.disabled = false;
   }
 
   if (status) {

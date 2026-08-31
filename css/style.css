@@ -1750,6 +1750,60 @@ textarea[aria-invalid="true"] {
   gap: 14px;
 }
 
+.notification-section-title {
+  margin: 28px 0 12px;
+  font-size: 20px;
+}
+
+.emergency-notification-list {
+  display: grid;
+  gap: 14px;
+}
+
+.emergency-notification-item {
+  padding: 20px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+
+.emergency-notification-item.unread {
+  border-color: #f0a5a5;
+  box-shadow: 0 10px 26px rgba(181, 40, 40, 0.12);
+}
+
+.emergency-notification-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.notification-read-state {
+  color: var(--subtext);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.emergency-notification-item h3 {
+  margin: 0 0 10px;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.emergency-notification-item time,
+.emergency-notification-status {
+  color: var(--subtext);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.emergency-notification-status {
+  margin: 8px 0 0;
+}
+
 .user-notification-item,
 .notification-empty {
   padding: 20px;
@@ -2123,7 +2177,7 @@ body.app-dialog-open {
 
 .alarm-modal-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 12px;
   margin-top: 18px;
 }
@@ -2144,11 +2198,6 @@ body.app-dialog-open {
   color: var(--white);
   background: var(--red);
   border-color: var(--red);
-}
-
-.alarm-acknowledge-button:disabled {
-  cursor: wait;
-  opacity: 0.65;
 }
 
 @keyframes alarm-ring {
@@ -2252,6 +2301,17 @@ body.app-dialog-open {
 
 
 @media (max-width: 390px) {
+  .app-header {
+    gap: 8px;
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .app-logo {
+    min-width: 0;
+    font-size: 18px;
+  }
+
   .alarm-modal {
     padding: 14px;
   }
@@ -2289,6 +2349,21 @@ body.app-dialog-open {
     width: 42px;
     min-width: 42px;
     padding: 7px;
+  }
+
+  .notification-bell-button {
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+  }
+
+  .emergency-notification-item {
+    min-width: 0;
+    padding: 16px;
+  }
+
+  .emergency-notification-item .notification-read-button {
+    width: 100%;
   }
 
   .sound-toggle-label {
@@ -2375,6 +2450,10 @@ body.app-dialog-open {
   width: min(100% - 32px, 760px);
   margin: 0 auto;
   padding: 48px 0 100px;
+}
+
+.member-page.hidden {
+  display: none;
 }
 
 .member-status-card {

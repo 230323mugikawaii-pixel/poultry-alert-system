@@ -15,6 +15,7 @@ export interface AlertRecord {
   readonly acknowledgedAt: Date | null;
   readonly acknowledgedBy: AlertAcknowledgedBy | null;
   readonly acknowledgedByName: string | null;
+  readonly readAt: Date | null;
   readonly resolvedAt: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -70,6 +71,18 @@ export interface AlertRepository {
     readonly memberId: string;
     readonly now: Date;
   }): Promise<AlertAcknowledgementResult>;
+  markReadByOwner(input: {
+    readonly teamId: string;
+    readonly alertId: string;
+    readonly userId: string;
+    readonly now: Date;
+  }): Promise<AlertRecord>;
+  markReadByNotificationMember(input: {
+    readonly teamId: string;
+    readonly alertId: string;
+    readonly memberId: string;
+    readonly now: Date;
+  }): Promise<AlertRecord>;
   resolveByOwner(input: {
     readonly teamId: string;
     readonly alertId: string;
