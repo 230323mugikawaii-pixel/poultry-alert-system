@@ -197,7 +197,7 @@ const ALERT_FALLBACK_INTERVAL_MS = 4000;
 const ALERT_LONG_DISCONNECT_MS = 12000;
 
 const APP_BUILD_VERSION =
-  "2026-08-31.3";
+  "2026-08-31.4";
 
 let alarmAudioContext = null;
 let alarmSoundEnabled =
@@ -262,6 +262,18 @@ let alertFallbackInterval = null;
 let alertLongDisconnectTimer = null;
 let activeAlertAudience = null;
 let currentAlarmAlertContext = null;
+const notificationSelectionModes = {
+  OWNER: false,
+  NOTIFICATION_MEMBER: false
+};
+const selectedNotificationKeys = {
+  OWNER: new Set(),
+  NOTIFICATION_MEMBER: new Set()
+};
+const expandedEmergencyAlertIds = {
+  OWNER: new Set(),
+  NOTIFICATION_MEMBER: new Set()
+};
 const notifiedAlertIds =
   loadNotifiedAlertIds();
 let legacyGoogleAccountsFallbackBackup =
@@ -1723,11 +1735,6 @@ function openNotificationMemberApp() {
       `通知グループ ${notificationMemberSession.team.teamCode}`
   );
   showNotificationMemberHome();
-  renderAlertList(
-    "notificationMemberAlertList",
-    notificationMemberAlerts,
-    "NOTIFICATION_MEMBER"
-  );
   renderEmergencyNotifications(
     "notificationMemberEmergencyNotificationList",
     notificationMemberAlerts,
@@ -1760,6 +1767,8 @@ function openNotificationMemberNotificationCenter() {
     .getElementById("notificationMemberNotificationCenterPage")
     ?.classList.remove("hidden");
   setText("notificationMemberNotificationCenterError", "");
+  setText("notificationMemberNotificationCenterStatus", "");
+  renderNotificationSelectionControls("NOTIFICATION_MEMBER");
   renderEmergencyNotifications(
     "notificationMemberEmergencyNotificationList",
     notificationMemberAlerts,
@@ -1788,6 +1797,7 @@ async function logoutNotificationMember() {
   }
   notificationMemberSession = null;
   notificationMemberAlerts = [];
+  resetNotificationCenterUiState("NOTIFICATION_MEMBER");
   renderNotificationBadge();
   stopAlertEventStream();
   openGuestHome();
@@ -1980,10 +1990,12 @@ function handleAlertSessionEnded(audience) {
   stopAlertEventStream();
   if (audience === "NOTIFICATION_MEMBER") {
     notificationMemberSession = null;
+    resetNotificationCenterUiState("NOTIFICATION_MEMBER");
     openNotificationMemberLogin();
     return;
   }
   authenticatedUser = null;
+  resetNotificationCenterUiState("OWNER");
   resetOwnerOnboardingClientState();
   openGuestHome();
 }
@@ -2000,10 +2012,7 @@ function setAlertStreamStatus(audience, text, reconnecting) {
 }
 
 function applyAlertUpdate(alerts, audience) {
-  renderAlertList(
-    audience === "OWNER" ? "ownerAlertList" : "notificationMemberAlertList",
-    alerts,
-    audience);
+  pruneNotificationSelection(audience);
   renderEmergencyNotifications(
     audience === "OWNER"
       ? "ownerEmergencyNotificationList"
@@ -2032,50 +2041,6 @@ function applyAlertUpdate(alerts, audience) {
         kind: nextAlert.kind || "REAL"});
     }
   }
-}
-
-function renderAlertList(containerId, alerts, audience) {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-  if (alerts.length === 0) {
-    container.innerHTML =
-      '<p class="alert-list-empty">現在、確認が必要な通知はありません。</p>';
-    return;
-  }
-  container.innerHTML = alerts
-    .map((alert) => {
-      const active = alert.status === "ACTIVE";
-      const acknowledged = alert.status === "ACKNOWLEDGED";
-      const acknowledgedByName =
-        alert.acknowledgedByName ||
-        (alert.acknowledgedBy === "OWNER" ? "代表者" : "通知メンバー");
-      const statusText = active
-        ? "対応中"
-        : acknowledged
-          ? `${acknowledgedByName}さんが対応中`
-          : "対応完了";
-      const actions =
-        audience === "OWNER" && (active || acknowledged)
-          ? `<button type="button" class="btn outline" onclick="resolveAlert('${escapeHtml(alert.id)}')">対応完了にする</button>`
-          : "";
-      const isTest = alert.kind === "TEST";
-      return `
-        <article class="alert-list-item ${active ? "active" : ""} ${isTest ? "test" : ""}">
-          <div>
-            <div class="alert-list-heading-row">
-              ${isTest ? '<span class="alert-kind-badge">テスト</span>' : ""}
-              <h3>「${escapeHtml(alert.matchedKeyword)}」を検知</h3>
-            </div>
-            <p class="alert-list-meta">
-              ${escapeHtml(formatAlarmDetectedAt(alert.detectedAt))}・${escapeHtml(mailProviderLabel(alert.source.provider))}
-            </p>
-            <p class="alert-list-status">${escapeHtml(statusText)}</p>
-          </div>
-          <div class="alert-list-actions">${actions}</div>
-        </article>
-      `;
-    })
-    .join("");
 }
 
 async function resolveAlert(alertId) {
@@ -5525,6 +5490,7 @@ async function refreshUserNotifications() {
         : userNotifications.filter(
             (notification) => !notification.readAt
           ).length;
+    pruneNotificationSelection("OWNER");
     renderNotificationBadge();
     renderUserNotifications();
     return true;
@@ -5578,6 +5544,8 @@ function updateNotificationBadge(badgeId, buttonId, unreadCount, label) {
 async function openNotificationCenter() {
   showAppPage("notificationCenterPage");
   setText("notificationCenterError", "");
+  setText("notificationCenterStatus", "");
+  renderNotificationSelectionControls("OWNER");
   renderEmergencyNotifications(
     "ownerEmergencyNotificationList",
     ownerAlerts,
@@ -5595,6 +5563,7 @@ function renderEmergencyNotifications(containerId, alerts, audience) {
   const list = document.getElementById(containerId);
   if (!list) return;
   list.replaceChildren();
+  const selectionMode = notificationSelectionModes[audience];
 
   if (alerts.length === 0) {
     const empty = document.createElement("p");
@@ -5607,6 +5576,22 @@ function renderEmergencyNotifications(containerId, alerts, audience) {
   alerts.forEach((alert) => {
     const item = document.createElement("article");
     item.className = `emergency-notification-item${alert.readAt ? "" : " unread"}`;
+    const key = notificationItemKey("ALERT", alert.id);
+    const deletable = alert.status === "RESOLVED";
+    item.dataset.notificationKey = key;
+    item.setAttribute(
+      "aria-selected",
+      String(selectedNotificationKeys[audience].has(key))
+    );
+    if (selectionMode) {
+      item.classList.add("selection-mode");
+      appendNotificationSelectionControl(item, {
+        audience,
+        key,
+        label: `「${String(alert.matchedKeyword || "キーワード")}」の緊急通知を選択`,
+        deletable
+      });
+    }
 
     const heading = document.createElement("div");
     heading.className = "emergency-notification-heading";
@@ -5629,13 +5614,67 @@ function renderEmergencyNotifications(containerId, alerts, audience) {
     const details = document.createElement("button");
     details.type = "button";
     details.className = "notification-read-button";
-    details.textContent = "詳細を開く";
+    const expanded = expandedEmergencyAlertIds[audience].has(alert.id);
+    details.textContent = expanded ? "詳細を閉じる" : "詳細を開く";
+    details.setAttribute("aria-expanded", String(expanded));
     details.addEventListener("click", () => {
       void openEmergencyAlertDetails(alert.id, audience);
     });
     item.append(heading, title, date, status, details);
+    if (selectionMode && !deletable) {
+      const restriction = document.createElement("p");
+      restriction.className = "notification-delete-restriction";
+      restriction.textContent = "対応完了後に削除できます";
+      item.appendChild(restriction);
+    }
+    if (expanded) {
+      item.appendChild(createEmergencyAlertDetails(alert, audience));
+    }
     list.appendChild(item);
   });
+}
+
+
+function createEmergencyAlertDetails(alert, audience) {
+  const details = document.createElement("div");
+  details.className = "emergency-notification-details";
+
+  const list = document.createElement("dl");
+  appendNotificationDetail(list, "種別", alert.kind === "TEST" ? "テスト通知" : "緊急通知");
+  appendNotificationDetail(list, "通知キーワード", String(alert.matchedKeyword || "キーワード"));
+  appendNotificationDetail(list, "検知時刻", formatNotificationDate(alert.detectedAt));
+  appendNotificationDetail(list, "状態", formatEmergencyAlertStatus(alert));
+  appendNotificationDetail(list, "確認状態", alert.readAt ? "既読" : "未読");
+  appendNotificationDetail(
+    list,
+    "対応完了時刻",
+    alert.resolvedAt ? formatNotificationDate(alert.resolvedAt) : "未完了"
+  );
+  details.appendChild(list);
+
+  if (
+    audience === "OWNER" &&
+    (alert.status === "ACTIVE" || alert.status === "ACKNOWLEDGED")
+  ) {
+    const resolveButton = document.createElement("button");
+    resolveButton.type = "button";
+    resolveButton.className = "btn primary";
+    resolveButton.textContent = "対応完了にする";
+    resolveButton.addEventListener("click", () => {
+      void resolveAlert(alert.id);
+    });
+    details.appendChild(resolveButton);
+  }
+  return details;
+}
+
+
+function appendNotificationDetail(list, label, value) {
+  const term = document.createElement("dt");
+  term.textContent = label;
+  const description = document.createElement("dd");
+  description.textContent = value;
+  list.append(term, description);
 }
 
 
@@ -5658,19 +5697,19 @@ async function openEmergencyAlertDetails(alertId, audience) {
     const marked = await markEmergencyAlertRead(alertId, audience);
     if (!marked) return;
   }
-  if (audience === "OWNER") {
-    showAppPage("homePage");
-    document.getElementById("ownerAlertList")?.scrollIntoView({
-      behavior: "smooth",
-      block: "start"
-    });
+  const expanded = expandedEmergencyAlertIds[audience];
+  if (expanded.has(alertId)) {
+    expanded.delete(alertId);
   } else {
-    showNotificationMemberHome();
-    document.getElementById("notificationMemberAlertList")?.scrollIntoView({
-      behavior: "smooth",
-      block: "start"
-    });
+    expanded.add(alertId);
   }
+  renderEmergencyNotifications(
+    audience === "OWNER"
+      ? "ownerEmergencyNotificationList"
+      : "notificationMemberEmergencyNotificationList",
+    audience === "OWNER" ? ownerAlerts : notificationMemberAlerts,
+    audience
+  );
 }
 
 
@@ -5733,6 +5772,21 @@ function renderUserNotifications() {
   userNotifications.forEach((notification) => {
     const item = document.createElement("article");
     item.className = `user-notification-item${notification.readAt ? "" : " unread"}`;
+    const key = notificationItemKey("USER_NOTIFICATION", notification.id);
+    item.dataset.notificationKey = key;
+    item.setAttribute(
+      "aria-selected",
+      String(selectedNotificationKeys.OWNER.has(key))
+    );
+    if (notificationSelectionModes.OWNER) {
+      item.classList.add("selection-mode");
+      appendNotificationSelectionControl(item, {
+        audience: "OWNER",
+        key,
+        label: `「${String(notification.title || "お知らせ")}」を選択`,
+        deletable: true
+      });
+    }
 
     const title = document.createElement("h2");
     title.textContent = String(notification.title || "通知");
@@ -5755,6 +5809,263 @@ function renderUserNotifications() {
     }
     list.appendChild(item);
   });
+}
+
+
+function appendNotificationSelectionControl(
+  item,
+  { audience, key, label, deletable }
+) {
+  const wrapper = document.createElement("label");
+  wrapper.className = "notification-select-control";
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = selectedNotificationKeys[audience].has(key);
+  checkbox.disabled = !deletable;
+  checkbox.setAttribute("aria-checked", String(checkbox.checked));
+  checkbox.setAttribute("aria-label", label);
+  checkbox.addEventListener("change", () => {
+    checkbox.setAttribute("aria-checked", String(checkbox.checked));
+    toggleNotificationSelection(audience, key, checkbox.checked);
+    item.setAttribute("aria-selected", String(checkbox.checked));
+  });
+  const text = document.createElement("span");
+  text.className = "visually-hidden";
+  text.textContent = label;
+  wrapper.append(checkbox, text);
+  item.prepend(wrapper);
+}
+
+
+function notificationItemKey(type, id) {
+  return `${type}:${id}`;
+}
+
+
+function resetNotificationCenterUiState(audience) {
+  notificationSelectionModes[audience] = false;
+  selectedNotificationKeys[audience].clear();
+  expandedEmergencyAlertIds[audience].clear();
+}
+
+
+function getNotificationCenterItems(audience) {
+  const alerts = (audience === "OWNER" ? ownerAlerts : notificationMemberAlerts).map(
+    (alert) => ({
+      key: notificationItemKey("ALERT", alert.id),
+      type: "ALERT",
+      id: alert.id,
+      deletable: alert.status === "RESOLVED"
+    })
+  );
+  if (audience !== "OWNER") return alerts;
+  return alerts.concat(
+    userNotifications.map((notification) => ({
+      key: notificationItemKey("USER_NOTIFICATION", notification.id),
+      type: "USER_NOTIFICATION",
+      id: notification.id,
+      deletable: true
+    }))
+  );
+}
+
+
+function startNotificationSelection(audience) {
+  notificationSelectionModes[audience] = true;
+  selectedNotificationKeys[audience].clear();
+  renderNotificationCenterForAudience(audience);
+}
+
+
+function cancelNotificationSelection(audience) {
+  notificationSelectionModes[audience] = false;
+  selectedNotificationKeys[audience].clear();
+  renderNotificationCenterForAudience(audience);
+}
+
+
+function toggleNotificationSelection(audience, key, selected) {
+  if (selected) {
+    selectedNotificationKeys[audience].add(key);
+  } else {
+    selectedNotificationKeys[audience].delete(key);
+  }
+  renderNotificationSelectionControls(audience);
+}
+
+
+function selectAllNotifications(audience) {
+  selectedNotificationKeys[audience].clear();
+  getNotificationCenterItems(audience)
+    .filter(({ deletable }) => deletable)
+    .forEach(({ key }) => selectedNotificationKeys[audience].add(key));
+  renderNotificationCenterForAudience(audience);
+}
+
+
+function clearNotificationSelection(audience) {
+  selectedNotificationKeys[audience].clear();
+  renderNotificationCenterForAudience(audience);
+}
+
+
+function pruneNotificationSelection(audience) {
+  const available = new Set(
+    getNotificationCenterItems(audience)
+      .filter(({ deletable }) => deletable)
+      .map(({ key }) => key)
+  );
+  for (const key of selectedNotificationKeys[audience]) {
+    if (!available.has(key)) selectedNotificationKeys[audience].delete(key);
+  }
+  for (const alertId of expandedEmergencyAlertIds[audience]) {
+    const exists = (audience === "OWNER" ? ownerAlerts : notificationMemberAlerts).some(
+      ({ id }) => id === alertId
+    );
+    if (!exists) expandedEmergencyAlertIds[audience].delete(alertId);
+  }
+  renderNotificationSelectionControls(audience);
+}
+
+
+function renderNotificationCenterForAudience(audience) {
+  pruneNotificationSelection(audience);
+  renderEmergencyNotifications(
+    audience === "OWNER"
+      ? "ownerEmergencyNotificationList"
+      : "notificationMemberEmergencyNotificationList",
+    audience === "OWNER" ? ownerAlerts : notificationMemberAlerts,
+    audience
+  );
+  if (audience === "OWNER") renderUserNotifications();
+}
+
+
+function renderNotificationSelectionControls(audience) {
+  const owner = audience === "OWNER";
+  const toolbarId = owner
+    ? "ownerNotificationSelectionToolbar"
+    : "notificationMemberSelectionToolbar";
+  const selectionButtonId = owner
+    ? "ownerNotificationSelectionButton"
+    : "notificationMemberSelectionButton";
+  const countId = owner
+    ? "ownerNotificationSelectionCount"
+    : "notificationMemberSelectionCount";
+  const deleteButtonId = owner
+    ? "ownerDeleteSelectionButton"
+    : "notificationMemberDeleteSelectionButton";
+  const active = notificationSelectionModes[audience];
+  const count = selectedNotificationKeys[audience].size;
+  document.getElementById(toolbarId)?.classList.toggle("hidden", !active);
+  document.getElementById(selectionButtonId)?.classList.toggle("hidden", active);
+  setText(countId, `${count}件選択中`);
+  const deleteButton = document.getElementById(deleteButtonId);
+  if (deleteButton) deleteButton.disabled = count === 0;
+}
+
+
+async function deleteSelectedNotifications(audience) {
+  const selected = selectedNotificationKeys[audience];
+  const visibleByKey = new Map(
+    getNotificationCenterItems(audience).map((item) => [item.key, item])
+  );
+  const items = [...selected]
+    .map((key) => visibleByKey.get(key))
+    .filter((item) => item?.deletable);
+  const errorId =
+    audience === "OWNER"
+      ? "notificationCenterError"
+      : "notificationMemberNotificationCenterError";
+  const statusId =
+    audience === "OWNER"
+      ? "notificationCenterStatus"
+      : "notificationMemberNotificationCenterStatus";
+  setText(errorId, "");
+  setText(statusId, "");
+  if (items.length < 1) return;
+  if (items.length > 100) {
+    setText(errorId, "一度に削除できるお知らせは100件までです。");
+    return;
+  }
+
+  const count = items.length;
+  const confirmed = await showAppConfirm(
+    count === 1
+      ? "このお知らせを削除しますか？\n\n一覧から削除されます。ほかの利用者の通知や共有Alertには影響しません。"
+      : `選択した${count}件のお知らせを削除しますか？`,
+    {
+      title: count === 1 ? "お知らせを削除" : "お知らせを一括削除",
+      confirmText: count === 1 ? "削除する" : `${count}件を削除`,
+      cancelText: "キャンセル",
+      tone: "danger"
+    }
+  );
+  if (!confirmed) return;
+
+  const path =
+    audience === "OWNER"
+      ? "/api/v1/notification-center/delete"
+      : "/api/v1/notification-members/notification-center/delete";
+  const body =
+    audience === "OWNER"
+      ? { items: items.map(({ type, id }) => ({ type, id })) }
+      : { alertIds: items.map(({ id }) => id) };
+  try {
+    const response = await fetch(apiUrl(path), {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !Array.isArray(payload?.items)) {
+      throw new Error(
+        payload?.error?.message ||
+          "お知らせを削除できませんでした。もう一度お試しください。"
+      );
+    }
+
+    const deletedKeys = new Set(items.map(({ key }) => key));
+    if (audience === "OWNER") {
+      ownerAlerts = ownerAlerts.filter(
+        ({ id }) => !deletedKeys.has(notificationItemKey("ALERT", id))
+      );
+      userNotifications = userNotifications.filter(
+        ({ id }) =>
+          !deletedKeys.has(notificationItemKey("USER_NOTIFICATION", id))
+      );
+      notificationUnreadCount = userNotifications.filter(
+        ({ readAt }) => !readAt
+      ).length;
+    } else {
+      notificationMemberAlerts = notificationMemberAlerts.filter(
+        ({ id }) => !deletedKeys.has(notificationItemKey("ALERT", id))
+      );
+    }
+    notificationSelectionModes[audience] = false;
+    selected.clear();
+    renderNotificationCenterForAudience(audience);
+    renderNotificationBadge();
+    setText(statusId, `${count}件のお知らせを削除しました。`);
+
+    if (audience === "OWNER") {
+      await Promise.all([refreshOwnerAlerts(), refreshUserNotifications()]);
+    } else {
+      await refreshNotificationMemberAlerts();
+    }
+    setText(statusId, `${count}件のお知らせを削除しました。`);
+  } catch (error) {
+    setText(
+      errorId,
+      error instanceof Error
+        ? error.message
+        : "お知らせを削除できませんでした。もう一度お試しください。"
+    );
+  }
 }
 
 
@@ -5919,11 +6230,6 @@ function openApp() {
 
   renderUserNotifications();
 
-  renderAlertList(
-    "ownerAlertList",
-    ownerAlerts,
-    "OWNER"
-  );
   void refreshOwnerAlerts();
   startOwnerAlertStream();
 
@@ -6210,6 +6516,7 @@ async function performLogout() {
   ownerAlerts = [];
   userNotifications = [];
   notificationUnreadCount = 0;
+  resetNotificationCenterUiState("OWNER");
   stopAlertEventStream();
 
   setupMode =
@@ -6468,7 +6775,7 @@ function openAppDialog(options) {
     appDialogResolver =
       resolve;
 
-    confirmButton.focus();
+    (showCancel ? cancelButton : confirmButton).focus();
   });
 }
 

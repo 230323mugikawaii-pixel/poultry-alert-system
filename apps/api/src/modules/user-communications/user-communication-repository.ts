@@ -10,6 +10,7 @@ export interface UserNotificationRecord {
   readonly message: string;
   readonly createdAt: Date;
   readonly readAt: Date | null;
+  readonly deletedAt: Date | null;
 }
 
 export interface FeedbackRecord {

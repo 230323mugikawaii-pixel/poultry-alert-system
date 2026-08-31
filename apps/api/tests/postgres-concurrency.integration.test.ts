@@ -2501,6 +2501,239 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     ).resolves.toBe(2);
   });
 
+  it("soft-deletes notification-center items per recipient without deleting shared records", async () => {
+    const clock = { value: new Date("2026-08-31T06:00:00.000Z") };
+    const owner = await createUser("dismiss-owner@example.com");
+    const invitation = await prepareInvitationCredential({
+      now: clock.value,
+      ttlDays: 30
+    });
+    const team = await createServices(clock, "482760").teamService.createTeam(
+      { ownerUserId: owner.id, seatLimit: 1 },
+      invitation
+    );
+    const memberService = new NotificationMemberService({
+      repository: new PrismaNotificationMemberRepository(database),
+      securityThrottle: new SecurityThrottleService(
+        new PrismaSecurityThrottleRepository(database),
+        testPepper,
+        () => clock.value
+      ),
+      tokenPepper: testPepper,
+      sessionIdleDays: 30,
+      sessionAbsoluteDays: 90,
+      maxActiveSessions: 5,
+      now: () => clock.value,
+      callNowIdGenerator: () => "CN-D0000001"
+    });
+    const member = await memberService.create({
+      teamId: team.team.teamId,
+      actorUserId: owner.id,
+      displayName: "通知担当"
+    });
+    const connection = await createActiveMailConnection(
+      owner.id,
+      team.team.teamId,
+      "dismiss-google-subject"
+    );
+    const alertService = new AlertService({
+      repository: new PrismaAlertRepository(database),
+      now: () => clock.value
+    });
+    const alert = await alertService.ingest({
+      teamId: team.team.teamId,
+      sourceMailConnectionId: connection.id,
+      sourceEventId: "gmail-history-dismiss-1",
+      matchedKeyword: "停電",
+      detectedAt: clock.value
+    });
+    const communicationService = new UserCommunicationService(
+      new PrismaUserCommunicationRepository(database),
+      () => clock.value
+    );
+    const feedback = await communicationService.submitFeedback({
+      userId: owner.id,
+      teamId: team.team.teamId,
+      message: "通知センター削除の統合テスト",
+      requestId: "dismiss-feedback"
+    });
+    const notification = await communicationService.recordOperatorReply({
+      feedbackId: feedback.id,
+      title: "運営からのお知らせ",
+      message: "確認しました。",
+      requestId: "dismiss-feedback-reply"
+    });
+
+    await expect(
+      alertService.dismissOwnerNotifications({
+        teamId: team.team.teamId,
+        userId: owner.id,
+        items: [
+          { type: "ALERT", id: alert.alert.id },
+          { type: "USER_NOTIFICATION", id: notification.id }
+        ]
+      })
+    ).rejects.toMatchObject({
+      code: "NOTIFICATION_NOT_RESOLVED",
+      statusCode: 409
+    });
+    await expect(
+      database.userNotification.findUniqueOrThrow({
+        where: { id: notification.id },
+        select: { deletedAt: true }
+      })
+    ).resolves.toEqual({ deletedAt: null });
+
+    clock.value = new Date(clock.value.getTime() + 1_000);
+    await alertService.resolveByOwner({
+      teamId: team.team.teamId,
+      alertId: alert.alert.id,
+      userId: owner.id
+    });
+    const ownerDeletion = await alertService.dismissOwnerNotifications({
+      teamId: team.team.teamId,
+      userId: owner.id,
+      items: [
+        { type: "ALERT", id: alert.alert.id },
+        { type: "USER_NOTIFICATION", id: notification.id }
+      ],
+      requestId: "owner-dismiss"
+    });
+    expect(ownerDeletion).toMatchObject({
+      deletedCount: 2,
+      alreadyDeletedCount: 0
+    });
+    await expect(
+      alertService.listForOwner(team.team.teamId, owner.id)
+    ).resolves.toEqual([]);
+    await expect(
+      communicationService.listNotifications(owner.id)
+    ).resolves.toMatchObject({ notifications: [], unreadCount: 0 });
+    await expect(
+      alertService.listForNotificationMember(team.team.teamId, member.member.id)
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: alert.alert.id, status: "RESOLVED" })
+      ])
+    );
+
+    await expect(
+      alertService.dismissOwnerNotifications({
+        teamId: team.team.teamId,
+        userId: owner.id,
+        items: [
+          { type: "ALERT", id: alert.alert.id },
+          { type: "USER_NOTIFICATION", id: notification.id }
+        ]
+      })
+    ).resolves.toMatchObject({ deletedCount: 0, alreadyDeletedCount: 2 });
+
+    const newAlert = await alertService.ingest({
+      teamId: team.team.teamId,
+      sourceMailConnectionId: connection.id,
+      sourceEventId: "gmail-history-dismiss-2",
+      matchedKeyword: "停電",
+      detectedAt: clock.value
+    });
+    const ownerAlertsAfterNewDetection = await alertService.listForOwner(
+      team.team.teamId,
+      owner.id
+    );
+    expect(ownerAlertsAfterNewDetection).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: newAlert.alert.id,
+          matchedKeyword: "停電"
+        })
+      ])
+    );
+    expect(ownerAlertsAfterNewDetection).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: alert.alert.id })])
+    );
+
+    const recipientsAfterOwnerDeletion = await database.alertRecipient.findMany(
+      {
+        where: { alertId: alert.alert.id },
+        select: {
+          kind: true,
+          userId: true,
+          notificationMemberId: true,
+          dismissedAt: true
+        }
+      }
+    );
+    expect(recipientsAfterOwnerDeletion).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "OWNER",
+          userId: owner.id,
+          dismissedAt: clock.value
+        }),
+        expect.objectContaining({
+          kind: "NOTIFICATION_MEMBER",
+          notificationMemberId: member.member.id,
+          dismissedAt: null
+        })
+      ])
+    );
+
+    const otherOwner = await createUser("dismiss-other@example.com");
+    const otherTeam = await createServices(
+      clock,
+      "482761"
+    ).teamService.createTeam({ ownerUserId: otherOwner.id, seatLimit: 0 });
+    await expect(
+      alertService.dismissOwnerNotifications({
+        teamId: otherTeam.team.teamId,
+        userId: otherOwner.id,
+        items: [{ type: "ALERT", id: alert.alert.id }]
+      })
+    ).rejects.toMatchObject({
+      code: "NOTIFICATION_NOT_FOUND",
+      statusCode: 404
+    });
+
+    const memberDeletion = await alertService.dismissNotificationMemberAlerts({
+      teamId: team.team.teamId,
+      memberId: member.member.id,
+      alertIds: [alert.alert.id],
+      requestId: "member-dismiss"
+    });
+    expect(memberDeletion).toMatchObject({
+      deletedCount: 1,
+      alreadyDeletedCount: 0
+    });
+    await expect(
+      alertService.listForNotificationMember(team.team.teamId, member.member.id)
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: newAlert.alert.id, status: "ACTIVE" })
+      ])
+    );
+    await expect(
+      alertService.dismissNotificationMemberAlerts({
+        teamId: team.team.teamId,
+        memberId: member.member.id,
+        alertIds: [newAlert.alert.id]
+      })
+    ).rejects.toMatchObject({
+      code: "NOTIFICATION_NOT_RESOLVED",
+      statusCode: 409
+    });
+    await expect(
+      database.alert.count({ where: { id: alert.alert.id } })
+    ).resolves.toBe(1);
+    await expect(
+      database.feedbackSubmission.count({ where: { id: feedback.id } })
+    ).resolves.toBe(1);
+    await expect(
+      database.userNotification.findUniqueOrThrow({
+        where: { id: notification.id },
+        select: { deletedAt: true }
+      })
+    ).resolves.toEqual({ deletedAt: clock.value });
+  });
+
   it("stores feedback privately and delivers one idempotent reply notification", async () => {
     const clock = { value: new Date("2026-08-29T04:00:00.000Z") };
     const owner = await createUser("feedback-owner@example.com");

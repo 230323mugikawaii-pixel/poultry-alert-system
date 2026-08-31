@@ -723,6 +723,7 @@ model AlertRecipient {
   status               AlertRecipientStatus @default(PENDING)
   acknowledgedAt       DateTime?            @db.Timestamptz(3)
   readAt               DateTime?            @db.Timestamptz(3)
+  dismissedAt          DateTime?            @db.Timestamptz(3)
   createdAt            DateTime             @default(now()) @db.Timestamptz(3)
   updatedAt            DateTime             @updatedAt @db.Timestamptz(3)
   alert                Alert                @relation(fields: [alertId], references: [id], onDelete: Cascade)
@@ -735,6 +736,8 @@ model AlertRecipient {
   @@index([notificationMemberId, status, createdAt])
   @@index([userId, readAt, createdAt])
   @@index([notificationMemberId, readAt, createdAt])
+  @@index([userId, dismissedAt, readAt, createdAt])
+  @@index([notificationMemberId, dismissedAt, readAt, createdAt])
   @@map("alert_recipients")
 }
 
@@ -747,10 +750,12 @@ model UserNotification {
   message    String               @db.Text
   createdAt  DateTime             @default(now()) @db.Timestamptz(3)
   readAt     DateTime?            @db.Timestamptz(3)
+  deletedAt  DateTime?            @db.Timestamptz(3)
   user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   feedback   FeedbackSubmission?  @relation("FeedbackReplyNotification", fields: [feedbackId], references: [id], onDelete: SetNull)
 
   @@index([userId, readAt, createdAt])
+  @@index([userId, deletedAt, readAt, createdAt])
   @@index([userId, createdAt])
   @@map("user_notifications")
 }

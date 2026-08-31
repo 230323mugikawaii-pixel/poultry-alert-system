@@ -15,7 +15,8 @@ const notificationSelect = {
   title: true,
   message: true,
   createdAt: true,
-  readAt: true
+  readAt: true,
+  deletedAt: true
 } as const;
 
 const feedbackSelect = {
@@ -37,13 +38,13 @@ export class PrismaUserCommunicationRepository implements UserCommunicationRepos
   }): Promise<UserNotificationList> {
     const [notifications, unreadCount] = await Promise.all([
       this.database.userNotification.findMany({
-        where: { userId: input.userId },
+        where: { userId: input.userId, deletedAt: null },
         select: notificationSelect,
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: input.limit
       }),
       this.database.userNotification.count({
-        where: { userId: input.userId, readAt: null }
+        where: { userId: input.userId, readAt: null, deletedAt: null }
       })
     ]);
     return { notifications, unreadCount };
@@ -59,12 +60,17 @@ export class PrismaUserCommunicationRepository implements UserCommunicationRepos
         where: {
           id: input.notificationId,
           userId: input.userId,
-          readAt: null
+          readAt: null,
+          deletedAt: null
         },
         data: { readAt: input.now }
       });
       const notification = await transaction.userNotification.findFirst({
-        where: { id: input.notificationId, userId: input.userId },
+        where: {
+          id: input.notificationId,
+          userId: input.userId,
+          deletedAt: null
+        },
         select: notificationSelect
       });
       if (!notification) {

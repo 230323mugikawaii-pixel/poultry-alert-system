@@ -5,7 +5,9 @@ import type {
   AlertIngestionResult,
   AlertRecord,
   AlertRepository,
-  AlertResolutionResult
+  AlertResolutionResult,
+  NotificationCenterDeletionItem,
+  NotificationCenterDeletionResult
 } from "../src/modules/alerts/alert-repository.js";
 import { AlertService } from "../src/modules/alerts/alert-service.js";
 
@@ -76,10 +78,60 @@ describe("AlertService", () => {
     expect(first.readAt).toEqual(now);
     expect(duplicate.readAt).toEqual(now);
   });
+
+  it("deduplicates owner notification deletion items before persistence", async () => {
+    const repository = new MemoryAlertRepository();
+    const service = new AlertService({ repository });
+    const alertId = randomUUID();
+    const notificationId = randomUUID();
+
+    const result = await service.dismissOwnerNotifications({
+      teamId: randomUUID(),
+      userId: randomUUID(),
+      items: [
+        { type: "ALERT", id: alertId },
+        { type: "ALERT", id: alertId },
+        { type: "USER_NOTIFICATION", id: notificationId }
+      ]
+    });
+
+    expect(repository.lastOwnerDeletionItems).toEqual([
+      { type: "ALERT", id: alertId },
+      { type: "USER_NOTIFICATION", id: notificationId }
+    ]);
+    expect(result.deletedCount).toBe(2);
+  });
+
+  it.each([0, 101])(
+    "rejects deletion batches containing %s items",
+    async (count) => {
+      const service = new AlertService({
+        repository: new MemoryAlertRepository()
+      });
+      const items = Array.from({ length: count }, () => ({
+        type: "ALERT" as const,
+        id: randomUUID()
+      }));
+
+      expect(() =>
+        service.dismissOwnerNotifications({
+          teamId: randomUUID(),
+          userId: randomUUID(),
+          items
+        })
+      ).toThrow(
+        expect.objectContaining({
+          code: "NOTIFICATION_DELETE_LIMIT_EXCEEDED",
+          statusCode: 400
+        })
+      );
+    }
+  );
 });
 
 class MemoryAlertRepository implements AlertRepository {
   private alert: AlertRecord | null = null;
+  public lastOwnerDeletionItems: readonly NotificationCenterDeletionItem[] = [];
 
   public async ingest(input: {
     readonly teamId: string;
@@ -139,6 +191,28 @@ class MemoryAlertRepository implements AlertRepository {
     readonly now: Date;
   }): Promise<AlertRecord> {
     return this.markReadByOwner(input);
+  }
+
+  public dismissOwnerNotifications(input: {
+    readonly items: readonly NotificationCenterDeletionItem[];
+  }): Promise<NotificationCenterDeletionResult> {
+    this.lastOwnerDeletionItems = input.items;
+    return Promise.resolve({
+      items: input.items,
+      deletedCount: input.items.length,
+      alreadyDeletedCount: 0
+    });
+  }
+
+  public dismissNotificationMemberAlerts(input: {
+    readonly alertIds: readonly string[];
+  }): Promise<NotificationCenterDeletionResult> {
+    const items = input.alertIds.map((id) => ({ type: "ALERT" as const, id }));
+    return Promise.resolve({
+      items,
+      deletedCount: items.length,
+      alreadyDeletedCount: 0
+    });
   }
 
   public resolveByOwner(): Promise<AlertResolutionResult> {

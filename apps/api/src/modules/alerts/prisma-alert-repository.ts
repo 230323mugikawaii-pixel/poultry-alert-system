@@ -7,7 +7,9 @@ import type {
   AlertIngestionResult,
   AlertRecord,
   AlertRepository,
-  AlertResolutionResult
+  AlertResolutionResult,
+  NotificationCenterDeletionItem,
+  NotificationCenterDeletionResult
 } from "./alert-repository.js";
 
 const alertInclude = {
@@ -171,7 +173,12 @@ export class PrismaAlertRepository implements AlertRepository {
       where: {
         teamId: input.teamId,
         recipients: {
-          some: { kind: "OWNER", userId: input.userId, channel: "IN_APP" }
+          some: {
+            kind: "OWNER",
+            userId: input.userId,
+            channel: "IN_APP",
+            dismissedAt: null
+          }
         }
       },
       orderBy: [{ detectedAt: "desc" }, { id: "desc" }],
@@ -183,7 +190,8 @@ export class PrismaAlertRepository implements AlertRepository {
         alertId: { in: alerts.map(({ id }) => id) },
         kind: "OWNER",
         userId: input.userId,
-        channel: "IN_APP"
+        channel: "IN_APP",
+        dismissedAt: null
       },
       select: { alertId: true, readAt: true }
     });
@@ -207,7 +215,8 @@ export class PrismaAlertRepository implements AlertRepository {
           some: {
             kind: "NOTIFICATION_MEMBER",
             notificationMemberId: input.memberId,
-            channel: "IN_APP"
+            channel: "IN_APP",
+            dismissedAt: null
           }
         }
       },
@@ -220,7 +229,8 @@ export class PrismaAlertRepository implements AlertRepository {
         alertId: { in: alerts.map(({ id }) => id) },
         kind: "NOTIFICATION_MEMBER",
         notificationMemberId: input.memberId,
-        channel: "IN_APP"
+        channel: "IN_APP",
+        dismissedAt: null
       },
       select: { alertId: true, readAt: true }
     });
@@ -266,6 +276,160 @@ export class PrismaAlertRepository implements AlertRepository {
     readonly now: Date;
   }): Promise<AlertRecord> {
     return this.markRead({ ...input, kind: "NOTIFICATION_MEMBER" });
+  }
+
+  public dismissOwnerNotifications(input: {
+    readonly teamId: string;
+    readonly userId: string;
+    readonly items: readonly NotificationCenterDeletionItem[];
+    readonly requestId: string | null;
+    readonly now: Date;
+  }): Promise<NotificationCenterDeletionResult> {
+    return this.database.$transaction(async (transaction) => {
+      const alertIds = input.items
+        .filter(({ type }) => type === "ALERT")
+        .map(({ id }) => id);
+      const notificationIds = input.items
+        .filter(({ type }) => type === "USER_NOTIFICATION")
+        .map(({ id }) => id);
+
+      const [alertRecipients, notifications] = await Promise.all([
+        alertIds.length
+          ? transaction.alertRecipient.findMany({
+              where: {
+                alertId: { in: alertIds },
+                kind: "OWNER",
+                userId: input.userId,
+                channel: "IN_APP",
+                alert: { teamId: input.teamId }
+              },
+              select: {
+                id: true,
+                alertId: true,
+                dismissedAt: true,
+                alert: { select: { status: true } }
+              }
+            })
+          : Promise.resolve([]),
+        notificationIds.length
+          ? transaction.userNotification.findMany({
+              where: { id: { in: notificationIds }, userId: input.userId },
+              select: { id: true, deletedAt: true }
+            })
+          : Promise.resolve([])
+      ]);
+
+      if (
+        alertRecipients.length !== alertIds.length ||
+        notifications.length !== notificationIds.length
+      ) {
+        throw notificationNotFoundError();
+      }
+      if (alertRecipients.some(({ alert }) => alert.status !== "RESOLVED")) {
+        throw notificationNotResolvedError();
+      }
+
+      const [dismissedAlerts, deletedNotifications] = await Promise.all([
+        transaction.alertRecipient.updateMany({
+          where: {
+            id: { in: alertRecipients.map(({ id }) => id) },
+            dismissedAt: null
+          },
+          data: { dismissedAt: input.now }
+        }),
+        transaction.userNotification.updateMany({
+          where: {
+            id: { in: notifications.map(({ id }) => id) },
+            deletedAt: null
+          },
+          data: { deletedAt: input.now }
+        })
+      ]);
+      const deletedCount = dismissedAlerts.count + deletedNotifications.count;
+      if (deletedCount > 0) {
+        await transaction.auditEvent.create({
+          data: {
+            teamId: input.teamId,
+            actorUserId: input.userId,
+            action: "NOTIFICATION_CENTER_ITEMS_DISMISSED",
+            targetType: "NotificationCenter",
+            requestId: input.requestId,
+            metadata: {
+              actorType: "OWNER",
+              alertCount: dismissedAlerts.count,
+              userNotificationCount: deletedNotifications.count,
+              totalCount: deletedCount
+            }
+          }
+        });
+      }
+      return {
+        items: input.items,
+        deletedCount,
+        alreadyDeletedCount: input.items.length - deletedCount
+      };
+    });
+  }
+
+  public dismissNotificationMemberAlerts(input: {
+    readonly teamId: string;
+    readonly memberId: string;
+    readonly alertIds: readonly string[];
+    readonly requestId: string | null;
+    readonly now: Date;
+  }): Promise<NotificationCenterDeletionResult> {
+    return this.database.$transaction(async (transaction) => {
+      const recipients = await transaction.alertRecipient.findMany({
+        where: {
+          alertId: { in: [...input.alertIds] },
+          kind: "NOTIFICATION_MEMBER",
+          notificationMemberId: input.memberId,
+          channel: "IN_APP",
+          alert: { teamId: input.teamId }
+        },
+        select: {
+          id: true,
+          alertId: true,
+          dismissedAt: true,
+          alert: { select: { status: true } }
+        }
+      });
+      if (recipients.length !== input.alertIds.length) {
+        throw notificationNotFoundError();
+      }
+      if (recipients.some(({ alert }) => alert.status !== "RESOLVED")) {
+        throw notificationNotResolvedError();
+      }
+
+      const dismissed = await transaction.alertRecipient.updateMany({
+        where: {
+          id: { in: recipients.map(({ id }) => id) },
+          dismissedAt: null
+        },
+        data: { dismissedAt: input.now }
+      });
+      if (dismissed.count > 0) {
+        await transaction.auditEvent.create({
+          data: {
+            teamId: input.teamId,
+            action: "NOTIFICATION_CENTER_ITEMS_DISMISSED",
+            targetType: "NotificationCenter",
+            requestId: input.requestId,
+            metadata: {
+              actorType: "NOTIFICATION_MEMBER",
+              alertCount: dismissed.count,
+              userNotificationCount: 0,
+              totalCount: dismissed.count
+            }
+          }
+        });
+      }
+      return {
+        items: input.alertIds.map((id) => ({ type: "ALERT", id })),
+        deletedCount: dismissed.count,
+        alreadyDeletedCount: input.alertIds.length - dismissed.count
+      };
+    });
   }
 
   public async resolveByOwner(input: {
@@ -350,6 +514,7 @@ export class PrismaAlertRepository implements AlertRepository {
           alertId: input.alertId,
           ...actorWhere,
           channel: "IN_APP",
+          dismissedAt: null,
           alert: { teamId: input.teamId }
         },
         select: { id: true, readAt: true }
@@ -504,4 +669,20 @@ function mapAlert(alert: AlertWithSource, readAt: Date | null): AlertRecord {
 
 function alertNotFoundError(): AppError {
   return new AppError("ALERT_NOT_FOUND", "通知が見つかりません。", 404);
+}
+
+function notificationNotFoundError(): AppError {
+  return new AppError(
+    "NOTIFICATION_NOT_FOUND",
+    "削除するお知らせが見つかりません。",
+    404
+  );
+}
+
+function notificationNotResolvedError(): AppError {
+  return new AppError(
+    "NOTIFICATION_NOT_RESOLVED",
+    "対応完了後に削除できます。",
+    409
+  );
 }

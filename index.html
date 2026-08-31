@@ -14,7 +14,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=29"/>
+    <link rel="stylesheet" href="css/style.css?v=30"/>
 </head>
 
 <body>
@@ -203,27 +203,39 @@
           <h2 id="notificationMemberWelcome">通知メンバー</h2>
           <p id="notificationMemberTeamName"></p>
           <p>
-            この画面では重要メールの通知確認と停止を行えます。メール本文やアカウント設定は表示されません。
+            緊急通知はヘッダーのベルから確認できます。メール本文やアカウント設定は表示されません。
           </p>
         </article>
-        <article class="card member-alert-card">
-          <div class="alert-card-heading">
-            <div>
-              <h2>重要通知</h2>
-              <p>新しい通知は、この画面を開いている間に自動で更新されます。</p>
-            </div>
-            <span
-              id="notificationMemberAlertStreamStatus"
-              class="alert-stream-status"
-            >
-              接続中
-            </span>
-          </div>
-          <div
-            id="notificationMemberAlertList"
-            class="alert-list"
-            aria-live="polite"
-          ></div>
+      </section>
+      <section
+        id="notificationMemberNotificationCenterPage"
+        class="member-page hidden"
+      >
+        <button
+          type="button"
+          class="back-button"
+          onclick="showNotificationMemberHome()"
+        >
+          ← 通知ホームへ戻る
+        </button>
+        <div class="notification-center-heading">
+          <h1>お知らせ</h1>
+          <button
+            id="notificationMemberSelectionButton"
+            type="button"
+            class="btn outline notification-selection-button"
+            onclick="startNotificationSelection('NOTIFICATION_MEMBER')"
+          >
+            選択
+          </button>
+        </div>
+        <div class="notification-center-health">
+          <span
+            id="notificationMemberAlertStreamStatus"
+            class="alert-stream-status"
+          >
+            接続中
+          </span>
           <div
             class="alert-audio-readiness"
             data-audience="NOTIFICATION_MEMBER"
@@ -243,20 +255,39 @@
               通知音を有効にする
             </button>
           </div>
-        </article>
-      </section>
-      <section
-        id="notificationMemberNotificationCenterPage"
-        class="member-page hidden"
-      >
-        <button
-          type="button"
-          class="back-button"
-          onclick="showNotificationMemberHome()"
+        </div>
+        <div
+          id="notificationMemberSelectionToolbar"
+          class="notification-selection-toolbar hidden"
+          role="toolbar"
+          aria-label="お知らせの選択操作"
         >
-          ← 通知ホームへ戻る
-        </button>
-        <h1>通知</h1>
+          <button type="button" class="btn outline" onclick="selectAllNotifications('NOTIFICATION_MEMBER')">
+            すべて選択
+          </button>
+          <span id="notificationMemberSelectionCount" aria-live="polite">0件選択中</span>
+          <button type="button" class="btn outline" onclick="clearNotificationSelection('NOTIFICATION_MEMBER')">
+            選択を解除
+          </button>
+          <button
+            id="notificationMemberDeleteSelectionButton"
+            type="button"
+            class="btn danger"
+            onclick="deleteSelectedNotifications('NOTIFICATION_MEMBER')"
+            disabled
+          >
+            選択した通知を削除
+          </button>
+          <button type="button" class="btn outline" onclick="cancelNotificationSelection('NOTIFICATION_MEMBER')">
+            キャンセル
+          </button>
+        </div>
+        <p
+          id="notificationMemberNotificationCenterStatus"
+          class="feedback-status"
+          role="status"
+          aria-live="polite"
+        ></p>
         <h2 class="notification-section-title">緊急通知</h2>
         <p
           id="notificationMemberNotificationCenterError"
@@ -1147,44 +1178,6 @@
 
           </article>
 
-          <article class="card owner-alert-card">
-            <div class="alert-card-heading">
-              <div>
-                <h2>重要通知</h2>
-                <p>
-                  本番通知とテスト通知は、この画面を開いている間に自動で更新されます。
-                </p>
-              </div>
-              <span
-                id="ownerAlertStreamStatus"
-                class="alert-stream-status"
-              >
-                接続中
-              </span>
-            </div>
-            <div class="alert-audio-readiness" data-audience="OWNER">
-              <div>
-                <strong>通知音</strong>
-                <p id="ownerAudioStatus">
-                  ブラウザで通知音の状態を確認しています。
-                </p>
-              </div>
-              <button
-                id="ownerEnableAudioButton"
-                type="button"
-                class="btn outline"
-                onclick="enableAlarmAudio('OWNER')"
-              >
-                通知音を有効にする
-              </button>
-            </div>
-            <div
-              id="ownerAlertList"
-              class="alert-list"
-              aria-live="polite"
-            ></div>
-          </article>
-
         </div>
 
       </section>
@@ -1700,7 +1693,68 @@
         <button type="button" class="back-button" onclick="showAppPage('homePage')">
           ← ホームへ戻る
         </button>
-        <h1>通知</h1>
+        <div class="notification-center-heading">
+          <h1>お知らせ</h1>
+          <button
+            id="ownerNotificationSelectionButton"
+            type="button"
+            class="btn outline notification-selection-button"
+            onclick="startNotificationSelection('OWNER')"
+          >
+            選択
+          </button>
+        </div>
+        <div class="notification-center-health">
+          <span id="ownerAlertStreamStatus" class="alert-stream-status">接続中</span>
+          <div class="alert-audio-readiness" data-audience="OWNER">
+            <div>
+              <strong>通知音</strong>
+              <p id="ownerAudioStatus">
+                ブラウザで通知音の状態を確認しています。
+              </p>
+            </div>
+            <button
+              id="ownerEnableAudioButton"
+              type="button"
+              class="btn outline"
+              onclick="enableAlarmAudio('OWNER')"
+            >
+              通知音を有効にする
+            </button>
+          </div>
+        </div>
+        <div
+          id="ownerNotificationSelectionToolbar"
+          class="notification-selection-toolbar hidden"
+          role="toolbar"
+          aria-label="お知らせの選択操作"
+        >
+          <button type="button" class="btn outline" onclick="selectAllNotifications('OWNER')">
+            すべて選択
+          </button>
+          <span id="ownerNotificationSelectionCount" aria-live="polite">0件選択中</span>
+          <button type="button" class="btn outline" onclick="clearNotificationSelection('OWNER')">
+            選択を解除
+          </button>
+          <button
+            id="ownerDeleteSelectionButton"
+            type="button"
+            class="btn danger"
+            onclick="deleteSelectedNotifications('OWNER')"
+            disabled
+          >
+            選択した通知を削除
+          </button>
+          <button type="button" class="btn outline" onclick="cancelNotificationSelection('OWNER')">
+            キャンセル
+          </button>
+        </div>
+        <p
+          id="notificationCenterStatus"
+          class="feedback-status"
+          role="status"
+          aria-live="polite"
+        ></p>
         <p
           id="notificationCenterError"
           class="form-error"
@@ -1713,7 +1767,7 @@
           class="emergency-notification-list"
           aria-live="polite"
         ></div>
-        <h2 class="notification-section-title">お知らせ</h2>
+        <h2 class="notification-section-title">運営からのお知らせ</h2>
         <div
           id="userNotificationList"
           class="user-notification-list"
@@ -1788,7 +1842,7 @@
 
     <script src="js/keyword-policy.js?v=2"></script>
     <script src="js/owner-onboarding-routing.js?v=2"></script>
-    <script src="js/app.js?v=31"></script>
+    <script src="js/app.js?v=32"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";
