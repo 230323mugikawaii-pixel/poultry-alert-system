@@ -74,7 +74,7 @@ export class PrismaAlertRepository implements AlertRepository {
               include: alertInclude
             });
             if (existing) {
-              return { alert: mapAlert(existing), created: false };
+              return { alert: mapAlert(existing, null), created: false };
             }
 
             const [owners, members] = await Promise.all([
@@ -149,7 +149,7 @@ export class PrismaAlertRepository implements AlertRepository {
                 }
               }
             });
-            return { alert: mapAlert(created), created: true };
+            return { alert: mapAlert(created, null), created: true };
           },
           { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
         ),
@@ -178,7 +178,21 @@ export class PrismaAlertRepository implements AlertRepository {
       take: input.limit,
       include: alertInclude
     });
-    return alerts.map(mapAlert);
+    const recipients = await this.database.alertRecipient.findMany({
+      where: {
+        alertId: { in: alerts.map(({ id }) => id) },
+        kind: "OWNER",
+        userId: input.userId,
+        channel: "IN_APP"
+      },
+      select: { alertId: true, readAt: true }
+    });
+    const readAtByAlertId = new Map(
+      recipients.map(({ alertId, readAt }) => [alertId, readAt])
+    );
+    return alerts.map((alert) =>
+      mapAlert(alert, readAtByAlertId.get(alert.id) ?? null)
+    );
   }
 
   public async listForNotificationMember(input: {
@@ -201,7 +215,21 @@ export class PrismaAlertRepository implements AlertRepository {
       take: input.limit,
       include: alertInclude
     });
-    return alerts.map(mapAlert);
+    const recipients = await this.database.alertRecipient.findMany({
+      where: {
+        alertId: { in: alerts.map(({ id }) => id) },
+        kind: "NOTIFICATION_MEMBER",
+        notificationMemberId: input.memberId,
+        channel: "IN_APP"
+      },
+      select: { alertId: true, readAt: true }
+    });
+    const readAtByAlertId = new Map(
+      recipients.map(({ alertId, readAt }) => [alertId, readAt])
+    );
+    return alerts.map((alert) =>
+      mapAlert(alert, readAtByAlertId.get(alert.id) ?? null)
+    );
   }
 
   public acknowledgeByOwner(input: {
@@ -222,6 +250,24 @@ export class PrismaAlertRepository implements AlertRepository {
     return this.acknowledge({ ...input, kind: "NOTIFICATION_MEMBER" });
   }
 
+  public markReadByOwner(input: {
+    readonly teamId: string;
+    readonly alertId: string;
+    readonly userId: string;
+    readonly now: Date;
+  }): Promise<AlertRecord> {
+    return this.markRead({ ...input, kind: "OWNER" });
+  }
+
+  public markReadByNotificationMember(input: {
+    readonly teamId: string;
+    readonly alertId: string;
+    readonly memberId: string;
+    readonly now: Date;
+  }): Promise<AlertRecord> {
+    return this.markRead({ ...input, kind: "NOTIFICATION_MEMBER" });
+  }
+
   public async resolveByOwner(input: {
     readonly teamId: string;
     readonly alertId: string;
@@ -236,7 +282,7 @@ export class PrismaAlertRepository implements AlertRepository {
           userId: input.userId,
           alert: { teamId: input.teamId }
         },
-        select: { id: true }
+        select: { id: true, readAt: true }
       });
       if (!recipient) throw alertNotFoundError();
       const resolved = await transaction.alert.updateMany({
@@ -263,9 +309,65 @@ export class PrismaAlertRepository implements AlertRepository {
         });
       }
       return {
-        alert: await findAlertOrThrow(transaction, input.alertId, input.teamId),
+        alert: await findAlertOrThrow(
+          transaction,
+          input.alertId,
+          input.teamId,
+          recipient.readAt
+        ),
         alreadyResolved: resolved.count === 0
       };
+    });
+  }
+
+  private markRead(
+    input:
+      | {
+          readonly kind: "OWNER";
+          readonly teamId: string;
+          readonly alertId: string;
+          readonly userId: string;
+          readonly now: Date;
+        }
+      | {
+          readonly kind: "NOTIFICATION_MEMBER";
+          readonly teamId: string;
+          readonly alertId: string;
+          readonly memberId: string;
+          readonly now: Date;
+        }
+  ): Promise<AlertRecord> {
+    return this.database.$transaction(async (transaction) => {
+      const actorWhere =
+        input.kind === "OWNER"
+          ? { kind: "OWNER" as const, userId: input.userId }
+          : {
+              kind: "NOTIFICATION_MEMBER" as const,
+              notificationMemberId: input.memberId
+            };
+      const recipient = await transaction.alertRecipient.findFirst({
+        where: {
+          alertId: input.alertId,
+          ...actorWhere,
+          channel: "IN_APP",
+          alert: { teamId: input.teamId }
+        },
+        select: { id: true, readAt: true }
+      });
+      if (!recipient) throw alertNotFoundError();
+
+      if (!recipient.readAt) {
+        await transaction.alertRecipient.update({
+          where: { id: recipient.id },
+          data: { readAt: input.now }
+        });
+      }
+      return findAlertOrThrow(
+        transaction,
+        input.alertId,
+        input.teamId,
+        recipient.readAt ?? input.now
+      );
     });
   }
 
@@ -300,7 +402,7 @@ export class PrismaAlertRepository implements AlertRepository {
           ...actorWhere,
           alert: { teamId: input.teamId }
         },
-        select: { id: true }
+        select: { id: true, readAt: true }
       });
       if (!recipient) throw alertNotFoundError();
 
@@ -345,7 +447,12 @@ export class PrismaAlertRepository implements AlertRepository {
         });
       }
       return {
-        alert: await findAlertOrThrow(transaction, input.alertId, input.teamId),
+        alert: await findAlertOrThrow(
+          transaction,
+          input.alertId,
+          input.teamId,
+          recipient.readAt
+        ),
         alreadyAcknowledged: acknowledged.count === 0
       };
     });
@@ -355,17 +462,18 @@ export class PrismaAlertRepository implements AlertRepository {
 async function findAlertOrThrow(
   transaction: Prisma.TransactionClient,
   alertId: string,
-  teamId: string
+  teamId: string,
+  readAt: Date | null = null
 ): Promise<AlertRecord> {
   const alert = await transaction.alert.findFirst({
     where: { id: alertId, teamId },
     include: alertInclude
   });
   if (!alert) throw alertNotFoundError();
-  return mapAlert(alert);
+  return mapAlert(alert, readAt);
 }
 
-function mapAlert(alert: AlertWithSource): AlertRecord {
+function mapAlert(alert: AlertWithSource, readAt: Date | null): AlertRecord {
   return {
     id: alert.id,
     teamId: alert.teamId,
@@ -386,6 +494,7 @@ function mapAlert(alert: AlertWithSource): AlertRecord {
       : alert.acknowledgedByNotificationMemberId
         ? alert.acknowledgedByNotificationMember?.displayName || "通知メンバー"
         : null,
+    readAt,
     resolvedAt: alert.resolvedAt,
     createdAt: alert.createdAt,
     updatedAt: alert.updatedAt,

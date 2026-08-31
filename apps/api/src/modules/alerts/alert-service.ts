@@ -102,6 +102,28 @@ export class AlertService {
     });
   }
 
+  public markReadByOwner(input: {
+    readonly teamId: string;
+    readonly alertId: string;
+    readonly userId: string;
+  }): Promise<AlertRecord> {
+    return this.options.repository.markReadByOwner({
+      ...input,
+      now: this.now()
+    });
+  }
+
+  public markReadByNotificationMember(input: {
+    readonly teamId: string;
+    readonly alertId: string;
+    readonly memberId: string;
+  }): Promise<AlertRecord> {
+    return this.options.repository.markReadByNotificationMember({
+      ...input,
+      now: this.now()
+    });
+  }
+
   public resolveByOwner(input: {
     readonly teamId: string;
     readonly alertId: string;

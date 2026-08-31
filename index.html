@@ -177,21 +177,36 @@
           <span aria-hidden="true">🔊</span>
           <span class="sound-toggle-label">通知音 ON</span>
         </button>
+        <button
+          id="notificationMemberNotificationCenterButton"
+          type="button"
+          class="notification-bell-button"
+          aria-label="緊急通知を開く"
+          onclick="openNotificationMemberNotificationCenter()"
+        >
+          <span aria-hidden="true">🔔</span>
+          <span
+            id="notificationMemberUnreadBadge"
+            class="notification-unread-badge hidden"
+            aria-label="未読の緊急通知"
+          ></span>
+        </button>
         <button type="button" class="logout-button" onclick="logoutNotificationMember()">
           ログアウト
         </button>
       </div>
     </header>
     <main class="member-app-main">
-      <h1>通知ホーム</h1>
-      <article class="card member-status-card">
-        <h2 id="notificationMemberWelcome">通知メンバー</h2>
-        <p id="notificationMemberTeamName"></p>
-        <p>
-          この画面では重要メールの通知確認と停止を行えます。メール本文やアカウント設定は表示されません。
-        </p>
-      </article>
-      <article class="card member-alert-card">
+      <section id="notificationMemberHomePage" class="member-page">
+        <h1>通知ホーム</h1>
+        <article class="card member-status-card">
+          <h2 id="notificationMemberWelcome">通知メンバー</h2>
+          <p id="notificationMemberTeamName"></p>
+          <p>
+            この画面では重要メールの通知確認と停止を行えます。メール本文やアカウント設定は表示されません。
+          </p>
+        </article>
+        <article class="card member-alert-card">
           <div class="alert-card-heading">
             <div>
               <h2>重要通知</h2>
@@ -229,6 +244,32 @@
             </button>
           </div>
         </article>
+      </section>
+      <section
+        id="notificationMemberNotificationCenterPage"
+        class="member-page hidden"
+      >
+        <button
+          type="button"
+          class="back-button"
+          onclick="showNotificationMemberHome()"
+        >
+          ← 通知ホームへ戻る
+        </button>
+        <h1>通知</h1>
+        <h2 class="notification-section-title">緊急通知</h2>
+        <p
+          id="notificationMemberNotificationCenterError"
+          class="form-error"
+          role="alert"
+          aria-live="polite"
+        ></p>
+        <div
+          id="notificationMemberEmergencyNotificationList"
+          class="emergency-notification-list"
+          aria-live="polite"
+        ></div>
+      </section>
     </main>
   </section>
 
@@ -568,7 +609,7 @@
         通知音を鳴らす
       </button>
       <p id="alarmActionHelp" class="alarm-action-help">
-        音を止める操作はこの端末だけに反映されます。「対応を開始」は全利用者に共有されます。
+        音を止める操作はこの端末だけに反映されます。通知は代表者が対応完了にするまで残ります。
       </p>
       <div class="alarm-modal-actions">
         <button
@@ -577,13 +618,6 @@
           class="btn outline alarm-stop-button"
         >
           この端末の通知音を停止
-        </button>
-        <button
-          id="acknowledgeAlarmButton"
-          type="button"
-          class="btn primary alarm-acknowledge-button"
-        >
-          対応を開始
         </button>
       </div>
     </div>
@@ -1673,6 +1707,13 @@
           role="alert"
           aria-live="polite"
         ></p>
+        <h2 class="notification-section-title">緊急通知</h2>
+        <div
+          id="ownerEmergencyNotificationList"
+          class="emergency-notification-list"
+          aria-live="polite"
+        ></div>
+        <h2 class="notification-section-title">お知らせ</h2>
         <div
           id="userNotificationList"
           class="user-notification-list"

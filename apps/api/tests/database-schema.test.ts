@@ -59,6 +59,10 @@ describe("database foundation", () => {
     );
     expect(schema).toContain("model AlertRecipient {");
     expect(schema).toContain("notificationMemberId");
+    expect(schema).toMatch(/model AlertRecipient \{[^}]*readAt\s+DateTime\?/s);
+    expect(schema).toContain(
+      "@@index([notificationMemberId, readAt, createdAt])"
+    );
     expect(schema).toContain("model NotificationTest {");
     expect(schema).toContain("enum NotificationTestStatus");
   });

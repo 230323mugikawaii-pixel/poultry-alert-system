@@ -52,6 +52,30 @@ describe("AlertService", () => {
       ).toThrow(expect.objectContaining({ code: "ALERT_KEYWORD_INVALID" }));
     }
   );
+
+  it("marks an owner recipient read idempotently", async () => {
+    const repository = new MemoryAlertRepository();
+    const now = new Date("2026-08-31T09:00:00.000Z");
+    const service = new AlertService({ repository, now: () => now });
+    const created = await service.ingest({
+      teamId: randomUUID(),
+      sourceMailConnectionId: randomUUID(),
+      sourceEventId: "provider-event-read",
+      matchedKeyword: "停電",
+      detectedAt: now
+    });
+    const input = {
+      teamId: created.alert.teamId,
+      alertId: created.alert.id,
+      userId: randomUUID()
+    };
+
+    const first = await service.markReadByOwner(input);
+    const duplicate = await service.markReadByOwner(input);
+
+    expect(first.readAt).toEqual(now);
+    expect(duplicate.readAt).toEqual(now);
+  });
 });
 
 class MemoryAlertRepository implements AlertRepository {
@@ -79,6 +103,7 @@ class MemoryAlertRepository implements AlertRepository {
       acknowledgedAt: null,
       acknowledgedBy: null,
       acknowledgedByName: null,
+      readAt: null,
       resolvedAt: null,
       createdAt: input.now,
       updatedAt: input.now,
@@ -102,6 +127,18 @@ class MemoryAlertRepository implements AlertRepository {
 
   public acknowledgeByNotificationMember(): Promise<AlertAcknowledgementResult> {
     throw new Error("not implemented");
+  }
+
+  public markReadByOwner(input: { readonly now: Date }): Promise<AlertRecord> {
+    if (!this.alert) throw new Error("not implemented");
+    this.alert = { ...this.alert, readAt: this.alert.readAt ?? input.now };
+    return Promise.resolve(this.alert);
+  }
+
+  public markReadByNotificationMember(input: {
+    readonly now: Date;
+  }): Promise<AlertRecord> {
+    return this.markReadByOwner(input);
   }
 
   public resolveByOwner(): Promise<AlertResolutionResult> {

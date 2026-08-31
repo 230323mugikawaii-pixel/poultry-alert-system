@@ -2288,7 +2288,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     ).resolves.toEqual({ status: "EXPIRED", alertId: null });
   });
 
-  it("allows one simultaneous acknowledgement and enforces team isolation", async () => {
+  it("keeps recipient reads independent and preserves legacy acknowledgement", async () => {
     const clock = { value: new Date("2026-08-28T08:00:00.000Z") };
     const owner = await createUser("ack-owner@example.com");
     await database.user.update({
@@ -2339,6 +2339,62 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       matchedKeyword: "システム障害",
       detectedAt: clock.value
     });
+
+    clock.value = new Date(clock.value.getTime() + 1_000);
+    const memberRead = await alertService.markReadByNotificationMember({
+      teamId: team.team.teamId,
+      alertId: created.alert.id,
+      memberId: member.member.id
+    });
+    expect(memberRead.readAt).toEqual(clock.value);
+    await expect(
+      alertService.listForOwner(team.team.teamId, owner.id)
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: created.alert.id, readAt: null })
+      ])
+    );
+    await expect(
+      alertService.listForNotificationMember(team.team.teamId, member.member.id)
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: created.alert.id,
+          readAt: clock.value
+        })
+      ])
+    );
+    await expect(
+      alertService.markReadByNotificationMember({
+        teamId: team.team.teamId,
+        alertId: created.alert.id,
+        memberId: member.member.id
+      })
+    ).resolves.toMatchObject({ readAt: clock.value });
+
+    clock.value = new Date(clock.value.getTime() + 1_000);
+    await expect(
+      alertService.markReadByOwner({
+        teamId: team.team.teamId,
+        alertId: created.alert.id,
+        userId: owner.id
+      })
+    ).resolves.toMatchObject({ readAt: clock.value });
+    await expect(
+      database.alertRecipient.findMany({
+        where: { alertId: created.alert.id },
+        orderBy: { kind: "asc" },
+        select: { kind: true, readAt: true }
+      })
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        { kind: "OWNER", readAt: clock.value },
+        {
+          kind: "NOTIFICATION_MEMBER",
+          readAt: new Date(clock.value.getTime() - 1_000)
+        }
+      ])
+    );
 
     const acknowledgements = await Promise.all([
       alertService.acknowledgeByOwner({
@@ -2407,6 +2463,13 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       seatLimit: 0
     });
     await expect(
+      alertService.markReadByOwner({
+        teamId: otherTeam.team.teamId,
+        alertId: created.alert.id,
+        userId: otherOwner.id
+      })
+    ).rejects.toMatchObject({ code: "ALERT_NOT_FOUND", statusCode: 404 });
+    await expect(
       alertService.acknowledgeByOwner({
         teamId: otherTeam.team.teamId,
         alertId: created.alert.id,
@@ -2416,6 +2479,26 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     await expect(
       alertService.listForOwner(otherTeam.team.teamId, otherOwner.id)
     ).resolves.toEqual([]);
+
+    clock.value = new Date(clock.value.getTime() + 1_000);
+    await expect(
+      alertService.resolveByOwner({
+        teamId: team.team.teamId,
+        alertId: created.alert.id,
+        userId: owner.id
+      })
+    ).resolves.toMatchObject({
+      alreadyResolved: false,
+      alert: {
+        status: "RESOLVED",
+        readAt: new Date(clock.value.getTime() - 1_000)
+      }
+    });
+    await expect(
+      database.alertRecipient.count({
+        where: { alertId: created.alert.id, readAt: { not: null } }
+      })
+    ).resolves.toBe(2);
   });
 
   it("stores feedback privately and delivers one idempotent reply notification", async () => {

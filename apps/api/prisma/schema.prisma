@@ -722,6 +722,7 @@ model AlertRecipient {
   channel              AlertDeliveryChannel @default(IN_APP)
   status               AlertRecipientStatus @default(PENDING)
   acknowledgedAt       DateTime?            @db.Timestamptz(3)
+  readAt               DateTime?            @db.Timestamptz(3)
   createdAt            DateTime             @default(now()) @db.Timestamptz(3)
   updatedAt            DateTime             @updatedAt @db.Timestamptz(3)
   alert                Alert                @relation(fields: [alertId], references: [id], onDelete: Cascade)
@@ -732,6 +733,8 @@ model AlertRecipient {
   @@unique([alertId, notificationMemberId, channel])
   @@index([userId, status, createdAt])
   @@index([notificationMemberId, status, createdAt])
+  @@index([userId, readAt, createdAt])
+  @@index([notificationMemberId, readAt, createdAt])
   @@map("alert_recipients")
 }
 
