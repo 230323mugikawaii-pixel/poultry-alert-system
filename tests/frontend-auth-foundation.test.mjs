@@ -31,7 +31,10 @@ test("frontend authentication uses the server session API", () => {
 
 test("frontend no longer treats browser storage or a Google access token as login", () => {
   assert.doesNotMatch(appSource, /callNowSession/);
-  assert.doesNotMatch(appSource, /sessionStorage/);
+  assert.doesNotMatch(
+    appSource,
+    /sessionStorage\.(?:getItem|setItem)\(\s*["'](?:callNowSession|googleAccessToken)/
+  );
   assert.doesNotMatch(appSource, /googleAccessToken/);
   assert.doesNotMatch(appSource, /initTokenClient/);
   assert.doesNotMatch(appSource, /gmail\.readonly/);

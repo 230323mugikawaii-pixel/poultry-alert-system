@@ -58,6 +58,7 @@ test("SSE reconnects with list refresh, fallback polling, and alert-id deduplica
   assert.match(appSource, /stopAlertFallbackPolling/);
   assert.match(appSource, /refreshAlertsForAudience/);
   assert.match(appSource, /rememberNotifiedAlert\(nextAlert\.id\)/);
+  assert.match(appSource, /window\.sessionStorage\.setItem/);
   assert.match(appSource, /stream-error/);
   assert.match(appSource, /handleAlertSessionEnded/);
 });

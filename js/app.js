@@ -190,6 +190,8 @@ const TEST_DETECTION_TIMEOUT_MS =
 const ALERT_SOUND_SETTING_KEY =
   "callNowAlertSoundSetting";
 const ALERT_SOUND_SETTING_VERSION = 1;
+const NOTIFIED_ALERT_IDS_KEY =
+  "callNowNotifiedAlertIds";
 const ALERT_FALLBACK_DELAY_MS = 4000;
 const ALERT_FALLBACK_INTERVAL_MS = 4000;
 const ALERT_LONG_DISCONNECT_MS = 12000;
@@ -260,7 +262,8 @@ let alertFallbackInterval = null;
 let alertLongDisconnectTimer = null;
 let activeAlertAudience = null;
 let currentAlarmAlertContext = null;
-const notifiedAlertIds = new Set();
+const notifiedAlertIds =
+  loadNotifiedAlertIds();
 let legacyGoogleAccountsFallbackBackup =
   [];
 let contractStorageMigrationPending =
@@ -6503,8 +6506,30 @@ function saveAlarmSoundPreference(enabled) {
   }
 }
 
+function loadNotifiedAlertIds() {
+  try {
+    const saved = JSON.parse(
+      window.sessionStorage.getItem(NOTIFIED_ALERT_IDS_KEY) || "[]"
+    );
+    if (Array.isArray(saved)) {
+      return new Set(saved.filter((value) => typeof value === "string"));
+    }
+  } catch {
+    /* 保存値が壊れている場合は空の履歴から開始する。 */
+  }
+  return new Set();
+}
+
 function rememberNotifiedAlert(alertId) {
   notifiedAlertIds.add(alertId);
+  try {
+    window.sessionStorage.setItem(
+      NOTIFIED_ALERT_IDS_KEY,
+      JSON.stringify(Array.from(notifiedAlertIds).slice(-100))
+    );
+  } catch {
+    /* 通知表示自体は継続する。 */
+  }
 }
 
 function initializeAlarmNotification() {
