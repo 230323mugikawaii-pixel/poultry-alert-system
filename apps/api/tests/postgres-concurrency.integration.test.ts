@@ -2509,9 +2509,10 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       ttlDays: 30
     });
     const team = await createServices(clock, "482760").teamService.createTeam(
-      { ownerUserId: owner.id, seatLimit: 1 },
+      { ownerUserId: owner.id, seatLimit: 2 },
       invitation
     );
+    let nextMemberNumber = 1;
     const memberService = new NotificationMemberService({
       repository: new PrismaNotificationMemberRepository(database),
       securityThrottle: new SecurityThrottleService(
@@ -2524,12 +2525,17 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       sessionAbsoluteDays: 90,
       maxActiveSessions: 5,
       now: () => clock.value,
-      callNowIdGenerator: () => "CN-D0000001"
+      callNowIdGenerator: () => `CN-D000000${nextMemberNumber++}`
     });
     const member = await memberService.create({
       teamId: team.team.teamId,
       actorUserId: owner.id,
       displayName: "通知担当"
+    });
+    const otherMember = await memberService.create({
+      teamId: team.team.teamId,
+      actorUserId: owner.id,
+      displayName: "通知担当2"
     });
     const connection = await createActiveMailConnection(
       owner.id,
@@ -2546,6 +2552,36 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       sourceEventId: "gmail-history-dismiss-1",
       matchedKeyword: "停電",
       detectedAt: clock.value
+    });
+    const acknowledgedAlert = await alertService.ingest({
+      teamId: team.team.teamId,
+      sourceMailConnectionId: connection.id,
+      sourceEventId: "gmail-history-dismiss-acknowledged",
+      kind: "TEST",
+      matchedKeyword: "警報テスト",
+      detectedAt: clock.value
+    });
+    await alertService.acknowledgeByOwner({
+      teamId: team.team.teamId,
+      alertId: acknowledgedAlert.alert.id,
+      userId: owner.id
+    });
+    const resolvedAlert = await alertService.ingest({
+      teamId: team.team.teamId,
+      sourceMailConnectionId: connection.id,
+      sourceEventId: "gmail-history-dismiss-resolved",
+      matchedKeyword: "システム障害",
+      detectedAt: clock.value
+    });
+    await alertService.resolveByOwner({
+      teamId: team.team.teamId,
+      alertId: resolvedAlert.alert.id,
+      userId: owner.id
+    });
+    await alertService.markReadByOwner({
+      teamId: team.team.teamId,
+      alertId: resolvedAlert.alert.id,
+      userId: owner.id
     });
     const communicationService = new UserCommunicationService(
       new PrismaUserCommunicationRepository(database),
@@ -2564,45 +2600,39 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       requestId: "dismiss-feedback-reply"
     });
 
-    await expect(
-      alertService.dismissOwnerNotifications({
-        teamId: team.team.teamId,
-        userId: owner.id,
-        items: [
-          { type: "ALERT", id: alert.alert.id },
-          { type: "USER_NOTIFICATION", id: notification.id }
-        ]
-      })
-    ).rejects.toMatchObject({
-      code: "NOTIFICATION_NOT_RESOLVED",
-      statusCode: 409
-    });
-    await expect(
-      database.userNotification.findUniqueOrThrow({
-        where: { id: notification.id },
-        select: { deletedAt: true }
-      })
-    ).resolves.toEqual({ deletedAt: null });
-
-    clock.value = new Date(clock.value.getTime() + 1_000);
-    await alertService.resolveByOwner({
-      teamId: team.team.teamId,
-      alertId: alert.alert.id,
-      userId: owner.id
-    });
     const ownerDeletion = await alertService.dismissOwnerNotifications({
       teamId: team.team.teamId,
       userId: owner.id,
       items: [
         { type: "ALERT", id: alert.alert.id },
+        { type: "ALERT", id: acknowledgedAlert.alert.id },
+        { type: "ALERT", id: resolvedAlert.alert.id },
         { type: "USER_NOTIFICATION", id: notification.id }
       ],
       requestId: "owner-dismiss"
     });
     expect(ownerDeletion).toMatchObject({
-      deletedCount: 2,
+      deletedCount: 4,
       alreadyDeletedCount: 0
     });
+    const ownerDismissals = await database.alertRecipient.findMany({
+      where: {
+        alertId: {
+          in: [
+            alert.alert.id,
+            acknowledgedAlert.alert.id,
+            resolvedAlert.alert.id
+          ]
+        },
+        kind: "OWNER",
+        userId: owner.id
+      },
+      select: { alertId: true, dismissedAt: true }
+    });
+    expect(ownerDismissals).toHaveLength(3);
+    expect(
+      ownerDismissals.every(({ dismissedAt }) => dismissedAt !== null)
+    ).toBe(true);
     await expect(
       alertService.listForOwner(team.team.teamId, owner.id)
     ).resolves.toEqual([]);
@@ -2613,9 +2643,24 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       alertService.listForNotificationMember(team.team.teamId, member.member.id)
     ).resolves.toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: alert.alert.id, status: "RESOLVED" })
+        expect.objectContaining({ id: alert.alert.id, status: "ACTIVE" }),
+        expect.objectContaining({
+          id: acknowledgedAlert.alert.id,
+          kind: "TEST",
+          status: "ACKNOWLEDGED"
+        }),
+        expect.objectContaining({
+          id: resolvedAlert.alert.id,
+          status: "RESOLVED"
+        })
       ])
     );
+    await expect(
+      alertService.listForNotificationMember(
+        team.team.teamId,
+        otherMember.member.id
+      )
+    ).resolves.toHaveLength(3);
 
     await expect(
       alertService.dismissOwnerNotifications({
@@ -2623,10 +2668,12 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
         userId: owner.id,
         items: [
           { type: "ALERT", id: alert.alert.id },
+          { type: "ALERT", id: acknowledgedAlert.alert.id },
+          { type: "ALERT", id: resolvedAlert.alert.id },
           { type: "USER_NOTIFICATION", id: notification.id }
         ]
       })
-    ).resolves.toMatchObject({ deletedCount: 0, alreadyDeletedCount: 2 });
+    ).resolves.toMatchObject({ deletedCount: 0, alreadyDeletedCount: 4 });
 
     const newAlert = await alertService.ingest({
       teamId: team.team.teamId,
@@ -2673,6 +2720,11 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
           kind: "NOTIFICATION_MEMBER",
           notificationMemberId: member.member.id,
           dismissedAt: null
+        }),
+        expect.objectContaining({
+          kind: "NOTIFICATION_MEMBER",
+          notificationMemberId: otherMember.member.id,
+          dismissedAt: null
         })
       ])
     );
@@ -2696,11 +2748,15 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     const memberDeletion = await alertService.dismissNotificationMemberAlerts({
       teamId: team.team.teamId,
       memberId: member.member.id,
-      alertIds: [alert.alert.id],
+      alertIds: [
+        alert.alert.id,
+        acknowledgedAlert.alert.id,
+        resolvedAlert.alert.id
+      ],
       requestId: "member-dismiss"
     });
     expect(memberDeletion).toMatchObject({
-      deletedCount: 1,
+      deletedCount: 3,
       alreadyDeletedCount: 0
     });
     await expect(
@@ -2710,19 +2766,60 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
         expect.objectContaining({ id: newAlert.alert.id, status: "ACTIVE" })
       ])
     );
+    const activeMemberDeletion =
+      await alertService.dismissNotificationMemberAlerts({
+        teamId: team.team.teamId,
+        memberId: member.member.id,
+        alertIds: [newAlert.alert.id]
+      });
+    expect(activeMemberDeletion).toMatchObject({
+      deletedCount: 1,
+      alreadyDeletedCount: 0
+    });
     await expect(
       alertService.dismissNotificationMemberAlerts({
         teamId: team.team.teamId,
         memberId: member.member.id,
         alertIds: [newAlert.alert.id]
       })
-    ).rejects.toMatchObject({
-      code: "NOTIFICATION_NOT_RESOLVED",
-      statusCode: 409
-    });
+    ).resolves.toMatchObject({ deletedCount: 0, alreadyDeletedCount: 1 });
     await expect(
-      database.alert.count({ where: { id: alert.alert.id } })
-    ).resolves.toBe(1);
+      alertService.listForNotificationMember(team.team.teamId, member.member.id)
+    ).resolves.toEqual([]);
+    await expect(
+      alertService.listForNotificationMember(
+        team.team.teamId,
+        otherMember.member.id
+      )
+    ).resolves.toHaveLength(4);
+    await expect(
+      database.alert.findMany({
+        where: {
+          id: {
+            in: [
+              alert.alert.id,
+              acknowledgedAlert.alert.id,
+              resolvedAlert.alert.id,
+              newAlert.alert.id
+            ]
+          }
+        },
+        select: { sourceEventId: true, status: true }
+      })
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        { sourceEventId: "gmail-history-dismiss-1", status: "ACTIVE" },
+        {
+          sourceEventId: "gmail-history-dismiss-acknowledged",
+          status: "ACKNOWLEDGED"
+        },
+        {
+          sourceEventId: "gmail-history-dismiss-resolved",
+          status: "RESOLVED"
+        },
+        { sourceEventId: "gmail-history-dismiss-2", status: "ACTIVE" }
+      ])
+    );
     await expect(
       database.feedbackSubmission.count({ where: { id: feedback.id } })
     ).resolves.toBe(1);
@@ -2732,6 +2829,25 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
         select: { deletedAt: true }
       })
     ).resolves.toEqual({ deletedAt: clock.value });
+    const dismissalAudits = await database.auditEvent.findMany({
+      where: {
+        teamId: team.team.teamId,
+        action: "NOTIFICATION_CENTER_ITEMS_DISMISSED"
+      },
+      select: { metadata: true }
+    });
+    expect(dismissalAudits).toHaveLength(3);
+    expect(JSON.stringify(dismissalAudits)).not.toMatch(
+      /message|body|token|cookie|password|oauth|email/iu
+    );
+    await expect(
+      database.auditEvent.count({
+        where: {
+          teamId: team.team.teamId,
+          action: "NOTIFICATION_CENTER_ITEMS_DISMISSED"
+        }
+      })
+    ).resolves.toBe(3);
   });
 
   it("stores feedback privately and delivers one idempotent reply notification", async () => {

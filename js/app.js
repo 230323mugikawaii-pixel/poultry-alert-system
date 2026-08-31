@@ -197,7 +197,7 @@ const ALERT_FALLBACK_INTERVAL_MS = 4000;
 const ALERT_LONG_DISCONNECT_MS = 12000;
 
 const APP_BUILD_VERSION =
-  "2026-08-31.4";
+  "2026-08-31.5";
 
 let alarmAudioContext = null;
 let alarmSoundEnabled =
@@ -2021,10 +2021,10 @@ function applyAlertUpdate(alerts, audience) {
     audience
   );
   renderNotificationBadge();
-  const current = currentAlarmAlertContext
+  const current = currentAlarmAlertContext?.audience === audience
     ? alerts.find((alert) => alert.id === currentAlarmAlertContext.alertId)
     : null;
-  if (currentAlarmAlertContext && current?.status !== "ACTIVE") {
+  if (currentAlarmAlertContext?.audience === audience && !current) {
     closeAlarmNotification();
   }
   const nextAlert = alerts.find(
@@ -2042,26 +2042,6 @@ function applyAlertUpdate(alerts, audience) {
     }
   }
 }
-
-async function resolveAlert(alertId) {
-  if (!currentTeam || currentTeam.role !== "OWNER") return;
-  try {
-    const response = await fetch(
-      apiUrl(
-        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/alerts/${encodeURIComponent(alertId)}/resolve`),
-      {
-        method: "POST",
-        credentials: "include",
-        headers: { Accept: "application/json" }});
-    if (!response.ok) throw new Error("alert_resolve_failed");
-    await refreshOwnerAlerts();
-  } catch {
-    await showAppAlert(
-      "通知を対応完了にできませんでした。もう一度お試しください。",
-      { title: "通知の更新エラー" });
-  }
-}
-
 
 function openSetupForAuthenticatedUser() {
   if (!authenticatedUser) {
@@ -5577,7 +5557,6 @@ function renderEmergencyNotifications(containerId, alerts, audience) {
     const item = document.createElement("article");
     item.className = `emergency-notification-item${alert.readAt ? "" : " unread"}`;
     const key = notificationItemKey("ALERT", alert.id);
-    const deletable = alert.status === "RESOLVED";
     item.dataset.notificationKey = key;
     item.setAttribute(
       "aria-selected",
@@ -5588,8 +5567,7 @@ function renderEmergencyNotifications(containerId, alerts, audience) {
       appendNotificationSelectionControl(item, {
         audience,
         key,
-        label: `「${String(alert.matchedKeyword || "キーワード")}」の緊急通知を選択`,
-        deletable
+        label: `「${String(alert.matchedKeyword || "キーワード")}」の緊急通知を選択`
       });
     }
 
@@ -5608,9 +5586,6 @@ function renderEmergencyNotifications(containerId, alerts, audience) {
     const date = document.createElement("time");
     date.dateTime = String(alert.detectedAt || "");
     date.textContent = formatNotificationDate(alert.detectedAt);
-    const status = document.createElement("p");
-    status.className = "emergency-notification-status";
-    status.textContent = `状態：${formatEmergencyAlertStatus(alert)}`;
     const details = document.createElement("button");
     details.type = "button";
     details.className = "notification-read-button";
@@ -5620,22 +5595,16 @@ function renderEmergencyNotifications(containerId, alerts, audience) {
     details.addEventListener("click", () => {
       void openEmergencyAlertDetails(alert.id, audience);
     });
-    item.append(heading, title, date, status, details);
-    if (selectionMode && !deletable) {
-      const restriction = document.createElement("p");
-      restriction.className = "notification-delete-restriction";
-      restriction.textContent = "対応完了後に削除できます";
-      item.appendChild(restriction);
-    }
+    item.append(heading, title, date, details);
     if (expanded) {
-      item.appendChild(createEmergencyAlertDetails(alert, audience));
+      item.appendChild(createEmergencyAlertDetails(alert));
     }
     list.appendChild(item);
   });
 }
 
 
-function createEmergencyAlertDetails(alert, audience) {
+function createEmergencyAlertDetails(alert) {
   const details = document.createElement("div");
   details.className = "emergency-notification-details";
 
@@ -5643,28 +5612,15 @@ function createEmergencyAlertDetails(alert, audience) {
   appendNotificationDetail(list, "種別", alert.kind === "TEST" ? "テスト通知" : "緊急通知");
   appendNotificationDetail(list, "通知キーワード", String(alert.matchedKeyword || "キーワード"));
   appendNotificationDetail(list, "検知時刻", formatNotificationDate(alert.detectedAt));
-  appendNotificationDetail(list, "状態", formatEmergencyAlertStatus(alert));
   appendNotificationDetail(list, "確認状態", alert.readAt ? "既読" : "未読");
   appendNotificationDetail(
     list,
-    "対応完了時刻",
-    alert.resolvedAt ? formatNotificationDate(alert.resolvedAt) : "未完了"
+    "配信について",
+    alert.kind === "TEST"
+      ? "通知テストにより、あなたのお知らせへ配信されました。"
+      : "登録したキーワードを含む重要メールを検知したため、あなたのお知らせへ配信されました。"
   );
   details.appendChild(list);
-
-  if (
-    audience === "OWNER" &&
-    (alert.status === "ACTIVE" || alert.status === "ACKNOWLEDGED")
-  ) {
-    const resolveButton = document.createElement("button");
-    resolveButton.type = "button";
-    resolveButton.className = "btn primary";
-    resolveButton.textContent = "対応完了にする";
-    resolveButton.addEventListener("click", () => {
-      void resolveAlert(alert.id);
-    });
-    details.appendChild(resolveButton);
-  }
   return details;
 }
 
@@ -5675,16 +5631,6 @@ function appendNotificationDetail(list, label, value) {
   const description = document.createElement("dd");
   description.textContent = value;
   list.append(term, description);
-}
-
-
-function formatEmergencyAlertStatus(alert) {
-  if (alert.status === "RESOLVED") return "対応完了";
-  if (alert.status === "ACKNOWLEDGED") {
-    const name = alert.acknowledgedByName || "担当者";
-    return `${name}さんが対応中`;
-  }
-  return "対応中";
 }
 
 
@@ -5783,8 +5729,7 @@ function renderUserNotifications() {
       appendNotificationSelectionControl(item, {
         audience: "OWNER",
         key,
-        label: `「${String(notification.title || "お知らせ")}」を選択`,
-        deletable: true
+        label: `「${String(notification.title || "お知らせ")}」を選択`
       });
     }
 
@@ -5814,14 +5759,13 @@ function renderUserNotifications() {
 
 function appendNotificationSelectionControl(
   item,
-  { audience, key, label, deletable }
+  { audience, key, label }
 ) {
   const wrapper = document.createElement("label");
   wrapper.className = "notification-select-control";
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = selectedNotificationKeys[audience].has(key);
-  checkbox.disabled = !deletable;
   checkbox.setAttribute("aria-checked", String(checkbox.checked));
   checkbox.setAttribute("aria-label", label);
   checkbox.addEventListener("change", () => {
@@ -5855,7 +5799,7 @@ function getNotificationCenterItems(audience) {
       key: notificationItemKey("ALERT", alert.id),
       type: "ALERT",
       id: alert.id,
-      deletable: alert.status === "RESOLVED"
+      readAt: alert.readAt
     })
   );
   if (audience !== "OWNER") return alerts;
@@ -5864,7 +5808,7 @@ function getNotificationCenterItems(audience) {
       key: notificationItemKey("USER_NOTIFICATION", notification.id),
       type: "USER_NOTIFICATION",
       id: notification.id,
-      deletable: true
+      readAt: notification.readAt
     }))
   );
 }
@@ -5897,7 +5841,6 @@ function toggleNotificationSelection(audience, key, selected) {
 function selectAllNotifications(audience) {
   selectedNotificationKeys[audience].clear();
   getNotificationCenterItems(audience)
-    .filter(({ deletable }) => deletable)
     .forEach(({ key }) => selectedNotificationKeys[audience].add(key));
   renderNotificationCenterForAudience(audience);
 }
@@ -5912,7 +5855,6 @@ function clearNotificationSelection(audience) {
 function pruneNotificationSelection(audience) {
   const available = new Set(
     getNotificationCenterItems(audience)
-      .filter(({ deletable }) => deletable)
       .map(({ key }) => key)
   );
   for (const key of selectedNotificationKeys[audience]) {
@@ -5972,7 +5914,7 @@ async function deleteSelectedNotifications(audience) {
   );
   const items = [...selected]
     .map((key) => visibleByKey.get(key))
-    .filter((item) => item?.deletable);
+    .filter(Boolean);
   const errorId =
     audience === "OWNER"
       ? "notificationCenterError"
@@ -5989,14 +5931,12 @@ async function deleteSelectedNotifications(audience) {
     return;
   }
 
-  const count = items.length;
+  const confirmation = buildNotificationDeletionConfirmation(items);
   const confirmed = await showAppConfirm(
-    count === 1
-      ? "このお知らせを削除しますか？\n\n一覧から削除されます。ほかの利用者の通知や共有Alertには影響しません。"
-      : `選択した${count}件のお知らせを削除しますか？`,
+    confirmation.message,
     {
-      title: count === 1 ? "お知らせを削除" : "お知らせを一括削除",
-      confirmText: count === 1 ? "削除する" : `${count}件を削除`,
+      title: confirmation.title,
+      confirmText: confirmation.confirmText,
       cancelText: "キャンセル",
       tone: "danger"
     }
@@ -6030,6 +5970,15 @@ async function deleteSelectedNotifications(audience) {
     }
 
     const deletedKeys = new Set(items.map(({ key }) => key));
+    if (
+      currentAlarmAlertContext?.audience === audience &&
+      items.some(
+        ({ type, id }) =>
+          type === "ALERT" && id === currentAlarmAlertContext.alertId
+      )
+    ) {
+      closeAlarmNotification();
+    }
     if (audience === "OWNER") {
       ownerAlerts = ownerAlerts.filter(
         ({ id }) => !deletedKeys.has(notificationItemKey("ALERT", id))
@@ -6050,14 +5999,14 @@ async function deleteSelectedNotifications(audience) {
     selected.clear();
     renderNotificationCenterForAudience(audience);
     renderNotificationBadge();
-    setText(statusId, `${count}件のお知らせを削除しました。`);
+    setText(statusId, `${items.length}件のお知らせを削除しました。`);
 
     if (audience === "OWNER") {
       await Promise.all([refreshOwnerAlerts(), refreshUserNotifications()]);
     } else {
       await refreshNotificationMemberAlerts();
     }
-    setText(statusId, `${count}件のお知らせを削除しました。`);
+    setText(statusId, `${items.length}件のお知らせを削除しました。`);
   } catch (error) {
     setText(
       errorId,
@@ -6066,6 +6015,41 @@ async function deleteSelectedNotifications(audience) {
         : "お知らせを削除できませんでした。もう一度お試しください。"
     );
   }
+}
+
+
+function buildNotificationDeletionConfirmation(items) {
+  const count = items.length;
+  const unreadEmergencyCount = items.filter(
+    ({ type, readAt }) => type === "ALERT" && !readAt
+  ).length;
+  if (count === 1 && items[0].type === "ALERT") {
+    return {
+      title: items[0].readAt
+        ? "緊急通知を削除"
+        : "未読の緊急通知を削除",
+      message: items[0].readAt
+        ? "この緊急通知を削除しますか？\n\n削除すると、このアカウントのお知らせ一覧から消えます。ほかの利用者の通知や共有データには影響しません。"
+        : "未読の緊急通知を削除しますか？\n\n削除すると、このアカウントのお知らせ一覧から消えます。ほかの利用者の通知や共有データには影響しません。",
+      confirmText: "削除する"
+    };
+  }
+  if (count === 1) {
+    return {
+      title: "お知らせを削除",
+      message:
+        "このお知らせを削除しますか？\n\n一覧から削除されます。ほかの利用者の通知や共有データには影響しません。",
+      confirmText: "削除する"
+    };
+  }
+  const unreadMessage = unreadEmergencyCount
+    ? `\n\n未読の緊急通知が${unreadEmergencyCount}件含まれています。`
+    : "";
+  return {
+    title: "お知らせを一括削除",
+    message: `選択した${count}件を削除しますか？${unreadMessage}\n\n削除すると、このアカウントのお知らせ一覧から消えます。ほかの利用者の通知や共有データには影響しません。`,
+    confirmText: `${count}件を削除`
+  };
 }
 
 
