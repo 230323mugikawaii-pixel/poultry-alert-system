@@ -28,8 +28,11 @@ export class PrismaAlertRepository implements AlertRepository {
     readonly teamId: string;
     readonly sourceMailConnectionId: string;
     readonly sourceEventId: string;
+    readonly kind: "REAL" | "TEST";
     readonly matchedKeyword: string;
     readonly detectedAt: Date;
+    readonly actorUserId?: string;
+    readonly notificationTestId?: string;
     readonly now: Date;
   }): Promise<AlertIngestionResult> {
     return retrySerializableTransaction(
@@ -105,6 +108,7 @@ export class PrismaAlertRepository implements AlertRepository {
                 teamId: input.teamId,
                 sourceMailConnectionId: input.sourceMailConnectionId,
                 sourceEventId: input.sourceEventId,
+                kind: input.kind,
                 matchedKeyword: input.matchedKeyword,
                 detectedAt: input.detectedAt,
                 recipients: {
@@ -127,11 +131,20 @@ export class PrismaAlertRepository implements AlertRepository {
             await transaction.auditEvent.create({
               data: {
                 teamId: input.teamId,
-                action: "ALERT_CREATED",
+                ...(input.actorUserId
+                  ? { actorUserId: input.actorUserId }
+                  : {}),
+                action:
+                  input.kind === "TEST"
+                    ? "TEST_ALERT_CREATED"
+                    : "ALERT_CREATED",
                 targetType: "Alert",
                 targetId: created.id,
                 metadata: {
                   sourceMailConnectionId: input.sourceMailConnectionId,
+                  ...(input.notificationTestId
+                    ? { notificationTestId: input.notificationTestId }
+                    : {}),
                   recipientCount: created._count.recipients
                 }
               }
@@ -358,6 +371,7 @@ function mapAlert(alert: AlertWithSource): AlertRecord {
     teamId: alert.teamId,
     sourceMailConnectionId: alert.sourceMailConnectionId,
     sourceProvider: alert.sourceMailConnection.mailAuthorization.provider,
+    kind: alert.kind,
     status: alert.status,
     detectedAt: alert.detectedAt,
     matchedKeyword: alert.matchedKeyword,

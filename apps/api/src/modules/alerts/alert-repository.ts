@@ -1,4 +1,5 @@
 export type AlertStatus = "ACTIVE" | "ACKNOWLEDGED" | "RESOLVED";
+export type AlertKind = "REAL" | "TEST";
 export type AlertAcknowledgedBy = "OWNER" | "NOTIFICATION_MEMBER";
 export type AlertMailProvider = "GOOGLE" | "MICROSOFT";
 
@@ -7,6 +8,7 @@ export interface AlertRecord {
   readonly teamId: string;
   readonly sourceMailConnectionId: string;
   readonly sourceProvider: AlertMailProvider;
+  readonly kind: AlertKind;
   readonly status: AlertStatus;
   readonly detectedAt: Date;
   readonly matchedKeyword: string;
@@ -39,8 +41,11 @@ export interface AlertRepository {
     readonly teamId: string;
     readonly sourceMailConnectionId: string;
     readonly sourceEventId: string;
+    readonly kind: AlertKind;
     readonly matchedKeyword: string;
     readonly detectedAt: Date;
+    readonly actorUserId?: string;
+    readonly notificationTestId?: string;
     readonly now: Date;
   }): Promise<AlertIngestionResult>;
   listForOwner(input: {

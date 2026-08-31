@@ -4,6 +4,8 @@ import { loadEnvironment } from "./config/env.js";
 import { createDatabaseClient } from "./db/client.js";
 import { AlertService } from "./modules/alerts/alert-service.js";
 import { PrismaAlertRepository } from "./modules/alerts/prisma-alert-repository.js";
+import { NotificationTestService } from "./modules/alerts/notification-test-service.js";
+import { PrismaNotificationTestRepository } from "./modules/alerts/prisma-notification-test-repository.js";
 import { AppleLoginOAuthClient } from "./modules/auth/apple-login-oauth-client.js";
 import { AuthService } from "./modules/auth/auth-service.js";
 import { SmtpMagicLinkEmailSender } from "./modules/auth/email-sender.js";
@@ -189,6 +191,10 @@ const notificationMemberService = new NotificationMemberService({
 const alertService = new AlertService({
   repository: new PrismaAlertRepository(database)
 });
+const notificationTestService = new NotificationTestService({
+  repository: new PrismaNotificationTestRepository(database),
+  alertService
+});
 const userCommunicationService = new UserCommunicationService(
   new PrismaUserCommunicationRepository(database)
 );
@@ -201,6 +207,7 @@ const app = await buildApp({
   invitationService,
   notificationMemberService,
   alertService,
+  notificationTestService,
   userCommunicationService,
   ownerOnboardingService,
   securityThrottleService,
@@ -236,6 +243,16 @@ const onboardingCleanupTimer = setInterval(
 );
 onboardingCleanupTimer.unref();
 app.addHook("onClose", async () => clearInterval(onboardingCleanupTimer));
+const notificationTestCleanupTimer = setInterval(() => {
+  void notificationTestService.cleanupExpired().catch((error: unknown) => {
+    app.log.warn(
+      { code: error instanceof Error ? error.name : "UNKNOWN" },
+      "Notification test cleanup failed"
+    );
+  });
+}, 60 * 1_000);
+notificationTestCleanupTimer.unref();
+app.addHook("onClose", async () => clearInterval(notificationTestCleanupTimer));
 
 const shutdown = async (signal: string): Promise<void> => {
   app.log.info({ signal }, "Shutting down");

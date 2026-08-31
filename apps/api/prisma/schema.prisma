@@ -130,6 +130,19 @@ enum AlertStatus {
   RESOLVED
 }
 
+enum AlertKind {
+  REAL
+  TEST
+}
+
+enum NotificationTestStatus {
+  PENDING
+  DETECTED
+  ALERT_CREATED
+  EXPIRED
+  FAILED
+}
+
 enum AlertRecipientKind {
   OWNER
   NOTIFICATION_MEMBER
@@ -208,6 +221,7 @@ model User {
   mailAuthorizations      MailAuthorization[]
   alertRecipients         AlertRecipient[]
   acknowledgedAlerts      Alert[]                @relation("AlertAcknowledgedByUser")
+  notificationTests       NotificationTest[]
   ownerOnboarding         OwnerOnboarding?
   notifications           UserNotification[]
   feedbackSubmissions     FeedbackSubmission[]
@@ -323,6 +337,7 @@ model Team {
   mailConnections MailConnection[]
   notificationMembers NotificationMember[]
   alerts          Alert[]
+  notificationTests NotificationTest[]
   ownerTransfers  OwnerTransfer[]
   auditEvents     AuditEvent[]
   ownerOnboarding OwnerOnboarding?
@@ -639,6 +654,7 @@ model MailConnection {
   team                 Team                  @relation(fields: [teamId], references: [id], onDelete: Cascade)
   mailAuthorization    MailAuthorization     @relation(fields: [mailAuthorizationId], references: [id], onDelete: Restrict)
   alerts               Alert[]
+  notificationTests    NotificationTest[]
 
   @@unique([teamId, mailAuthorizationId])
   @@index([teamId, status])
@@ -651,6 +667,7 @@ model Alert {
   teamId                             String              @db.Uuid
   sourceMailConnectionId             String              @db.Uuid
   sourceEventId                      String              @db.VarChar(191)
+  kind                               AlertKind           @default(REAL)
   status                             AlertStatus         @default(ACTIVE)
   detectedAt                         DateTime            @db.Timestamptz(3)
   matchedKeyword                     String              @db.VarChar(100)
@@ -665,10 +682,35 @@ model Alert {
   acknowledgedByUser                 User?               @relation("AlertAcknowledgedByUser", fields: [acknowledgedByUserId], references: [id], onDelete: SetNull)
   acknowledgedByNotificationMember   NotificationMember? @relation("AlertAcknowledgedByNotificationMember", fields: [acknowledgedByNotificationMemberId], references: [id], onDelete: SetNull)
   recipients                         AlertRecipient[]
+  notificationTest                   NotificationTest?
 
   @@unique([sourceMailConnectionId, sourceEventId])
   @@index([teamId, status, detectedAt])
   @@map("alerts")
+}
+
+model NotificationTest {
+  id                     String                 @id @default(uuid()) @db.Uuid
+  teamId                 String                 @db.Uuid
+  actorUserId            String                 @db.Uuid
+  sourceMailConnectionId String                 @db.Uuid
+  keyword                String                 @db.VarChar(100)
+  requestId              String                 @unique @db.VarChar(100)
+  status                 NotificationTestStatus @default(PENDING)
+  expiresAt              DateTime               @db.Timestamptz(3)
+  detectedAt             DateTime?              @db.Timestamptz(3)
+  alertId                String?                @unique @db.Uuid
+  completedAt            DateTime?              @db.Timestamptz(3)
+  createdAt              DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt              DateTime               @updatedAt @db.Timestamptz(3)
+  team                   Team                   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  actorUser              User                   @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+  sourceMailConnection   MailConnection         @relation(fields: [sourceMailConnectionId], references: [id], onDelete: Restrict)
+  alert                  Alert?                 @relation(fields: [alertId], references: [id], onDelete: SetNull)
+
+  @@index([teamId, status, createdAt])
+  @@index([expiresAt, status])
+  @@map("notification_tests")
 }
 
 model AlertRecipient {

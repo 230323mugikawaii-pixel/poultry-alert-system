@@ -4,6 +4,8 @@ import { createDatabaseClient, type DatabaseClient } from "../src/db/client.js";
 import { AppError } from "../src/lib/app-error.js";
 import { AlertService } from "../src/modules/alerts/alert-service.js";
 import { PrismaAlertRepository } from "../src/modules/alerts/prisma-alert-repository.js";
+import { NotificationTestService } from "../src/modules/alerts/notification-test-service.js";
+import { PrismaNotificationTestRepository } from "../src/modules/alerts/prisma-notification-test-repository.js";
 import { AuthService } from "../src/modules/auth/auth-service.js";
 import { GoogleAuthService } from "../src/modules/auth/google-auth-service.js";
 import type {
@@ -60,6 +62,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
         user_notifications,
         feedback_submissions,
         alert_recipients,
+        notification_tests,
         alerts,
         onboarding_mail_choices,
         owner_onboardings,
@@ -2041,6 +2044,196 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
         }
       })
     ).resolves.toBe(0);
+  });
+
+  it("creates one TEST alert after detection and fans out only to eligible recipients", async () => {
+    const clock = { value: new Date("2026-08-31T02:00:00.000Z") };
+    const owner = await createUser("notification-test-owner@example.com");
+    const invitation = await prepareInvitationCredential({
+      now: clock.value,
+      ttlDays: 30
+    });
+    const team = await createServices(clock, "482752").teamService.createTeam(
+      { ownerUserId: owner.id, seatLimit: 3 },
+      invitation
+    );
+    let generated = 0;
+    const memberService = new NotificationMemberService({
+      repository: new PrismaNotificationMemberRepository(database),
+      securityThrottle: new SecurityThrottleService(
+        new PrismaSecurityThrottleRepository(database),
+        testPepper,
+        () => clock.value
+      ),
+      tokenPepper: testPepper,
+      sessionIdleDays: 30,
+      sessionAbsoluteDays: 90,
+      maxActiveSessions: 5,
+      now: () => clock.value,
+      callNowIdGenerator: () => `CN-T${String(++generated).padStart(7, "0")}`
+    });
+    const activeMember = await memberService.create({
+      teamId: team.team.teamId,
+      actorUserId: owner.id,
+      displayName: "有効な参加者"
+    });
+    const disabledMember = await memberService.create({
+      teamId: team.team.teamId,
+      actorUserId: owner.id,
+      displayName: "無効な参加者"
+    });
+    await memberService.disable({
+      teamId: team.team.teamId,
+      memberId: disabledMember.member.id,
+      actorUserId: owner.id
+    });
+    const deletedMember = await memberService.create({
+      teamId: team.team.teamId,
+      actorUserId: owner.id,
+      displayName: "削除済み参加者"
+    });
+    await memberService.disable({
+      teamId: team.team.teamId,
+      memberId: deletedMember.member.id,
+      actorUserId: owner.id
+    });
+    await memberService.softDelete({
+      teamId: team.team.teamId,
+      memberId: deletedMember.member.id,
+      actorUserId: owner.id
+    });
+    const connection = await createActiveMailConnection(
+      owner.id,
+      team.team.teamId,
+      "notification-test-google-subject"
+    );
+    await database.mailConnection.update({
+      where: { id: connection.id },
+      data: { keywords: ["停電のお知らせ", "システム障害"] }
+    });
+    const repository = new PrismaNotificationTestRepository(database);
+    const alertService = new AlertService({
+      repository: new PrismaAlertRepository(database),
+      now: () => clock.value
+    });
+    let requestSequence = 0;
+    const service = new NotificationTestService({
+      repository,
+      alertService,
+      now: () => clock.value,
+      requestIdGenerator: () => `test-request-${++requestSequence}`,
+      ttlMilliseconds: 180_000
+    });
+
+    const started = await service.start({
+      teamId: team.team.teamId,
+      actorUserId: owner.id,
+      sourceMailConnectionId: connection.id,
+      keyword: "停電のお知らせ"
+    });
+    expect(started).toMatchObject({
+      created: true,
+      test: { status: "PENDING", requestId: "test-request-1" }
+    });
+    await expect(
+      service.confirm({
+        teamId: team.team.teamId,
+        testId: started.test.id,
+        actorUserId: owner.id,
+        requestId: "wrong-request-id"
+      })
+    ).rejects.toMatchObject({
+      code: "NOTIFICATION_TEST_REQUEST_MISMATCH",
+      statusCode: 403
+    });
+
+    const confirmations = await Promise.all([
+      service.confirm({
+        teamId: team.team.teamId,
+        testId: started.test.id,
+        actorUserId: owner.id,
+        requestId: started.test.requestId
+      }),
+      service.confirm({
+        teamId: team.team.teamId,
+        testId: started.test.id,
+        actorUserId: owner.id,
+        requestId: started.test.requestId
+      })
+    ]);
+    expect(confirmations.filter(({ created }) => created)).toHaveLength(1);
+    expect(confirmations.filter(({ created }) => !created)).toHaveLength(1);
+    expect(confirmations[0]?.test).toMatchObject({ status: "ALERT_CREATED" });
+    expect(confirmations[1]?.test).toMatchObject({ status: "ALERT_CREATED" });
+
+    const testAlert = await database.alert.findFirstOrThrow({
+      where: { kind: "TEST", teamId: team.team.teamId },
+      include: { recipients: true }
+    });
+    expect(testAlert.sourceEventId).toBe(
+      `notification-test:${started.test.id}`
+    );
+    expect(testAlert.recipients).toHaveLength(2);
+    expect(testAlert.recipients).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "OWNER", userId: owner.id }),
+        expect.objectContaining({
+          kind: "NOTIFICATION_MEMBER",
+          notificationMemberId: activeMember.member.id
+        })
+      ])
+    );
+    expect(testAlert.recipients).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          notificationMemberId: disabledMember.member.id
+        }),
+        expect.objectContaining({
+          notificationMemberId: deletedMember.member.id
+        })
+      ])
+    );
+    await expect(
+      database.auditEvent.count({
+        where: {
+          teamId: team.team.teamId,
+          action: {
+            in: [
+              "NOTIFICATION_TEST_STARTED",
+              "NOTIFICATION_TEST_DETECTED",
+              "TEST_ALERT_CREATED"
+            ]
+          }
+        }
+      })
+    ).resolves.toBe(3);
+
+    const expiring = await service.start({
+      teamId: team.team.teamId,
+      actorUserId: owner.id,
+      sourceMailConnectionId: connection.id,
+      keyword: "システム障害"
+    });
+    clock.value = new Date(clock.value.getTime() + 181_000);
+    await expect(
+      service.confirm({
+        teamId: team.team.teamId,
+        testId: expiring.test.id,
+        actorUserId: owner.id,
+        requestId: expiring.test.requestId
+      })
+    ).rejects.toMatchObject({ code: "NOTIFICATION_TEST_EXPIRED" });
+    await expect(
+      database.alert.count({
+        where: { teamId: team.team.teamId, kind: "TEST" }
+      })
+    ).resolves.toBe(1);
+    await expect(
+      database.notificationTest.findUniqueOrThrow({
+        where: { id: expiring.test.id },
+        select: { status: true, alertId: true }
+      })
+    ).resolves.toEqual({ status: "EXPIRED", alertId: null });
   });
 
   it("allows one simultaneous acknowledgement and enforces team isolation", async () => {

@@ -2,6 +2,7 @@ import { AppError } from "../../lib/app-error.js";
 import type {
   AlertAcknowledgementResult,
   AlertIngestionResult,
+  AlertKind,
   AlertRecord,
   AlertRepository,
   AlertResolutionResult
@@ -23,8 +24,11 @@ export class AlertService {
     readonly teamId: string;
     readonly sourceMailConnectionId: string;
     readonly sourceEventId: string;
+    readonly kind?: AlertKind;
     readonly matchedKeyword: string;
     readonly detectedAt: Date;
+    readonly actorUserId?: string;
+    readonly notificationTestId?: string;
   }): Promise<AlertIngestionResult> {
     const sourceEventId = input.sourceEventId.trim();
     const matchedKeyword = normalizeMatchedKeyword(input.matchedKeyword);
@@ -51,6 +55,7 @@ export class AlertService {
     }
     return this.options.repository.ingest({
       ...input,
+      kind: input.kind ?? "REAL",
       sourceEventId,
       matchedKeyword,
       now: this.now()

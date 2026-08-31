@@ -225,6 +225,7 @@ function createAlert(teamId: string): AlertRecord {
     teamId,
     sourceMailConnectionId: randomUUID(),
     sourceProvider: "GOOGLE",
+    kind: "REAL",
     status: "ACTIVE",
     detectedAt: now,
     matchedKeyword: "停電のお知らせ",
