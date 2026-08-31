@@ -2110,20 +2110,45 @@ body.app-dialog-open {
   font-weight: 900;
 }
 
-.alarm-restart-button,
-.alarm-stop-button {
+.alarm-restart-button {
   width: 100%;
   margin-top: 18px;
 }
 
+.alarm-action-help {
+  color: var(--subtext);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.alarm-modal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.alarm-modal-actions .btn {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  white-space: normal;
+}
+
 .alarm-stop-button {
-  background: var(--red);
+  color: var(--red);
   border-color: var(--red);
 }
 
 .alarm-stop-button:hover {
-  background: #b9271f;
-  border-color: #b9271f;
+  color: var(--white);
+  background: var(--red);
+  border-color: var(--red);
+}
+
+.alarm-acknowledge-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 @keyframes alarm-ring {
@@ -2227,6 +2252,22 @@ body.app-dialog-open {
 
 
 @media (max-width: 390px) {
+  .alarm-modal {
+    padding: 14px;
+  }
+
+  .alarm-modal-card {
+    padding: 24px 18px;
+  }
+
+  .alarm-modal-card h2 {
+    font-size: 27px;
+  }
+
+  .alarm-modal-actions {
+    grid-template-columns: 1fr;
+  }
+
   .tab-button small {
     font-size: 9px;
   }
