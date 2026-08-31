@@ -197,7 +197,7 @@ const ALERT_FALLBACK_INTERVAL_MS = 4000;
 const ALERT_LONG_DISCONNECT_MS = 12000;
 
 const APP_BUILD_VERSION =
-  "2026-08-31.2";
+  "2026-08-31.3";
 
 let alarmAudioContext = null;
 let alarmSoundEnabled =
@@ -262,6 +262,7 @@ let alertFallbackInterval = null;
 let alertLongDisconnectTimer = null;
 let activeAlertAudience = null;
 let currentAlarmAlertContext = null;
+const acknowledgingAlertIds = new Set();
 const notifiedAlertIds =
   loadNotifiedAlertIds();
 let legacyGoogleAccountsFallbackBackup =
@@ -2030,6 +2031,10 @@ function renderAlertList(containerId, alerts, audience) {
 }
 
 async function acknowledgeAlert(alertId, audience) {
+  if (acknowledgingAlertIds.has(alertId)) {
+    return false;
+  }
+  acknowledgingAlertIds.add(alertId);
   const path =
     audience === "OWNER"
       ? `/api/v1/teams/${encodeURIComponent(currentTeam?.id || "")}/alerts/${encodeURIComponent(alertId)}/acknowledge`
@@ -2055,10 +2060,14 @@ async function acknowledgeAlert(alertId, audience) {
         `すでに${acknowledgedByName}さんが対応を開始しています。`,
         { title: "対応開始済み" });
     }
+    return true;
   } catch {
     await showAppAlert(
       "対応開始を記録できませんでした。通信状態を確認して、もう一度お試しください。",
       { title: "対応開始エラー" });
+    return false;
+  } finally {
+    acknowledgingAlertIds.delete(alertId);
   }
 }
 
@@ -6543,21 +6552,36 @@ function initializeAlarmNotification() {
       "restartAlarmButton"
     );
 
+  const acknowledgeButton =
+    document.getElementById(
+      "acknowledgeAlarmButton"
+    );
+
+  const modal =
+    document.getElementById(
+      "alarmModal"
+    );
+
   if (stopButton) {
     stopButton.addEventListener(
       "click",
+      stopCurrentAlarmLocally
+    );
+  }
+
+  if (acknowledgeButton) {
+    acknowledgeButton.addEventListener(
+      "click",
       () => {
-        const context = currentAlarmAlertContext;
-        closeAlarmNotification();
-        if (context) {
-          void acknowledgeAlert(
-            context.alertId,
-            context.audience
-          );
-        }
+        void acknowledgeCurrentAlarm();
       }
     );
   }
+
+  modal?.addEventListener(
+    "keydown",
+    handleAlarmModalKeydown
+  );
 
   if (restartButton) {
     restartButton.addEventListener(
@@ -6580,6 +6604,55 @@ function initializeAlarmNotification() {
   });
 
   updateAllAlarmSoundControls();
+}
+
+
+function stopCurrentAlarmLocally() {
+  closeAlarmNotification();
+}
+
+
+async function acknowledgeCurrentAlarm() {
+  const context = currentAlarmAlertContext;
+  if (!context) return false;
+
+  const button =
+    document.getElementById(
+      "acknowledgeAlarmButton"
+    );
+  if (button) button.disabled = true;
+
+  try {
+    return await acknowledgeAlert(
+      context.alertId,
+      context.audience
+    );
+  } finally {
+    if (
+      button &&
+      currentAlarmAlertContext?.alertId === context.alertId
+    ) {
+      button.disabled = false;
+    }
+  }
+}
+
+
+function handleAlarmModalKeydown(event) {
+  const modal =
+    document.getElementById(
+      "alarmModal"
+    );
+  if (
+    !modal ||
+    modal.classList.contains("hidden") ||
+    event.key !== "Escape"
+  ) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  closeAlarmNotification();
 }
 
 
@@ -6883,7 +6956,7 @@ function playAlarmPattern() {
 
   if (status) {
     status.textContent =
-      "通知音が鳴っています。「通知音を停止」を押すまで繰り返します。";
+      "通知音が鳴っています。「この端末の通知音を停止」を押すまで繰り返します。";
   }
 
   if (restartButton) {
@@ -7084,6 +7157,11 @@ function showAlarmNotification(
       "stopAlarmButton"
     );
 
+  const acknowledgeButton =
+    document.getElementById(
+      "acknowledgeAlarmButton"
+    );
+
   alarmFocusBeforeOpen =
     document.activeElement;
   currentAlarmAlertContext =
@@ -7142,10 +7220,17 @@ function showAlarmNotification(
   );
 
   if (stopButton) {
-    stopButton.textContent = alertContext
-      ? "対応を開始して通知音を停止"
-      : "通知音を停止";
+    stopButton.textContent =
+      "この端末の通知音を停止";
     stopButton.focus();
+  }
+
+  if (acknowledgeButton) {
+    acknowledgeButton.classList.toggle(
+      "hidden",
+      !alertContext
+    );
+    acknowledgeButton.disabled = false;
   }
 
   if (alarmSoundEnabled) {
@@ -7174,6 +7259,11 @@ function closeAlarmNotification() {
       "restartAlarmButton"
     );
 
+  const acknowledgeButton =
+    document.getElementById(
+      "acknowledgeAlarmButton"
+    );
+
   if (modal) {
     modal.classList.add(
       "hidden"
@@ -7184,6 +7274,10 @@ function closeAlarmNotification() {
     restartButton.classList.add(
       "hidden"
     );
+  }
+
+  if (acknowledgeButton) {
+    acknowledgeButton.disabled = false;
   }
 
   if (status) {

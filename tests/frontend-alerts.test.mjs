@@ -32,15 +32,85 @@ test("in-app alert updates use credentialed SSE and explicit acknowledgement", (
     /\/alerts\/\$\{encodeURIComponent\(alertId\)\}\/acknowledge/,
   );
   assert.match(appSource, /currentAlarmAlertContext/);
-  assert.match(appSource, /void acknowledgeAlert\(/);
+  assert.match(appSource, /void acknowledgeCurrentAlarm\(\)/);
   assert.match(appSource, /acknowledgedByName/);
   assert.match(
     appSource,
     /すでに\$\{acknowledgedByName\}さんが対応を開始しています/,
   );
   assert.match(appSource, />対応を開始<\/button>/);
-  assert.match(appSource, /対応を開始して通知音を停止/);
+  assert.doesNotMatch(appSource, /対応を開始して通知音を停止/);
   assert.doesNotMatch(appSource, /serviceWorker\.register/);
+});
+
+test("local alarm stop and shared acknowledgement are separate actions", () => {
+  assert.match(htmlSource, /id="stopAlarmButton"/);
+  assert.match(htmlSource, /この端末の通知音を停止/);
+  assert.match(htmlSource, /id="acknowledgeAlarmButton"/);
+  assert.match(
+    htmlSource,
+    /「対応を開始」は全利用者に共有されます。/,
+  );
+
+  const localStopFunction = appSource.match(
+    /function stopCurrentAlarmLocally\(\) \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(localStopFunction, "local alarm stop handler should be present");
+  assert.match(localStopFunction, /closeAlarmNotification\(\)/);
+  assert.doesNotMatch(
+    localStopFunction,
+    /acknowledgeAlert|resolveAlert|fetch\(/,
+  );
+
+  const sharedAcknowledgeFunction = appSource.match(
+    /async function acknowledgeCurrentAlarm\(\) \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(
+    sharedAcknowledgeFunction,
+    "shared acknowledgement handler should be present",
+  );
+  assert.match(sharedAcknowledgeFunction, /acknowledgeAlert\(/);
+  assert.match(appSource, /acknowledgingAlertIds\.has\(alertId\)/);
+  assert.match(appSource, /acknowledgingAlertIds\.add\(alertId\)/);
+  assert.match(appSource, /acknowledgingAlertIds\.delete\(alertId\)/);
+});
+
+test("escape and sound preference changes remain local-only", () => {
+  const escapeFunction = appSource.match(
+    /function handleAlarmModalKeydown\(event\) \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(escapeFunction, "alarm Escape handler should be present");
+  assert.match(escapeFunction, /event\.key !== "Escape"/);
+  assert.match(escapeFunction, /closeAlarmNotification\(\)/);
+  assert.doesNotMatch(escapeFunction, /acknowledgeAlert|resolveAlert|fetch\(/);
+
+  const soundToggleFunction = appSource.match(
+    /async function toggleAlarmSoundPreference\(audience\) \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(soundToggleFunction, "sound preference handler should be present");
+  assert.match(soundToggleFunction, /stopAlarmSound\(\)/);
+  assert.doesNotMatch(
+    soundToggleFunction,
+    /acknowledgeAlert|resolveAlert|fetch\(/,
+  );
+
+  const closeFunction = appSource.match(
+    /function closeAlarmNotification\(\) \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(closeFunction, "local modal close handler should be present");
+  assert.match(closeFunction, /stopAlarmSound\(\)/);
+  assert.doesNotMatch(closeFunction, /acknowledgeAlert|resolveAlert|fetch\(/);
+});
+
+test("REAL and TEST alerts share the separated modal actions", () => {
+  const showFunction = appSource.match(
+    /function showAlarmNotification\([\s\S]*?\n\}\n\n\nfunction closeAlarmNotification/,
+  )?.[0];
+  assert.ok(showFunction, "alarm modal renderer should be present");
+  assert.match(showFunction, /alertContext\?\.kind === "TEST"/);
+  assert.match(showFunction, /この端末の通知音を停止/);
+  assert.match(showFunction, /acknowledgeAlarmButton/);
+  assert.doesNotMatch(showFunction, /acknowledgeAlert\(/);
 });
 
 test("SSE reconnects with list refresh, fallback polling, and alert-id deduplication", () => {

@@ -14,7 +14,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=28"/>
+    <link rel="stylesheet" href="css/style.css?v=29"/>
 </head>
 
 <body>
@@ -540,7 +540,7 @@
     role="alertdialog"
     aria-modal="true"
     aria-labelledby="alarmTitle"
-    aria-describedby="alarmMessage"
+    aria-describedby="alarmMessage alarmSoundStatus alarmActionHelp"
   >
     <div class="alarm-modal-card">
       <div class="alarm-modal-icon" aria-hidden="true">🔔</div>
@@ -567,13 +567,25 @@
       >
         通知音を鳴らす
       </button>
-      <button
-        id="stopAlarmButton"
-        type="button"
-        class="btn alarm-stop-button"
-      >
-        通知音を停止
-      </button>
+      <p id="alarmActionHelp" class="alarm-action-help">
+        音を止める操作はこの端末だけに反映されます。「対応を開始」は全利用者に共有されます。
+      </p>
+      <div class="alarm-modal-actions">
+        <button
+          id="stopAlarmButton"
+          type="button"
+          class="btn outline alarm-stop-button"
+        >
+          この端末の通知音を停止
+        </button>
+        <button
+          id="acknowledgeAlarmButton"
+          type="button"
+          class="btn primary alarm-acknowledge-button"
+        >
+          対応を開始
+        </button>
+      </div>
     </div>
   </div>
 
@@ -1735,7 +1747,7 @@
 
     <script src="js/keyword-policy.js?v=2"></script>
     <script src="js/owner-onboarding-routing.js?v=2"></script>
-    <script src="js/app.js?v=30"></script>
+    <script src="js/app.js?v=31"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";
