@@ -44,7 +44,11 @@ describe("database foundation", () => {
     expect(schema).toContain("FEEDBACK_REPLY");
     expect(schema).toContain("model FeedbackSubmission {");
     expect(schema).toContain("model UserNotification {");
+    expect(schema).toMatch(
+      /model UserNotification \{[^}]*deletedAt\s+DateTime\?/s
+    );
     expect(schema).toContain("@@index([userId, readAt, createdAt])");
+    expect(schema).toContain("@@index([userId, deletedAt, readAt, createdAt])");
     expect(schema).toContain('@@map("user_notifications")');
   });
 
@@ -60,8 +64,17 @@ describe("database foundation", () => {
     expect(schema).toContain("model AlertRecipient {");
     expect(schema).toContain("notificationMemberId");
     expect(schema).toMatch(/model AlertRecipient \{[^}]*readAt\s+DateTime\?/s);
+    expect(schema).toMatch(
+      /model AlertRecipient \{[^}]*dismissedAt\s+DateTime\?/s
+    );
     expect(schema).toContain(
       "@@index([notificationMemberId, readAt, createdAt])"
+    );
+    expect(schema).toContain(
+      "@@index([userId, dismissedAt, readAt, createdAt])"
+    );
+    expect(schema).toContain(
+      "@@index([notificationMemberId, dismissedAt, readAt, createdAt])"
     );
     expect(schema).toContain("model NotificationTest {");
     expect(schema).toContain("enum NotificationTestStatus");

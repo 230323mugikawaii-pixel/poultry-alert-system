@@ -15,9 +15,14 @@ const cssSource = readFileSync(
   "utf8",
 );
 
-test("owner and notification member alert views use authenticated APIs", () => {
-  assert.match(htmlSource, /id="ownerAlertList"/);
-  assert.match(htmlSource, /id="notificationMemberAlertList"/);
+test("alert views live only in the authenticated notification centers", () => {
+  assert.doesNotMatch(htmlSource, /id="ownerAlertList"/);
+  assert.doesNotMatch(htmlSource, /id="notificationMemberAlertList"/);
+  assert.match(htmlSource, /id="ownerEmergencyNotificationList"/);
+  assert.match(
+    htmlSource,
+    /id="notificationMemberEmergencyNotificationList"/,
+  );
   assert.match(
     appSource,
     /\/api\/v1\/teams\/\$\{encodeURIComponent\(currentTeam\.id\)\}\/alerts/,
@@ -95,12 +100,11 @@ test("REAL and TEST alerts share the separated modal actions", () => {
   assert.doesNotMatch(showFunction, /acknowledge|resolve|fetch\(/);
 });
 
-test("sound-off alerts update lists and badges without opening the alarm", () => {
+test("sound-off alerts update the bell and badge without opening the alarm", () => {
   const updateFunction = appSource.match(
-    /function applyAlertUpdate\([\s\S]*?\n}\n\nfunction renderAlertList/,
+    /function applyAlertUpdate\([\s\S]*?\n}\n\nasync function resolveAlert/,
   )?.[0];
   assert.ok(updateFunction, "alert update handler should be present");
-  assert.match(updateFunction, /renderAlertList/);
   assert.match(updateFunction, /renderEmergencyNotifications/);
   assert.match(updateFunction, /renderNotificationBadge/);
   assert.match(updateFunction, /if \(alarmSoundEnabled\)/);
@@ -149,6 +153,10 @@ test("alert notification center fits the 390px layout", () => {
     cssSource,
     /\.emergency-notification-item h3 \{[\s\S]*?overflow-wrap: anywhere;/,
   );
+  assert.match(
+    cssSource,
+    /@media \(max-width: 390px\)[\s\S]*?\.notification-selection-toolbar \{[\s\S]*?flex-direction: column;/,
+  );
 });
 
 test("SSE reconnects with list refresh, fallback polling, and alert-id deduplication", () => {
@@ -171,17 +179,50 @@ test("SSE reconnects with list refresh, fallback polling, and alert-id deduplica
   assert.match(appSource, /handleAlertSessionEnded/);
 });
 
-test("notification member alert view does not render mail bodies or credentials", () => {
+test("notification details are data-minimized and keep resolve owner-only", () => {
   const renderFunction = appSource.match(
-    /function renderAlertList\([\s\S]*?\n}\n\nasync function resolveAlert/,
+    /function createEmergencyAlertDetails\([\s\S]*?\n}\n\n+function appendNotificationDetail/,
   )?.[0];
-  assert.ok(renderFunction, "renderAlertList should be present");
+  assert.ok(renderFunction, "notification detail renderer should be present");
   assert.doesNotMatch(
     renderFunction,
     /body|subject|token|refresh|accessToken/iu,
   );
   assert.match(renderFunction, /matchedKeyword/);
   assert.match(renderFunction, /detectedAt/);
+  assert.match(renderFunction, /audience === "OWNER"/);
+  assert.match(renderFunction, /対応完了にする/);
+});
+
+test("notification selection supports safe individual and bulk deletion", () => {
+  assert.match(htmlSource, /id="ownerNotificationSelectionButton"/);
+  assert.match(htmlSource, /id="notificationMemberSelectionButton"/);
+  assert.match(htmlSource, /すべて選択/);
+  assert.match(htmlSource, /選択を解除/);
+  assert.match(htmlSource, /選択した通知を削除/);
+  assert.match(htmlSource, /キャンセル/);
+  assert.match(appSource, /function startNotificationSelection/);
+  assert.match(appSource, /function selectAllNotifications/);
+  assert.match(appSource, /function clearNotificationSelection/);
+  assert.match(appSource, /function deleteSelectedNotifications/);
+  assert.match(appSource, /alert\.status === "RESOLVED"/);
+  assert.match(appSource, /対応完了後に削除できます/);
+  assert.match(appSource, /items\.length > 100/);
+  assert.match(appSource, /一度に削除できるお知らせは100件までです。/);
+  assert.match(appSource, /\/api\/v1\/notification-center\/delete/);
+  assert.match(
+    appSource,
+    /\/api\/v1\/notification-members\/notification-center\/delete/,
+  );
+  assert.match(appSource, /ほかの利用者の通知や共有Alertには影響しません。/);
+});
+
+test("notification details no longer navigate to removed Home alert lists", () => {
+  assert.doesNotMatch(appSource, /ownerAlertList/);
+  assert.doesNotMatch(appSource, /notificationMemberAlertList/);
+  assert.match(appSource, /expandedEmergencyAlertIds/);
+  assert.match(appSource, /詳細を開く/);
+  assert.match(appSource, /詳細を閉じる/);
 });
 
 test("notification tests create server TEST alerts instead of opening a local-only alarm", () => {

@@ -11,15 +11,14 @@ const htmlSource = readFileSync(
   "utf8"
 );
 
-test("Home keeps monitoring controls and the shared owner alert surface", () => {
+test("Home keeps monitoring controls without a duplicate alert surface", () => {
   const home = htmlSource.match(
     /id="homePage"[\s\S]*?<\/section>/
   )?.[0];
   assert.ok(home, "Home should be present");
   assert.match(home, /監視アカウント/);
-  assert.match(home, /重要通知/);
-  assert.match(home, /id="ownerAlertList"/);
-  assert.doesNotMatch(home, /サービス状況|お知らせ/);
+  assert.doesNotMatch(home, /重要通知/);
+  assert.doesNotMatch(home, /id="ownerAlertList"/);
   assert.doesNotMatch(home, />\s*未設定\s*</);
 
   assert.match(appSource, /refreshOwnerAlerts\(\)/);
@@ -41,7 +40,7 @@ test("owner header uses a private notification center without normal logout UI",
   assert.match(appSource, /notification\.readAt/);
   assert.match(htmlSource, /id="ownerEmergencyNotificationList"/);
   assert.match(htmlSource, />緊急通知</);
-  assert.match(htmlSource, />お知らせ</);
+  assert.match(htmlSource, />運営からのお知らせ</);
   assert.match(appSource, /countUnreadAlerts\(ownerAlerts\)/);
   assert.match(appSource, /\/api\/v1\/auth\/logout/);
 });

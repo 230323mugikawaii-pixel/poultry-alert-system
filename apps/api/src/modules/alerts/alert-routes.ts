@@ -59,6 +59,33 @@ const AlertParams = Type.Object({
 const MemberAlertParams = Type.Object({
   alertId: Uuid
 });
+const NotificationDeletionItem = Type.Object(
+  {
+    type: Type.Union([
+      Type.Literal("ALERT"),
+      Type.Literal("USER_NOTIFICATION")
+    ]),
+    id: Uuid
+  },
+  { additionalProperties: false }
+);
+const OwnerNotificationDeletionBody = Type.Object(
+  {
+    items: Type.Array(NotificationDeletionItem, { minItems: 1 })
+  },
+  { additionalProperties: false }
+);
+const MemberNotificationDeletionBody = Type.Object(
+  {
+    alertIds: Type.Array(Uuid, { minItems: 1 })
+  },
+  { additionalProperties: false }
+);
+const NotificationDeletionResponse = Type.Object({
+  items: Type.Array(NotificationDeletionItem),
+  deletedCount: Type.Integer({ minimum: 0 }),
+  alreadyDeletedCount: Type.Integer({ minimum: 0 })
+});
 
 export function createAlertRoutes(
   authService: AuthService,
@@ -68,13 +95,19 @@ export function createAlertRoutes(
   environment: AppEnvironment
 ): FastifyPluginAsyncTypebox {
   return async (app) => {
+    const authenticateUser = async (
+      request: FastifyRequest
+    ): Promise<string> => {
+      const token = request.cookies[environment.COOKIE_NAME];
+      if (!token) throw unauthenticatedError();
+      return (await authService.authenticate(token)).user.id;
+    };
+
     const authenticateOwner = async (
       request: FastifyRequest,
       teamId: string
     ): Promise<string> => {
-      const token = request.cookies[environment.COOKIE_NAME];
-      if (!token) throw unauthenticatedError();
-      const userId = (await authService.authenticate(token)).user.id;
+      const userId = await authenticateUser(request);
       await teamService.requireOwnerForTeam(userId, teamId);
       return userId;
     };
@@ -198,6 +231,28 @@ export function createAlertRoutes(
       }
     );
 
+    app.post(
+      "/api/v1/notification-center/delete",
+      {
+        schema: {
+          body: OwnerNotificationDeletionBody,
+          response: { 200: NotificationDeletionResponse }
+        }
+      },
+      async (request) => {
+        requireSameOrigin(request);
+        const userId = await authenticateUser(request);
+        const team = await teamService.requireOwner(userId);
+        const result = await alertService.dismissOwnerNotifications({
+          teamId: team.teamId,
+          userId,
+          items: request.body.items,
+          requestId: request.id
+        });
+        return { ...result, items: [...result.items] };
+      }
+    );
+
     app.get(
       "/api/v1/notification-members/alerts",
       { schema: { response: { 200: AlertListResponse } } },
@@ -270,6 +325,27 @@ export function createAlertRoutes(
             memberId: authenticated.member.id
           })
         );
+      }
+    );
+
+    app.post(
+      "/api/v1/notification-members/notification-center/delete",
+      {
+        schema: {
+          body: MemberNotificationDeletionBody,
+          response: { 200: NotificationDeletionResponse }
+        }
+      },
+      async (request) => {
+        requireSameOrigin(request);
+        const authenticated = await authenticateMember(request);
+        const result = await alertService.dismissNotificationMemberAlerts({
+          teamId: authenticated.team.id,
+          memberId: authenticated.member.id,
+          alertIds: request.body.alertIds,
+          requestId: request.id
+        });
+        return { ...result, items: [...result.items] };
       }
     );
   };

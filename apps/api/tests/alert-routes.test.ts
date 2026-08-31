@@ -109,6 +109,9 @@ describe("alert routes", () => {
     });
     teamRepository.addMember(accountMember.userId);
     const alert = createAlert(team.team.teamId);
+    const notificationId = randomUUID();
+    const ownerDeletionCalls: unknown[] = [];
+    const memberDeletionCalls: unknown[] = [];
     const alertService = {
       listForOwner: async () => [alert],
       listForNotificationMember: async () => [alert],
@@ -124,7 +127,36 @@ describe("alert routes", () => {
       markReadByNotificationMember: async () => ({
         ...alert,
         readAt: new Date()
-      })
+      }),
+      dismissOwnerNotifications: async (input: unknown) => {
+        ownerDeletionCalls.push(input);
+        return {
+          items: [
+            { type: "ALERT" as const, id: alert.id },
+            { type: "USER_NOTIFICATION" as const, id: notificationId }
+          ],
+          deletedCount: 2,
+          alreadyDeletedCount: 0
+        };
+      },
+      dismissNotificationMemberAlerts: async (input: unknown) => {
+        if (
+          Array.isArray((input as { alertIds?: unknown }).alertIds) &&
+          (input as { alertIds: unknown[] }).alertIds.length > 100
+        ) {
+          throw new AppError(
+            "NOTIFICATION_DELETE_LIMIT_EXCEEDED",
+            "一度に削除できるお知らせは100件までです。",
+            400
+          );
+        }
+        memberDeletionCalls.push(input);
+        return {
+          items: [{ type: "ALERT" as const, id: alert.id }],
+          deletedCount: 1,
+          alreadyDeletedCount: 0
+        };
+      }
     } as unknown as AlertService;
     const memberService = {
       authenticate: async () => ({
@@ -250,6 +282,112 @@ describe("alert routes", () => {
     });
     expect(memberRead.statusCode, memberRead.body).toBe(200);
     expect(memberRead.json<{ readAt: string | null }>().readAt).not.toBeNull();
+
+    const blockedOwnerDelete = await app.inject({
+      method: "POST",
+      url: "/api/v1/notification-center/delete",
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`
+      },
+      payload: { items: [{ type: "ALERT", id: alert.id }] }
+    });
+    expect(blockedOwnerDelete.statusCode).toBe(403);
+
+    const unauthenticatedOwnerDelete = await app.inject({
+      method: "POST",
+      url: "/api/v1/notification-center/delete",
+      headers: { origin: environment.PUBLIC_ORIGIN },
+      payload: { items: [{ type: "ALERT", id: alert.id }] }
+    });
+    expect(unauthenticatedOwnerDelete.statusCode).toBe(401);
+
+    const accountMemberDelete = await app.inject({
+      method: "POST",
+      url: "/api/v1/notification-center/delete",
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${accountMember.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      },
+      payload: { items: [{ type: "ALERT", id: alert.id }] }
+    });
+    expect(accountMemberDelete.statusCode).toBe(403);
+
+    const ownerDelete = await app.inject({
+      method: "POST",
+      url: "/api/v1/notification-center/delete",
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      },
+      payload: {
+        items: [
+          { type: "ALERT", id: alert.id },
+          { type: "USER_NOTIFICATION", id: notificationId }
+        ]
+      }
+    });
+    expect(ownerDelete.statusCode, ownerDelete.body).toBe(200);
+    expect(ownerDelete.json()).toMatchObject({ deletedCount: 2 });
+    expect(ownerDeletionCalls).toHaveLength(1);
+    expect(ownerDeletionCalls[0]).toMatchObject({
+      teamId: team.team.teamId,
+      userId: owner.userId,
+      items: [
+        { type: "ALERT", id: alert.id },
+        { type: "USER_NOTIFICATION", id: notificationId }
+      ]
+    });
+
+    const memberDelete = await app.inject({
+      method: "POST",
+      url: "/api/v1/notification-members/notification-center/delete",
+      headers: {
+        cookie: `${environment.COOKIE_NAME}_member=member-token`,
+        origin: environment.PUBLIC_ORIGIN
+      },
+      payload: { alertIds: [alert.id] }
+    });
+    expect(memberDelete.statusCode, memberDelete.body).toBe(200);
+    expect(memberDelete.json()).toMatchObject({ deletedCount: 1 });
+    expect(memberDeletionCalls).toHaveLength(1);
+    expect(memberDeletionCalls[0]).toMatchObject({
+      alertIds: [alert.id]
+    });
+
+    const blockedMemberDelete = await app.inject({
+      method: "POST",
+      url: "/api/v1/notification-members/notification-center/delete",
+      headers: { cookie: `${environment.COOKIE_NAME}_member=member-token` },
+      payload: { alertIds: [alert.id] }
+    });
+    expect(blockedMemberDelete.statusCode).toBe(403);
+
+    const unauthenticatedMemberDelete = await app.inject({
+      method: "POST",
+      url: "/api/v1/notification-members/notification-center/delete",
+      headers: { origin: environment.PUBLIC_ORIGIN },
+      payload: { alertIds: [alert.id] }
+    });
+    expect(unauthenticatedMemberDelete.statusCode).toBe(401);
+
+    const tooMany = await app.inject({
+      method: "POST",
+      url: "/api/v1/notification-members/notification-center/delete",
+      headers: {
+        cookie: `${environment.COOKIE_NAME}_member=member-token`,
+        origin: environment.PUBLIC_ORIGIN
+      },
+      payload: {
+        alertIds: Array.from({ length: 101 }, () => randomUUID())
+      }
+    });
+    expect(tooMany.statusCode).toBe(400);
+    expect(tooMany.json()).toMatchObject({
+      error: {
+        code: "NOTIFICATION_DELETE_LIMIT_EXCEEDED",
+        message: "一度に削除できるお知らせは100件までです。"
+      }
+    });
   });
 });
 

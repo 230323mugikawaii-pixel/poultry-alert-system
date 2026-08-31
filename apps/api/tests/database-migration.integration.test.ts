@@ -129,6 +129,13 @@ const alertRecipientReadStateMigration = readFileSync(
   ),
   "utf8"
 );
+const notificationDismissalMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260831000300_notification_dismissal/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 const migration =
   baseMigration +
   gmailMigration +
@@ -143,7 +150,8 @@ const migration =
   notificationMemberSoftDeleteMigration +
   contractChangeQuoteMigration +
   notificationTestAlertMigration +
-  alertRecipientReadStateMigration;
+  alertRecipientReadStateMigration +
+  notificationDismissalMigration;
 
 const databases: PGlite[] = [];
 
@@ -372,6 +380,24 @@ describe("PostgreSQL migrations", () => {
     expect(communicationTables.rows).toEqual([
       { table_name: "feedback_submissions" },
       { table_name: "user_notifications" }
+    ]);
+
+    const dismissalColumns = await database.query<{
+      table_name: string;
+      column_name: string;
+    }>(`
+      SELECT table_name, column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND (
+          (table_name = 'alert_recipients' AND column_name = 'dismissedAt')
+          OR (table_name = 'user_notifications' AND column_name = 'deletedAt')
+        )
+      ORDER BY table_name, column_name;
+    `);
+    expect(dismissalColumns.rows).toEqual([
+      { table_name: "alert_recipients", column_name: "dismissedAt" },
+      { table_name: "user_notifications", column_name: "deletedAt" }
     ]);
 
     await database.exec(`

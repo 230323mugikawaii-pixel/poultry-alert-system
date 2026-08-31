@@ -5,8 +5,12 @@ import type {
   AlertKind,
   AlertRecord,
   AlertRepository,
-  AlertResolutionResult
+  AlertResolutionResult,
+  NotificationCenterDeletionItem,
+  NotificationCenterDeletionResult
 } from "./alert-repository.js";
+
+const MAX_NOTIFICATION_DELETION_ITEMS = 100;
 
 export interface AlertServiceOptions {
   readonly repository: AlertRepository;
@@ -124,6 +128,40 @@ export class AlertService {
     });
   }
 
+  public dismissOwnerNotifications(input: {
+    readonly teamId: string;
+    readonly userId: string;
+    readonly items: readonly NotificationCenterDeletionItem[];
+    readonly requestId?: string;
+  }): Promise<NotificationCenterDeletionResult> {
+    const items = normalizeDeletionItems(input.items);
+    return this.options.repository.dismissOwnerNotifications({
+      teamId: input.teamId,
+      userId: input.userId,
+      items,
+      requestId: input.requestId ?? null,
+      now: this.now()
+    });
+  }
+
+  public dismissNotificationMemberAlerts(input: {
+    readonly teamId: string;
+    readonly memberId: string;
+    readonly alertIds: readonly string[];
+    readonly requestId?: string;
+  }): Promise<NotificationCenterDeletionResult> {
+    const items = normalizeDeletionItems(
+      input.alertIds.map((id) => ({ type: "ALERT" as const, id }))
+    );
+    return this.options.repository.dismissNotificationMemberAlerts({
+      teamId: input.teamId,
+      memberId: input.memberId,
+      alertIds: items.map(({ id }) => id),
+      requestId: input.requestId ?? null,
+      now: this.now()
+    });
+  }
+
   public resolveByOwner(input: {
     readonly teamId: string;
     readonly alertId: string;
@@ -134,6 +172,23 @@ export class AlertService {
       now: this.now()
     });
   }
+}
+
+function normalizeDeletionItems(
+  items: readonly NotificationCenterDeletionItem[]
+): readonly NotificationCenterDeletionItem[] {
+  if (items.length < 1 || items.length > MAX_NOTIFICATION_DELETION_ITEMS) {
+    throw new AppError(
+      "NOTIFICATION_DELETE_LIMIT_EXCEEDED",
+      "一度に削除できるお知らせは100件までです。",
+      400
+    );
+  }
+  const unique = new Map<string, NotificationCenterDeletionItem>();
+  for (const item of items) {
+    unique.set(`${item.type}:${item.id}`, item);
+  }
+  return [...unique.values()];
 }
 
 function normalizeMatchedKeyword(value: string): string {

@@ -20,7 +20,10 @@ export class MemoryUserCommunicationRepository implements UserCommunicationRepos
     readonly limit: number;
   }): Promise<UserNotificationList> {
     const notifications = this.notifications
-      .filter((notification) => notification.userId === input.userId)
+      .filter(
+        (notification) =>
+          notification.userId === input.userId && !notification.deletedAt
+      )
       .sort(
         (first, second) =>
           second.createdAt.getTime() - first.createdAt.getTime()
@@ -40,7 +43,8 @@ export class MemoryUserCommunicationRepository implements UserCommunicationRepos
     const index = this.notifications.findIndex(
       (notification) =>
         notification.id === input.notificationId &&
-        notification.userId === input.userId
+        notification.userId === input.userId &&
+        !notification.deletedAt
     );
     if (index < 0) {
       throw new AppError(
@@ -108,7 +112,8 @@ export class MemoryUserCommunicationRepository implements UserCommunicationRepos
       title: input.title,
       message: input.message,
       createdAt: input.now,
-      readAt: null
+      readAt: null,
+      deletedAt: null
     };
     this.notifications.push(notification);
     this.feedback[feedbackIndex] = {

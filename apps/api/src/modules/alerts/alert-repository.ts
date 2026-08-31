@@ -37,6 +37,19 @@ export interface AlertResolutionResult {
   readonly alreadyResolved: boolean;
 }
 
+export type NotificationCenterItemType = "ALERT" | "USER_NOTIFICATION";
+
+export interface NotificationCenterDeletionItem {
+  readonly type: NotificationCenterItemType;
+  readonly id: string;
+}
+
+export interface NotificationCenterDeletionResult {
+  readonly items: readonly NotificationCenterDeletionItem[];
+  readonly deletedCount: number;
+  readonly alreadyDeletedCount: number;
+}
+
 export interface AlertRepository {
   ingest(input: {
     readonly teamId: string;
@@ -83,6 +96,20 @@ export interface AlertRepository {
     readonly memberId: string;
     readonly now: Date;
   }): Promise<AlertRecord>;
+  dismissOwnerNotifications(input: {
+    readonly teamId: string;
+    readonly userId: string;
+    readonly items: readonly NotificationCenterDeletionItem[];
+    readonly requestId: string | null;
+    readonly now: Date;
+  }): Promise<NotificationCenterDeletionResult>;
+  dismissNotificationMemberAlerts(input: {
+    readonly teamId: string;
+    readonly memberId: string;
+    readonly alertIds: readonly string[];
+    readonly requestId: string | null;
+    readonly now: Date;
+  }): Promise<NotificationCenterDeletionResult>;
   resolveByOwner(input: {
     readonly teamId: string;
     readonly alertId: string;
