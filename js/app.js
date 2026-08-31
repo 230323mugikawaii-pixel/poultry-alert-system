@@ -187,11 +187,22 @@ const TEST_API_TOKEN =
   "callnow-test-2026-Abc123456789";
 const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
+const ALERT_SOUND_SETTING_KEY =
+  "callNowAlertSoundSetting";
+const ALERT_SOUND_SETTING_VERSION = 1;
+const NOTIFIED_ALERT_IDS_KEY =
+  "callNowNotifiedAlertIds";
+const ALERT_FALLBACK_DELAY_MS = 4000;
+const ALERT_FALLBACK_INTERVAL_MS = 4000;
+const ALERT_LONG_DISCONNECT_MS = 12000;
 
 const APP_BUILD_VERSION =
-  "2026-08-31.1";
+  "2026-08-31.2";
 
 let alarmAudioContext = null;
+let alarmSoundEnabled =
+  loadAlarmSoundPreference();
+let alarmSoundError = "";
 let alarmRepeatTimer = null;
 let alarmActiveNodes = [];
 let alarmIsActive = false;
@@ -246,8 +257,13 @@ let userNotifications = [];
 let notificationUnreadCount = 0;
 let notificationMemberAlerts = [];
 let alertEventSource = null;
+let alertFallbackStartTimer = null;
+let alertFallbackInterval = null;
+let alertLongDisconnectTimer = null;
+let activeAlertAudience = null;
 let currentAlarmAlertContext = null;
-const notifiedAlertIds = new Set();
+const notifiedAlertIds =
+  loadNotifiedAlertIds();
 let legacyGoogleAccountsFallbackBackup =
   [];
 let contractStorageMigrationPending =
@@ -1746,41 +1762,54 @@ async function fetchOwnerAlerts() {
     return [];
   }
   return fetchAlerts(
-    `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/alerts`);
+    `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/alerts`,
+    "OWNER");
 }
 
 async function fetchNotificationMemberAlerts() {
   if (!notificationMemberSession) {
     return [];
   }
-  return fetchAlerts("/api/v1/notification-members/alerts");
+  return fetchAlerts(
+    "/api/v1/notification-members/alerts",
+    "NOTIFICATION_MEMBER");
 }
 
-async function fetchAlerts(path) {
+async function fetchAlerts(path, audience) {
   try {
     const response = await fetch(apiUrl(path), {
       method: "GET",
       credentials: "include",
       headers: { Accept: "application/json" },
       cache: "no-store"});
+    if (response.status === 401) {
+      handleAlertSessionEnded(audience);
+      return null;
+    }
     if (!response.ok) {
-      return [];
+      return null;
     }
     const payload = await response.json();
     return Array.isArray(payload.alerts) ? payload.alerts : [];
   } catch {
-    return [];
+    return null;
   }
 }
 
 async function refreshOwnerAlerts() {
-  ownerAlerts = await fetchOwnerAlerts();
-  applyAlertUpdate(ownerAlerts, "OWNER");
+  const alerts = await fetchOwnerAlerts();
+  if (!Array.isArray(alerts)) return false;
+  ownerAlerts = alerts;
+  applyAlertUpdate(alerts, "OWNER");
+  return true;
 }
 
 async function refreshNotificationMemberAlerts() {
-  notificationMemberAlerts = await fetchNotificationMemberAlerts();
-  applyAlertUpdate(notificationMemberAlerts, "NOTIFICATION_MEMBER");
+  const alerts = await fetchNotificationMemberAlerts();
+  if (!Array.isArray(alerts)) return false;
+  notificationMemberAlerts = alerts;
+  applyAlertUpdate(alerts, "NOTIFICATION_MEMBER");
+  return true;
 }
 
 function startOwnerAlertStream() {
@@ -1805,42 +1834,41 @@ function startNotificationMemberAlertStream() {
 
 function startAlertEventStream(path, audience) {
   stopAlertEventStream();
+  activeAlertAudience = audience;
+  setAlertStreamStatus(
+    audience,
+    "接続しています…",
+    true);
   if (typeof window.EventSource !== "function") {
-    setAlertStreamStatus(audience, "再接続中", true);
+    markAlertStreamDisconnected(audience, true);
     return;
   }
   const stream = new EventSource(apiUrl(path), {
     withCredentials: true});
   alertEventSource = stream;
-  setAlertStreamStatus(audience, "接続中", false);
+  stream.onopen = () => {
+    setAlertStreamStatus(audience, "接続中", false);
+    stopAlertFallbackPolling();
+    void refreshAlertsForAudience(audience);
+  };
   stream.addEventListener("alerts", (event) => {
     try {
       const payload = JSON.parse(event.data);
       const alerts = Array.isArray(payload.alerts) ? payload.alerts : [];
-      if (audience === "OWNER") {
-        ownerAlerts = alerts;
-      } else {
-        notificationMemberAlerts = alerts;
-      }
-      applyAlertUpdate(alerts, audience);
+      applyAlertsForAudience(alerts, audience);
       setAlertStreamStatus(audience, "接続中", false);
     } catch {
-      setAlertStreamStatus(audience, "再接続中", true);
+      markAlertStreamDisconnected(audience);
     }
   });
   stream.addEventListener("session-ended", () => {
-    stopAlertEventStream();
-    if (audience === "NOTIFICATION_MEMBER") {
-      notificationMemberSession = null;
-      openNotificationMemberLogin();
-    } else {
-      authenticatedUser = null;
-      resetOwnerOnboardingClientState();
-      openGuestHome();
-    }
+    handleAlertSessionEnded(audience);
+  });
+  stream.addEventListener("stream-error", () => {
+    markAlertStreamDisconnected(audience);
   });
   stream.onerror = () => {
-    setAlertStreamStatus(audience, "再接続中", true);
+    markAlertStreamDisconnected(audience);
   };
 }
 
@@ -1849,6 +1877,78 @@ function stopAlertEventStream() {
     alertEventSource.close();
     alertEventSource = null;
   }
+  stopAlertFallbackPolling();
+  activeAlertAudience = null;
+}
+
+function markAlertStreamDisconnected(audience, immediate = false) {
+  setAlertStreamStatus(audience, "再接続中", true);
+  startAlertFallbackPolling(audience, immediate);
+}
+
+function startAlertFallbackPolling(audience, immediate = false) {
+  if (activeAlertAudience !== audience) return;
+  if (alertFallbackStartTimer || alertFallbackInterval) return;
+
+  alertLongDisconnectTimer = window.setTimeout(() => {
+    if (activeAlertAudience === audience) {
+      setAlertStreamStatus(
+        audience,
+        "リアルタイム接続が切れています。自動で再接続しています。",
+        true);
+    }
+  }, ALERT_LONG_DISCONNECT_MS);
+
+  alertFallbackStartTimer = window.setTimeout(() => {
+    alertFallbackStartTimer = null;
+    if (activeAlertAudience !== audience) return;
+    void refreshAlertsForAudience(audience);
+    alertFallbackInterval = window.setInterval(() => {
+      void refreshAlertsForAudience(audience);
+    }, ALERT_FALLBACK_INTERVAL_MS);
+  }, immediate ? 0 : ALERT_FALLBACK_DELAY_MS);
+}
+
+function stopAlertFallbackPolling() {
+  if (alertFallbackStartTimer) {
+    window.clearTimeout(alertFallbackStartTimer);
+    alertFallbackStartTimer = null;
+  }
+  if (alertFallbackInterval) {
+    window.clearInterval(alertFallbackInterval);
+    alertFallbackInterval = null;
+  }
+  if (alertLongDisconnectTimer) {
+    window.clearTimeout(alertLongDisconnectTimer);
+    alertLongDisconnectTimer = null;
+  }
+}
+
+function refreshAlertsForAudience(audience) {
+  return audience === "OWNER"
+    ? refreshOwnerAlerts()
+    : refreshNotificationMemberAlerts();
+}
+
+function applyAlertsForAudience(alerts, audience) {
+  if (audience === "OWNER") {
+    ownerAlerts = alerts;
+  } else {
+    notificationMemberAlerts = alerts;
+  }
+  applyAlertUpdate(alerts, audience);
+}
+
+function handleAlertSessionEnded(audience) {
+  stopAlertEventStream();
+  if (audience === "NOTIFICATION_MEMBER") {
+    notificationMemberSession = null;
+    openNotificationMemberLogin();
+    return;
+  }
+  authenticatedUser = null;
+  resetOwnerOnboardingClientState();
+  openGuestHome();
 }
 
 function setAlertStreamStatus(audience, text, reconnecting) {
@@ -1876,7 +1976,7 @@ function applyAlertUpdate(alerts, audience) {
   const nextAlert = alerts.find(
     (alert) => alert.status === "ACTIVE" && !notifiedAlertIds.has(alert.id));
   if (nextAlert) {
-    notifiedAlertIds.add(nextAlert.id);
+    rememberNotifiedAlert(nextAlert.id);
     showAlarmNotification(nextAlert.matchedKeyword, nextAlert.detectedAt, {
       alertId: nextAlert.id,
       audience,
@@ -3017,7 +3117,7 @@ ${formatYen(totalPrice)}
       await fetchMailProviderAvailability();
     mailConnections = await fetchMailConnections();
     hydrateContractKeywordsFromServer();
-    ownerAlerts = await fetchOwnerAlerts();
+    ownerAlerts = (await fetchOwnerAlerts()) ?? [];
     openApp();
   } catch (error) {
     setText(
@@ -6374,6 +6474,64 @@ function handleAppDialogKeydown(event) {
    警報音・停止画面
 ======================================== */
 
+function loadAlarmSoundPreference() {
+  try {
+    const saved = JSON.parse(
+      window.localStorage.getItem(ALERT_SOUND_SETTING_KEY) || "null"
+    );
+    if (
+      saved?.version === ALERT_SOUND_SETTING_VERSION &&
+      typeof saved.enabled === "boolean"
+    ) {
+      return saved.enabled;
+    }
+  } catch {
+    /* 保存値が壊れている場合は安全な初期値を使う。 */
+  }
+  return true;
+}
+
+function saveAlarmSoundPreference(enabled) {
+  alarmSoundEnabled = Boolean(enabled);
+  try {
+    window.localStorage.setItem(
+      ALERT_SOUND_SETTING_KEY,
+      JSON.stringify({
+        version: ALERT_SOUND_SETTING_VERSION,
+        enabled: alarmSoundEnabled
+      })
+    );
+  } catch {
+    /* 保存できなくても現在のタブでは設定を維持する。 */
+  }
+}
+
+function loadNotifiedAlertIds() {
+  try {
+    const saved = JSON.parse(
+      window.sessionStorage.getItem(NOTIFIED_ALERT_IDS_KEY) || "[]"
+    );
+    if (Array.isArray(saved)) {
+      return new Set(saved.filter((value) => typeof value === "string"));
+    }
+  } catch {
+    /* 保存値が壊れている場合は空の履歴から開始する。 */
+  }
+  return new Set();
+}
+
+function rememberNotifiedAlert(alertId) {
+  notifiedAlertIds.add(alertId);
+  try {
+    window.sessionStorage.setItem(
+      NOTIFIED_ALERT_IDS_KEY,
+      JSON.stringify(Array.from(notifiedAlertIds).slice(-100))
+    );
+  } catch {
+    /* 通知表示自体は継続する。 */
+  }
+}
+
 function initializeAlarmNotification() {
   const stopButton =
     document.getElementById(
@@ -6405,10 +6563,23 @@ function initializeAlarmNotification() {
     restartButton.addEventListener(
       "click",
       () => {
-        void startAlarmSound();
+        void enableAlarmSoundForCurrentAlert();
       }
     );
   }
+
+  window.addEventListener("storage", (event) => {
+    if (event.key !== ALERT_SOUND_SETTING_KEY) return;
+    alarmSoundEnabled = loadAlarmSoundPreference();
+    alarmSoundError = "";
+    if (!alarmSoundEnabled) {
+      stopAlarmSound();
+      updateAlarmModalSoundStatus();
+    }
+    updateAllAlarmSoundControls();
+  });
+
+  updateAllAlarmSoundControls();
 }
 
 
@@ -6428,8 +6599,7 @@ function getAlarmAudioContext() {
     alarmAudioContext.addEventListener?.(
       "statechange",
       () => {
-        updateAlarmAudioReadiness("OWNER");
-        updateAlarmAudioReadiness("NOTIFICATION_MEMBER");
+        updateAllAlarmSoundControls();
       }
     );
   }
@@ -6480,8 +6650,7 @@ async function unlockAlarmAudio() {
     );
 
     const ready = context.state === "running";
-    updateAlarmAudioReadiness("OWNER");
-    updateAlarmAudioReadiness("NOTIFICATION_MEMBER");
+    updateAllAlarmSoundControls();
     return ready;
   } catch (error) {
     console.warn(
@@ -6489,8 +6658,7 @@ async function unlockAlarmAudio() {
       error
     );
 
-    updateAlarmAudioReadiness("OWNER");
-    updateAlarmAudioReadiness("NOTIFICATION_MEMBER");
+    updateAllAlarmSoundControls();
 
     return false;
   }
@@ -6498,18 +6666,56 @@ async function unlockAlarmAudio() {
 
 
 async function enableAlarmAudio(audience) {
+  const wasEnabled = alarmSoundEnabled;
   const ready = await unlockAlarmAudio();
-  updateAlarmAudioReadiness(audience);
-  if (!ready) {
-    const statusId =
-      audience === "OWNER"
-        ? "ownerAudioStatus"
-        : "notificationMemberAudioStatus";
-    setText(
-      statusId,
-      "通知音を有効にできませんでした。ブラウザの音声設定を確認してください。"
-    );
+  if (ready) {
+    saveAlarmSoundPreference(true);
+    alarmSoundError = "";
+  } else {
+    if (!wasEnabled) saveAlarmSoundPreference(false);
+    alarmSoundError =
+      "通知音を有効にできませんでした。ブラウザの音声設定を確認してください。";
   }
+  updateAllAlarmSoundControls();
+  return ready;
+}
+
+async function toggleAlarmSoundPreference(audience) {
+  if (alarmSoundEnabled) {
+    saveAlarmSoundPreference(false);
+    alarmSoundError = "";
+    stopAlarmSound();
+    updateAlarmModalSoundStatus();
+    updateAllAlarmSoundControls();
+    return;
+  }
+
+  const ready = await enableAlarmAudio(audience);
+  if (ready && currentAlarmAlertContext) {
+    await startAlarmSound();
+  }
+}
+
+async function enableAlarmSoundForCurrentAlert() {
+  const audience = currentAlarmAlertContext?.audience || "OWNER";
+  const ready = await enableAlarmAudio(audience);
+  if (ready && currentAlarmAlertContext) {
+    await startAlarmSound();
+  }
+}
+
+function updateAllAlarmSoundControls() {
+  updateAlarmAudioReadiness("OWNER");
+  updateAlarmAudioReadiness("NOTIFICATION_MEMBER");
+}
+
+function alarmAudioReadiness() {
+  if (!window.AudioContext && !window.webkitAudioContext) {
+    return "UNAVAILABLE";
+  }
+  return alarmAudioContext?.state === "running"
+    ? "READY"
+    : "NEEDS_USER_GESTURE";
 }
 
 
@@ -6522,13 +6728,48 @@ function updateAlarmAudioReadiness(audience) {
     owner ? "ownerEnableAudioButton" : "notificationMemberEnableAudioButton"
   );
   const container = status?.closest(".alert-audio-readiness");
-  if (!status || !button) return;
-  const ready = alarmAudioContext?.state === "running";
-  status.textContent = ready
-    ? "通知音を受け取る準備ができています。"
-    : "ブラウザの制限により、最初に一度だけ通知音を有効にしてください。";
-  button.classList.toggle("hidden", ready);
+  const toggle = document.getElementById(
+    owner ? "ownerSoundToggleButton" : "notificationMemberSoundToggleButton"
+  );
+  if (!status || !button || !toggle) return;
+
+  const readiness = alarmAudioReadiness();
+  const ready = alarmSoundEnabled && readiness === "READY";
+  const needsGesture =
+    alarmSoundEnabled && readiness === "NEEDS_USER_GESTURE";
+  const unavailable = readiness === "UNAVAILABLE";
+  const label = alarmSoundEnabled
+    ? needsGesture
+      ? "通知音 ON・有効化必要"
+      : "通知音 ON"
+    : "通知音 OFF";
+
+  status.textContent = alarmSoundError
+    ? alarmSoundError
+    : !alarmSoundEnabled
+      ? "通知音はOFFです。画面通知は受信します。"
+      : unavailable
+        ? "このブラウザでは通知音を利用できません。画面通知は受信します。"
+        : ready
+          ? "通知音を受け取る準備ができています。"
+          : "ブラウザの制限により、最初に一度だけ通知音を有効にしてください。";
+  button.textContent = alarmSoundEnabled
+    ? "通知音を有効にする"
+    : "通知音をONにする";
+  button.classList.toggle("hidden", ready || unavailable);
   container?.classList.toggle("ready", ready);
+  container?.classList.toggle("off", !alarmSoundEnabled);
+  container?.classList.toggle("error", Boolean(alarmSoundError));
+
+  toggle.classList.toggle("off", !alarmSoundEnabled);
+  toggle.classList.toggle("needs-gesture", needsGesture);
+  toggle.setAttribute("aria-pressed", String(alarmSoundEnabled));
+  toggle.setAttribute("aria-label", `${label}。押すと切り替えます。`);
+  toggle.setAttribute("title", `${label}。押すと切り替えます。`);
+  const toggleLabel = toggle.querySelector(".sound-toggle-label");
+  if (toggleLabel) toggleLabel.textContent = label;
+  const icon = toggle.querySelector("[aria-hidden='true']");
+  if (icon) icon.textContent = alarmSoundEnabled ? "🔊" : "🔇";
 }
 
 
@@ -6609,7 +6850,7 @@ function scheduleAlarmTone(
 
 
 function playAlarmPattern() {
-  if (!alarmIsActive) {
+  if (!alarmIsActive || !alarmSoundEnabled) {
     return;
   }
 
@@ -6685,6 +6926,10 @@ function playAlarmPattern() {
 
 async function startAlarmSound() {
   stopAlarmSound();
+  if (!alarmSoundEnabled) {
+    updateAlarmModalSoundStatus();
+    return;
+  }
   alarmIsActive = true;
 
   const isReady =
@@ -6716,7 +6961,7 @@ function showAlarmAudioFallback() {
 
   if (status) {
     status.textContent =
-      "Safariが通知音をブロックしました。「通知音を鳴らす」を押してください。";
+      "ブラウザが通知音をブロックしました。「通知音を鳴らす」を押してください。";
   }
 
   if (restartButton) {
@@ -6724,6 +6969,33 @@ function showAlarmAudioFallback() {
       "hidden"
     );
   }
+}
+
+
+function updateAlarmModalSoundStatus() {
+  const status =
+    document.getElementById(
+      "alarmSoundStatus"
+    );
+  const restartButton =
+    document.getElementById(
+      "restartAlarmButton"
+    );
+  if (!status || !restartButton) return;
+
+  if (!alarmSoundEnabled) {
+    status.textContent =
+      "通知音はOFFです。画面通知は受信しています。";
+    restartButton.textContent =
+      "通知音をONにする";
+    restartButton.classList.remove(
+      "hidden"
+    );
+    return;
+  }
+
+  restartButton.textContent =
+    "通知音を鳴らす";
 }
 
 
@@ -6876,7 +7148,11 @@ function showAlarmNotification(
     stopButton.focus();
   }
 
-  void startAlarmSound();
+  if (alarmSoundEnabled) {
+    void startAlarmSound();
+  } else {
+    updateAlarmModalSoundStatus();
+  }
 }
 
 

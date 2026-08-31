@@ -43,6 +43,26 @@ test("in-app alert updates use credentialed SSE and explicit acknowledgement", (
   assert.doesNotMatch(appSource, /serviceWorker\.register/);
 });
 
+test("SSE reconnects with list refresh, fallback polling, and alert-id deduplication", () => {
+  assert.match(appSource, /stream\.onopen\s*=\s*\(\)\s*=>/);
+  assert.match(appSource, /接続しています…/);
+  assert.match(appSource, /setAlertStreamStatus\([\s\S]*?"接続中"/);
+  assert.match(appSource, /markAlertStreamDisconnected/);
+  assert.match(
+    appSource,
+    /リアルタイム接続が切れています。自動で再接続しています。/,
+  );
+  assert.match(appSource, /startAlertFallbackPolling/);
+  assert.match(appSource, /ALERT_FALLBACK_DELAY_MS/);
+  assert.match(appSource, /ALERT_FALLBACK_INTERVAL_MS/);
+  assert.match(appSource, /stopAlertFallbackPolling/);
+  assert.match(appSource, /refreshAlertsForAudience/);
+  assert.match(appSource, /rememberNotifiedAlert\(nextAlert\.id\)/);
+  assert.match(appSource, /window\.sessionStorage\.setItem/);
+  assert.match(appSource, /stream-error/);
+  assert.match(appSource, /handleAlertSessionEnded/);
+});
+
 test("notification member alert view does not render mail bodies or credentials", () => {
   const renderFunction = appSource.match(
     /function renderAlertList\([\s\S]*?\n}\n\nasync function acknowledgeAlert/,
@@ -71,9 +91,23 @@ test("notification tests create server TEST alerts instead of opening a local-on
   assert.match(htmlSource, /テスト通知/);
 });
 
-test("owner and participant screens provide an explicit audio readiness action", () => {
+test("owner and participant screens provide persistent sound controls", () => {
   assert.match(htmlSource, /id="ownerEnableAudioButton"/);
   assert.match(htmlSource, /id="notificationMemberEnableAudioButton"/);
+  assert.match(htmlSource, /id="ownerSoundToggleButton"/);
+  assert.match(htmlSource, /id="notificationMemberSoundToggleButton"/);
   assert.match(appSource, /updateAlarmAudioReadiness/);
   assert.match(appSource, /unlockAlarmAudio/);
+  assert.match(appSource, /toggleAlarmSoundPreference/);
+  assert.match(appSource, /ALERT_SOUND_SETTING_KEY/);
+  assert.match(appSource, /window\.localStorage\.setItem/);
+  assert.match(appSource, /window\.addEventListener\(\s*"storage"/);
+  assert.match(appSource, /通知音はOFFです。画面通知は受信しています。/);
+  assert.match(appSource, /if \(!alarmSoundEnabled\)/);
+  assert.match(appSource, /stopAlarmSound\(\)/);
+  assert.match(appSource, /updateAlarmModalSoundStatus/);
+  assert.doesNotMatch(
+    appSource,
+    /localStorage\.setItem\([^)]*(?:token|password|cookie)/iu,
+  );
 });
