@@ -9,6 +9,8 @@ import type { AppEnvironment } from "./config/env.js";
 import { AppError } from "./lib/app-error.js";
 import type { AlertService } from "./modules/alerts/alert-service.js";
 import { createAlertRoutes } from "./modules/alerts/alert-routes.js";
+import { createNotificationTestRoutes } from "./modules/alerts/notification-test-routes.js";
+import type { NotificationTestService } from "./modules/alerts/notification-test-service.js";
 import type { AuthService } from "./modules/auth/auth-service.js";
 import { createAuthRoutes } from "./modules/auth/auth-routes.js";
 import type { GoogleAuthService } from "./modules/auth/google-auth-service.js";
@@ -42,6 +44,7 @@ export interface BuildAppOptions {
   readonly notificationMemberService?: NotificationMemberService;
   readonly ownerOnboardingService?: OwnerOnboardingService;
   readonly alertService?: AlertService;
+  readonly notificationTestService?: NotificationTestService;
   readonly userCommunicationService?: UserCommunicationService;
   readonly securityThrottleService?: SecurityThrottleService;
   readonly readinessCheck?: () => Promise<void>;
@@ -203,6 +206,27 @@ export async function buildApp(
     !options.authService
   ) {
     throw new Error("authService is required for Google authentication");
+  }
+
+  if (
+    options.authService &&
+    options.teamService &&
+    options.notificationTestService
+  ) {
+    if (!options.securityThrottleService) {
+      throw new Error(
+        "securityThrottleService is required for notification tests"
+      );
+    }
+    await app.register(
+      createNotificationTestRoutes(
+        options.authService,
+        options.teamService,
+        options.notificationTestService,
+        options.securityThrottleService,
+        options.environment
+      )
+    );
   }
 
   if (options.authService && options.teamService) {

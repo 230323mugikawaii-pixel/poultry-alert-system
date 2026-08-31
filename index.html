@@ -14,7 +14,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=26"/>
+    <link rel="stylesheet" href="css/style.css?v=27"/>
 </head>
 
 <body>
@@ -196,6 +196,25 @@
             class="alert-list"
             aria-live="polite"
           ></div>
+          <div
+            class="alert-audio-readiness"
+            data-audience="NOTIFICATION_MEMBER"
+          >
+            <div>
+              <strong>通知音</strong>
+              <p id="notificationMemberAudioStatus">
+                ブラウザで通知音の状態を確認しています。
+              </p>
+            </div>
+            <button
+              id="notificationMemberEnableAudioButton"
+              type="button"
+              class="btn outline"
+              onclick="enableAlarmAudio('NOTIFICATION_MEMBER')"
+            >
+              通知音を有効にする
+            </button>
+          </div>
         </article>
     </main>
   </section>
@@ -512,7 +531,10 @@
   >
     <div class="alarm-modal-card">
       <div class="alarm-modal-icon" aria-hidden="true">🔔</div>
-      <p class="alarm-modal-eyebrow">メールを検知しました</p>
+      <span id="alarmKindBadge" class="alert-kind-badge test hidden">
+        テスト通知
+      </span>
+      <p id="alarmEyebrow" class="alarm-modal-eyebrow">メールを検知しました</p>
       <h2 id="alarmTitle">
         <span id="alarmKeyword"></span>の通知
       </h2>
@@ -1055,6 +1077,44 @@
 
           </article>
 
+          <article class="card owner-alert-card">
+            <div class="alert-card-heading">
+              <div>
+                <h2>重要通知</h2>
+                <p>
+                  本番通知とテスト通知は、この画面を開いている間に自動で更新されます。
+                </p>
+              </div>
+              <span
+                id="ownerAlertStreamStatus"
+                class="alert-stream-status"
+              >
+                接続中
+              </span>
+            </div>
+            <div class="alert-audio-readiness" data-audience="OWNER">
+              <div>
+                <strong>通知音</strong>
+                <p id="ownerAudioStatus">
+                  ブラウザで通知音の状態を確認しています。
+                </p>
+              </div>
+              <button
+                id="ownerEnableAudioButton"
+                type="button"
+                class="btn outline"
+                onclick="enableAlarmAudio('OWNER')"
+              >
+                通知音を有効にする
+              </button>
+            </div>
+            <div
+              id="ownerAlertList"
+              class="alert-list"
+              aria-live="polite"
+            ></div>
+          </article>
+
         </div>
 
       </section>
@@ -1081,6 +1141,13 @@
           id="notificationTestError"
           class="form-error"
           role="alert"
+          aria-live="polite"
+        ></p>
+
+        <p
+          id="notificationTestStatus"
+          class="form-success"
+          role="status"
           aria-live="polite"
         ></p>
 
@@ -1644,7 +1711,7 @@
 
     <script src="js/keyword-policy.js?v=2"></script>
     <script src="js/owner-onboarding-routing.js?v=2"></script>
-    <script src="js/app.js?v=28"></script>
+    <script src="js/app.js?v=29"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";

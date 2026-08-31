@@ -11,13 +11,15 @@ const htmlSource = readFileSync(
   "utf8"
 );
 
-test("Home keeps monitoring controls and removes large status and owner alert cards", () => {
+test("Home keeps monitoring controls and the shared owner alert surface", () => {
   const home = htmlSource.match(
     /id="homePage"[\s\S]*?<\/section>/
   )?.[0];
   assert.ok(home, "Home should be present");
   assert.match(home, /監視アカウント/);
-  assert.doesNotMatch(home, /サービス状況|重要通知|お知らせ/);
+  assert.match(home, /重要通知/);
+  assert.match(home, /id="ownerAlertList"/);
+  assert.doesNotMatch(home, /サービス状況|お知らせ/);
   assert.doesNotMatch(home, />\s*未設定\s*</);
 
   assert.match(appSource, /refreshOwnerAlerts\(\)/);

@@ -115,6 +115,13 @@ const contractChangeQuoteMigration = readFileSync(
   ),
   "utf8"
 );
+const notificationTestAlertMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260831000100_notification_test_alerts/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 const migration =
   baseMigration +
   gmailMigration +
@@ -127,7 +134,8 @@ const migration =
   providerKeywordMigration +
   userCommunicationMigration +
   notificationMemberSoftDeleteMigration +
-  contractChangeQuoteMigration;
+  contractChangeQuoteMigration +
+  notificationTestAlertMigration;
 
 const databases: PGlite[] = [];
 
@@ -310,6 +318,41 @@ describe("PostgreSQL migrations", () => {
       { table_name: "alert_recipients" },
       { table_name: "alerts" }
     ]);
+
+    const notificationTestTables = await database.query<{
+      table_name: string;
+    }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name = 'notification_tests';
+    `);
+    expect(notificationTestTables.rows).toEqual([
+      { table_name: "notification_tests" }
+    ]);
+
+    const alertKinds = await database.query<{ enumlabel: string }>(`
+      SELECT enumlabel
+      FROM pg_enum
+      JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+      WHERE pg_type.typname = 'AlertKind'
+      ORDER BY enumsortorder;
+    `);
+    expect(alertKinds.rows).toEqual([
+      { enumlabel: "REAL" },
+      { enumlabel: "TEST" }
+    ]);
+
+    const alertKindDefault = await database.query<{
+      column_default: string | null;
+    }>(`
+      SELECT column_default
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'alerts'
+        AND column_name = 'kind';
+    `);
+    expect(alertKindDefault.rows[0]?.column_default).toContain("REAL");
 
     const communicationTables = await database.query<{ table_name: string }>(`
       SELECT table_name

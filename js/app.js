@@ -189,7 +189,7 @@ const TEST_DETECTION_TIMEOUT_MS =
   3 * 60 * 1000;
 
 const APP_BUILD_VERSION =
-  "2026-08-30.2";
+  "2026-08-31.1";
 
 let alarmAudioContext = null;
 let alarmRepeatTimer = null;
@@ -1713,6 +1713,7 @@ function openNotificationMemberApp() {
   );
   void refreshNotificationMemberAlerts();
   startNotificationMemberAlertStream();
+  updateAlarmAudioReadiness("NOTIFICATION_MEMBER");
   window.scrollTo({ top: 0 });
 }
 
@@ -1878,7 +1879,8 @@ function applyAlertUpdate(alerts, audience) {
     notifiedAlertIds.add(nextAlert.id);
     showAlarmNotification(nextAlert.matchedKeyword, nextAlert.detectedAt, {
       alertId: nextAlert.id,
-      audience});
+      audience,
+      kind: nextAlert.kind || "REAL"});
   }
 }
 
@@ -1907,10 +1909,14 @@ function renderAlertList(containerId, alerts, audience) {
         : audience === "OWNER" && acknowledged
           ? `<button type="button" class="btn outline" onclick="resolveAlert('${escapeHtml(alert.id)}')">対応完了にする</button>`
           : "";
+      const isTest = alert.kind === "TEST";
       return `
-        <article class="alert-list-item ${active ? "active" : ""}">
+        <article class="alert-list-item ${active ? "active" : ""} ${isTest ? "test" : ""}">
           <div>
-            <h3>「${escapeHtml(alert.matchedKeyword)}」を検知</h3>
+            <div class="alert-list-heading-row">
+              ${isTest ? '<span class="alert-kind-badge">テスト</span>' : ""}
+              <h3>「${escapeHtml(alert.matchedKeyword)}」を検知</h3>
+            </div>
             <p class="alert-list-meta">
               ${escapeHtml(formatAlarmDetectedAt(alert.detectedAt))}・${escapeHtml(mailProviderLabel(alert.source.provider))}
             </p>
@@ -5652,6 +5658,8 @@ function openApp() {
   void refreshOwnerAlerts();
   startOwnerAlertStream();
 
+  updateAlarmAudioReadiness("OWNER");
+
   showAppPage(
     "homePage"
   );
@@ -6416,6 +6424,14 @@ function getAlarmAudioContext() {
   if (!alarmAudioContext) {
     alarmAudioContext =
       new AudioContextClass();
+
+    alarmAudioContext.addEventListener?.(
+      "statechange",
+      () => {
+        updateAlarmAudioReadiness("OWNER");
+        updateAlarmAudioReadiness("NOTIFICATION_MEMBER");
+      }
+    );
   }
 
   return alarmAudioContext;
@@ -6463,16 +6479,56 @@ async function unlockAlarmAudio() {
       context.currentTime + 0.01
     );
 
-    return context.state === "running"
-    ;
+    const ready = context.state === "running";
+    updateAlarmAudioReadiness("OWNER");
+    updateAlarmAudioReadiness("NOTIFICATION_MEMBER");
+    return ready;
   } catch (error) {
     console.warn(
       "通知音の再生準備に失敗しました。",
       error
     );
 
+    updateAlarmAudioReadiness("OWNER");
+    updateAlarmAudioReadiness("NOTIFICATION_MEMBER");
+
     return false;
   }
+}
+
+
+async function enableAlarmAudio(audience) {
+  const ready = await unlockAlarmAudio();
+  updateAlarmAudioReadiness(audience);
+  if (!ready) {
+    const statusId =
+      audience === "OWNER"
+        ? "ownerAudioStatus"
+        : "notificationMemberAudioStatus";
+    setText(
+      statusId,
+      "通知音を有効にできませんでした。ブラウザの音声設定を確認してください。"
+    );
+  }
+}
+
+
+function updateAlarmAudioReadiness(audience) {
+  const owner = audience === "OWNER";
+  const status = document.getElementById(
+    owner ? "ownerAudioStatus" : "notificationMemberAudioStatus"
+  );
+  const button = document.getElementById(
+    owner ? "ownerEnableAudioButton" : "notificationMemberEnableAudioButton"
+  );
+  const container = status?.closest(".alert-audio-readiness");
+  if (!status || !button) return;
+  const ready = alarmAudioContext?.state === "running";
+  status.textContent = ready
+    ? "通知音を受け取る準備ができています。"
+    : "ブラウザの制限により、最初に一度だけ通知音を有効にしてください。";
+  button.classList.toggle("hidden", ready);
+  container?.classList.toggle("ready", ready);
 }
 
 
@@ -6731,6 +6787,21 @@ function showAlarmNotification(
       "alarmSoundStatus"
     );
 
+  const kindBadge =
+    document.getElementById(
+      "alarmKindBadge"
+    );
+
+  const eyebrow =
+    document.getElementById(
+      "alarmEyebrow"
+    );
+
+  const message =
+    document.getElementById(
+      "alarmMessage"
+    );
+
   const restartButton =
     document.getElementById(
       "restartAlarmButton"
@@ -6745,6 +6816,26 @@ function showAlarmNotification(
     document.activeElement;
   currentAlarmAlertContext =
     alertContext;
+
+  const isTest =
+    alertContext?.kind === "TEST";
+
+  kindBadge?.classList.toggle(
+    "hidden",
+    !isTest
+  );
+
+  if (eyebrow) {
+    eyebrow.textContent = isTest
+      ? "テストメールを検知しました"
+      : "メールを検知しました";
+  }
+
+  if (message) {
+    message.textContent = isTest
+      ? "本番と同じ通知経路で配信されたテスト通知です。"
+      : "登録キーワードを含むメールを検知しました。";
+  }
 
   if (keywordElement) {
     keywordElement.textContent =
@@ -6956,13 +7047,15 @@ function renderTestKeywordCards() {
   updateContractStatusUI();
 }
 async function testNotification(keyword, button) {
-const testButtons =
-  document.querySelectorAll(
-    ".test-button"
-  );
+  const testButtons =
+    document.querySelectorAll(
+      ".test-button"
+    );
+  let serverTest = null;
 
   try {
     setText("notificationTestError", "");
+    setText("notificationTestStatus", "");
     if (isContractExpired()) {
       setText(
         "notificationTestError",
@@ -6979,7 +7072,22 @@ const testButtons =
       return;
     }
 
-    const requestId = createTestRequestId();
+    const connection =
+      findNotificationTestConnection(keyword);
+    if (!currentTeam || currentTeam.role !== "OWNER") {
+      setText(
+        "notificationTestError",
+        "通知テストは契約の管理者だけが実行できます。"
+      );
+      return;
+    }
+    if (!connection) {
+      setText(
+        "notificationTestError",
+        "このキーワードを監視している有効なメールアカウントがありません。"
+      );
+      return;
+    }
 
     testButtons.forEach((testButton) => {
       testButton.dataset.originalText =
@@ -6989,6 +7097,20 @@ const testButtons =
       testButton.textContent =
         "少々お待ちください";
     });
+
+    serverTest = await startServerNotificationTest(
+      connection.id,
+      keyword
+    );
+
+    if (serverTest.status === "DETECTED") {
+      await confirmServerNotificationTest(serverTest);
+      setText(
+        "notificationTestStatus",
+        "テスト通知を配信しました。管理者と有効な参加者へ通知しています。"
+      );
+      return;
+    }
 
     /*
       Apps Scriptへテスト送信を依頼
@@ -7004,7 +7126,7 @@ const testButtons =
             token: TEST_API_TOKEN,
             // キーワードはJSON本文で送り、URLやGmail検索式へ連結しない。
             keyword: keyword,
-            requestId: requestId
+            requestId: serverTest.requestId
           })
         }
       );
@@ -7029,6 +7151,10 @@ const testButtons =
         String(error.message)
           .startsWith("SERVER:")
       ) {
+        await failServerNotificationTest(
+          serverTest,
+          "DELIVERY_REQUEST_FAILED"
+        );
         throw error;
       }
 
@@ -7040,22 +7166,25 @@ const testButtons =
 
     const detectedStatus =
       await waitForTestDetection(
-        requestId,
+        serverTest.requestId,
         TEST_DETECTION_TIMEOUT_MS
       );
 
     if (detectedStatus) {
-      showAlarmNotification(
-        keyword,
-        detectedStatus.detectedAt || ""
+      await confirmServerNotificationTest(
+        serverTest
+      );
+      setText(
+        "notificationTestStatus",
+        "テスト通知を配信しました。管理者と有効な参加者へ通知しています。"
       );
     } else {
-      await showAppAlert(
-        `Gmailへの送信処理は行いましたが、
-3分以内に検知結果を確認できませんでした。
-
-Gmailにテストメールが届いているか、
-「CallNow-Test-Detected」ラベルが付いているか確認してください。`
+      await expireServerNotificationTest(
+        serverTest
+      );
+      setText(
+        "notificationTestError",
+        "3分以内にテストメールの検知を確認できなかったため、参加者へのテスト通知は送信されませんでした。"
       );
     }
   } catch (error) {
@@ -7066,7 +7195,7 @@ Gmailにテストメールが届いているか、
 
     setText(
       "notificationTestError",
-      `テスト処理に失敗しました。${String(error.message).replace("SERVER:", "")}`
+      notificationTestErrorMessage(error)
     );
   } finally {
     testButtons.forEach((testButton) => {
@@ -7081,20 +7210,139 @@ Gmailにテストメールが届いているか、
   }
 }
 
-function createTestRequestId() {
-  if (
-    window.crypto &&
-    typeof window.crypto.randomUUID === "function"
-  ) {
-    return window.crypto.randomUUID();
-  }
+function findNotificationTestConnection(keyword) {
+  const normalizedKeyword =
+    keyword
+      .trim()
+      .replace(/[ \u00a0\u3000]+/gu, " ")
+      .normalize("NFKC")
+      .toLocaleLowerCase("ja-JP");
+  return mailConnections.find(
+    (connection) =>
+      connection.connectionStatus === "ACTIVE" &&
+      connection.authorizationStatus === "ACTIVE" &&
+      connection.keywords.some(
+        (candidate) =>
+          candidate
+            .trim()
+            .replace(/[ \u00a0\u3000]+/gu, " ")
+            .normalize("NFKC")
+            .toLocaleLowerCase("ja-JP") ===
+          normalizedKeyword
+      )
+  ) || null;
+}
 
-  return (
-    `callnow-${Date.now()}-` +
-    Math.random()
-      .toString(36)
-      .slice(2, 10)
+async function startServerNotificationTest(
+  mailConnectionId,
+  keyword
+) {
+  const response = await fetch(
+    apiUrl(
+      `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/notification-tests`
+    ),
+    {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        mailConnectionId,
+        keyword
+      })
+    }
   );
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.test?.id || !payload.test.requestId) {
+    const error = new Error(
+      payload?.error?.message ||
+        "通知テストを開始できませんでした。"
+    );
+    error.code = payload?.error?.code || "NOTIFICATION_TEST_START_FAILED";
+    throw error;
+  }
+  return payload.test;
+}
+
+async function confirmServerNotificationTest(test) {
+  const response = await fetch(
+    apiUrl(
+      `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/notification-tests/${encodeURIComponent(test.id)}/confirm`
+    ),
+    {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ requestId: test.requestId })
+    }
+  );
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || payload?.test?.status !== "ALERT_CREATED") {
+    const error = new Error(
+      payload?.error?.message ||
+        "検知結果をテスト通知として配信できませんでした。"
+    );
+    error.code = payload?.error?.code || "NOTIFICATION_TEST_CONFIRM_FAILED";
+    throw error;
+  }
+  await refreshOwnerAlerts();
+  return payload.test;
+}
+
+async function failServerNotificationTest(test, reasonCode) {
+  await updateServerNotificationTest(
+    test,
+    "fail",
+    { requestId: test.requestId, reasonCode }
+  );
+}
+
+async function expireServerNotificationTest(test) {
+  await updateServerNotificationTest(
+    test,
+    "expire",
+    { requestId: test.requestId }
+  );
+}
+
+async function updateServerNotificationTest(test, action, body) {
+  const response = await fetch(
+    apiUrl(
+      `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/notification-tests/${encodeURIComponent(test.id)}/${action}`
+    ),
+    {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    }
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(
+      payload?.error?.message ||
+        "通知テストの状態を更新できませんでした。"
+    );
+  }
+}
+
+function notificationTestErrorMessage(error) {
+  if (error?.code === "NOTIFICATION_TEST_RATE_LIMITED") {
+    return "通知テストが続いています。少し時間をおいてお試しください。";
+  }
+  const message =
+    error instanceof Error
+      ? error.message.replace("SERVER:", "")
+      : "通知テストを完了できませんでした。";
+  return `テスト処理に失敗しました。${message}`;
 }
 
 /* ========================================

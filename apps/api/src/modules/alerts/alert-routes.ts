@@ -17,6 +17,7 @@ const Uuid = Type.String({
 });
 const AlertResponse = Type.Object({
   id: Uuid,
+  kind: Type.Union([Type.Literal("REAL"), Type.Literal("TEST")]),
   status: Type.Union([
     Type.Literal("ACTIVE"),
     Type.Literal("ACKNOWLEDGED"),
@@ -282,6 +283,7 @@ function serializeAlerts(alerts: readonly AlertRecord[]) {
 function serializeAlert(alert: AlertRecord) {
   return {
     id: alert.id,
+    kind: alert.kind,
     status: alert.status,
     detectedAt: alert.detectedAt.toISOString(),
     matchedKeyword: alert.matchedKeyword,

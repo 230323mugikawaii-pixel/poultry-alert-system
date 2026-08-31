@@ -431,6 +431,13 @@ button {
   margin: 8px 0;
 }
 
+.form-success {
+  min-height: 24px;
+  margin: 8px 0;
+  color: #176a3a;
+  font-weight: 800;
+}
+
 .field-error {
   font-size: 0.9rem;
 }
@@ -2291,6 +2298,10 @@ body.app-dialog-open {
   margin-top: 20px;
 }
 
+.owner-alert-card {
+  grid-column: 1 / -1;
+}
+
 .alert-card-heading {
   display: flex;
   align-items: flex-start;
@@ -2316,6 +2327,28 @@ body.app-dialog-open {
 .alert-stream-status.reconnecting {
   color: #8a5a00;
   background: #fff4d6;
+}
+
+.alert-audio-readiness {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid #d8e2ef;
+  border-radius: 14px;
+  background: #f5f8fc;
+}
+
+.alert-audio-readiness p {
+  margin: 4px 0 0;
+  color: var(--subtext);
+}
+
+.alert-audio-readiness.ready {
+  border-color: #b7dfc7;
+  background: #f1fbf5;
 }
 
 .alert-list {
@@ -2345,6 +2378,34 @@ body.app-dialog-open {
 .alert-list-item.active {
   border-color: #f2b7b7;
   background: #fff8f8;
+}
+
+.alert-list-item.test {
+  border-color: #8ebcf0;
+  background: #f4f9ff;
+}
+
+.alert-list-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.alert-kind-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 4px 9px;
+  border-radius: 999px;
+  color: #0b559f;
+  background: #dcecff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.alarm-modal-card > .alert-kind-badge {
+  margin: 0 auto 10px;
 }
 
 .alert-list-item h3 {
@@ -2798,6 +2859,15 @@ body.app-dialog-open {
 }
 
 @media (max-width: 600px) {
+  .alert-audio-readiness {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .alert-audio-readiness .btn {
+    width: 100%;
+  }
+
   .guest-home-card {
     padding: 24px 20px;
   }

@@ -64,13 +64,15 @@ class MemoryAlertRepository implements AlertRepository {
     readonly matchedKeyword: string;
     readonly detectedAt: Date;
     readonly now: Date;
+    readonly kind: "REAL" | "TEST";
   }): Promise<AlertIngestionResult> {
     if (this.alert) return { alert: this.alert, created: false };
-    this.alert = {
+    const created: AlertRecord = {
       id: randomUUID(),
       teamId: input.teamId,
       sourceMailConnectionId: input.sourceMailConnectionId,
       sourceProvider: "GOOGLE",
+      kind: input.kind,
       status: "ACTIVE",
       detectedAt: input.detectedAt,
       matchedKeyword: input.matchedKeyword,
@@ -82,7 +84,8 @@ class MemoryAlertRepository implements AlertRepository {
       updatedAt: input.now,
       recipientCount: 1
     };
-    return { alert: this.alert, created: true };
+    this.alert = created;
+    return { alert: created, created: true };
   }
 
   public listForOwner(): Promise<readonly AlertRecord[]> {

@@ -31,6 +31,7 @@ describe("database foundation", () => {
       "MailConnection",
       "Alert",
       "AlertRecipient",
+      "NotificationTest",
       "UserNotification",
       "FeedbackSubmission"
     ]) {
@@ -49,6 +50,8 @@ describe("database foundation", () => {
 
   it("defines provider-neutral alert fan-out and idempotency", () => {
     expect(schema).toContain("enum AlertStatus");
+    expect(schema).toContain("enum AlertKind");
+    expect(schema).toMatch(/enum AlertKind \{[^}]*REAL[^}]*TEST/s);
     expect(schema).toContain("enum AlertDeliveryChannel");
     expect(schema).toContain("sourceEventId");
     expect(schema).toContain(
@@ -56,6 +59,8 @@ describe("database foundation", () => {
     );
     expect(schema).toContain("model AlertRecipient {");
     expect(schema).toContain("notificationMemberId");
+    expect(schema).toContain("model NotificationTest {");
+    expect(schema).toContain("enum NotificationTestStatus");
   });
 
   it("separates Call Now login identity from mail monitoring authorization", () => {
