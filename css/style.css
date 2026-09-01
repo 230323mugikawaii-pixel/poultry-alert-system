@@ -1,16 +1,59 @@
 :root {
-  --blue: #0862c7;
-  --blue-dark: #044b9a;
-  --blue-light: #edf5ff;
-  --background: #f4f7fb;
-  --text: #101828;
-  --subtext: #667085;
-  --border: #d9e2ef;
-  --green: #18a957;
-  --red: #e13d3d;
-  --white: #ffffff;
-}
+  --color-primary: #0862c7;
+  --color-primary-hover: #044b9a;
+  --color-primary-soft: #edf5ff;
+  --color-text: #101828;
+  --color-text-muted: #53657c;
+  --color-background: #f4f7fb;
+  --color-surface: #ffffff;
+  --color-border: #cdd9e8;
+  --color-success: #087a42;
+  --color-success-soft: #edf9f2;
+  --color-warning: #8a5a00;
+  --color-warning-soft: #fff7df;
+  --color-danger: #b42318;
+  --color-danger-hover: #8f1d14;
+  --color-danger-soft: #fff4f2;
+  --color-focus: #0b6fd8;
 
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 40px;
+
+  --radius-small: 10px;
+  --radius-medium: 14px;
+  --radius-large: 20px;
+  --radius-pill: 999px;
+
+  --shadow-small: 0 2px 8px rgb(16 24 40 / 6%);
+  --shadow: 0 8px 24px rgb(16 24 40 / 8%);
+  --shadow-dialog: 0 24px 64px rgb(8 19 38 / 28%);
+
+  --font-size-small: 0.875rem;
+  --font-size-body: 1rem;
+  --font-size-section: 1.25rem;
+  --font-size-page: clamp(2rem, 5vw, 2.75rem);
+  --line-height-body: 1.7;
+  --button-height: 48px;
+  --content-width: 1040px;
+  --flow-width: 760px;
+
+  /* Existing component aliases */
+  --blue: var(--color-primary);
+  --blue-dark: var(--color-primary-hover);
+  --blue-light: var(--color-primary-soft);
+  --background: var(--color-background);
+  --text: var(--color-text);
+  --subtext: var(--color-text-muted);
+  --border: var(--color-border);
+  --green: var(--color-success);
+  --red: var(--color-danger);
+  --white: var(--color-surface);
+}
 
 /* ========================================
    全体設定
@@ -22,6 +65,7 @@
 
 html {
   scroll-behavior: smooth;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -31,12 +75,12 @@ body {
   background: var(--background);
 
   font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    "Hiragino Sans",
-    "Yu Gothic",
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic",
     sans-serif;
+
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+  -webkit-font-smoothing: antialiased;
 }
 
 button,
@@ -49,23 +93,51 @@ button {
   cursor: pointer;
 }
 
+button,
+a,
+input,
+textarea,
+summary {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 3px;
+}
+
+button:disabled,
+input:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+}
+
 .hidden {
   display: none !important;
 }
-
 
 /* ========================================
    共通ボタン
 ======================================== */
 
 .btn {
-  display: inline-block;
+  display: inline-flex;
+
+  min-height: var(--button-height);
+
+  align-items: center;
+  justify-content: center;
 
   border: none;
 
-  border-radius: 16px;
+  border-radius: var(--radius-medium);
 
-  padding: 16px 24px;
+  padding: 12px 22px;
 
   font-size: 16px;
   font-weight: 800;
@@ -74,13 +146,14 @@ button {
   text-decoration: none;
 
   transition:
-    transform 0.15s,
-    background 0.15s,
-    opacity 0.15s;
+    background-color 0.15s,
+    border-color 0.15s,
+    color 0.15s,
+    box-shadow 0.15s;
 }
 
 .btn:active {
-  transform: scale(0.98);
+  box-shadow: inset 0 2px 4px rgb(16 24 40 / 14%);
 }
 
 .btn.primary {
@@ -96,7 +169,7 @@ button {
   color: var(--blue);
   background: var(--white);
 
-  border: 3px solid var(--blue);
+  border: 2px solid var(--blue);
 }
 
 .btn.outline:hover {
@@ -107,7 +180,6 @@ button {
   width: 100%;
 }
 
-
 /* ========================================
    初期設定・決済・Google画面
 ======================================== */
@@ -115,20 +187,13 @@ button {
 .flow-screen {
   min-height: 100vh;
 
-  padding:
-    35px 20px 80px;
+  padding: 35px 20px 80px;
 
-  background:
-    radial-gradient(
-      circle at top,
-      #dcecff 0,
-      #f4f7fb 45%
-    );
+  background: radial-gradient(circle at top, #dcecff 0, #f4f7fb 45%);
 }
 
 .flow-container {
-  width:
-    min(680px, 100%);
+  width: min(680px, 100%);
 
   margin: auto;
 }
@@ -158,11 +223,9 @@ button {
 }
 
 .flow-container > h1 {
-  margin:
-    0 0 12px;
+  margin: 0 0 12px;
 
-  font-size:
-    clamp(34px, 6vw, 52px);
+  font-size: clamp(34px, 6vw, 52px);
 }
 
 .description {
@@ -172,7 +235,6 @@ button {
 
   line-height: 1.8;
 }
-
 
 /* ========================================
    共通カード
@@ -190,16 +252,12 @@ button {
 
   background: var(--white);
 
-  border:
-    1px solid var(--border);
+  border: 1px solid var(--border);
 
   border-radius: 24px;
 
-  box-shadow:
-    0 10px 35px
-    rgba(16, 24, 40, 0.07);
+  box-shadow: 0 10px 35px rgba(16, 24, 40, 0.07);
 }
-
 
 /* ========================================
    プラン表示
@@ -226,8 +284,7 @@ button {
 }
 
 .small-label {
-  margin:
-    0 0 5px;
+  margin: 0 0 5px;
 
   color: var(--subtext);
 
@@ -235,26 +292,22 @@ button {
   font-weight: 800;
 }
 
-
 /* ========================================
    キーワード入力
 ======================================== */
 
 .keyword-section {
-  margin:
-    30px 0;
+  margin: 30px 0;
 }
 
 .single-google-account-section {
-  margin:
-    30px 0;
+  margin: 30px 0;
 
   padding: 22px;
 
   background: var(--white);
 
-  border:
-    1px solid var(--border);
+  border: 1px solid var(--border);
 
   border-radius: 20px;
 }
@@ -266,8 +319,7 @@ button {
 }
 
 .input-help {
-  margin:
-    10px 0 0;
+  margin: 10px 0 0;
 
   color: var(--subtext);
 
@@ -289,8 +341,7 @@ button {
 }
 
 .section-title-row span {
-  padding:
-    7px 13px;
+  padding: 7px 13px;
 
   color: var(--blue);
 
@@ -304,8 +355,7 @@ button {
 .keyword-input-row {
   display: grid;
 
-  grid-template-columns:
-    46px 1fr 48px;
+  grid-template-columns: 46px 1fr 48px;
 
   gap: 10px;
 
@@ -331,8 +381,7 @@ button {
 .google-card input {
   width: 100%;
 
-  border:
-    2px solid var(--border);
+  border: 2px solid var(--border);
 
   border-radius: 14px;
 
@@ -349,9 +398,7 @@ button {
 
   outline: none;
 
-  box-shadow:
-    0 0 0 4px
-    rgba(8, 98, 199, 0.1);
+  box-shadow: 0 0 0 4px rgba(8, 98, 199, 0.1);
 }
 
 .remove-keyword {
@@ -377,7 +424,6 @@ button {
   opacity: 0.3;
 }
 
-
 /* ========================================
    料金表示
 ======================================== */
@@ -390,15 +436,13 @@ button {
 
   gap: 15px;
 
-  padding:
-    11px 0;
+  padding: 11px 0;
 }
 
 .price-card hr {
   border: none;
 
-  border-top:
-    1px solid var(--border);
+  border-top: 1px solid var(--border);
 }
 
 .total-row,
@@ -453,7 +497,6 @@ textarea[aria-invalid="true"] {
   font-weight: 800;
 }
 
-
 /* ========================================
    決済確認
 ======================================== */
@@ -469,13 +512,11 @@ textarea[aria-invalid="true"] {
 
   gap: 8px;
 
-  margin:
-    16px 0 24px;
+  margin: 16px 0 24px;
 }
 
 .keyword-chip {
-  padding:
-    8px 13px;
+  padding: 8px 13px;
 
   color: var(--blue);
 
@@ -500,7 +541,6 @@ textarea[aria-invalid="true"] {
   line-height: 1.7;
 }
 
-
 /* ========================================
    Googleアカウント選択
 ======================================== */
@@ -508,8 +548,7 @@ textarea[aria-invalid="true"] {
 .google-account-card {
   display: grid;
 
-  grid-template-columns:
-    54px 1fr auto;
+  grid-template-columns: 54px 1fr auto;
 
   align-items: center;
 
@@ -638,8 +677,7 @@ textarea[aria-invalid="true"] {
 .mail-provider-choices {
   display: grid;
 
-  grid-template-columns:
-    repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 
   gap: 10px;
 }
@@ -697,8 +735,7 @@ textarea[aria-invalid="true"] {
 
   min-width: 0;
 
-  grid-template-columns:
-    minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
 
   gap: 6px 12px;
 
@@ -764,8 +801,7 @@ textarea[aria-invalid="true"] {
 
   background: var(--white);
 
-  border:
-    2px solid var(--border);
+  border: 2px solid var(--border);
 
   border-radius: 50%;
 
@@ -790,8 +826,7 @@ textarea[aria-invalid="true"] {
 
   border-radius: 12px;
 
-  padding:
-    11px 16px;
+  padding: 11px 16px;
 
   color: var(--white);
 
@@ -807,8 +842,7 @@ textarea[aria-invalid="true"] {
 .google-card {
   display: grid;
 
-  grid-template-columns:
-    72px 1fr;
+  grid-template-columns: 72px 1fr;
 
   align-items: start;
 
@@ -828,8 +862,7 @@ textarea[aria-invalid="true"] {
 
   background: var(--white);
 
-  border:
-    2px solid var(--border);
+  border: 2px solid var(--border);
 
   border-radius: 50%;
 
@@ -854,8 +887,7 @@ textarea[aria-invalid="true"] {
 .google-card-content label {
   display: block;
 
-  margin:
-    18px 0 8px;
+  margin: 18px 0 8px;
 
   font-weight: 800;
 }
@@ -931,8 +963,7 @@ textarea[aria-invalid="true"] {
 .google-button {
   width: 100%;
 
-  border:
-    2px solid var(--border);
+  border: 2px solid var(--border);
 
   border-radius: 15px;
 
@@ -950,7 +981,6 @@ textarea[aria-invalid="true"] {
 
   background: var(--blue-light);
 }
-
 
 /* ========================================
    管理画面
@@ -974,22 +1004,11 @@ textarea[aria-invalid="true"] {
 
   justify-content: space-between;
 
-  padding:
-    calc(
-      15px +
-      env(safe-area-inset-top)
-    )
-    20px
-    15px;
+  padding: calc(15px + env(safe-area-inset-top)) 20px 15px;
 
   color: var(--white);
 
-  background:
-    linear-gradient(
-      135deg,
-      var(--blue),
-      var(--blue-dark)
-    );
+  background: linear-gradient(135deg, var(--blue), var(--blue-dark));
 }
 
 .app-logo {
@@ -1070,35 +1089,28 @@ textarea[aria-invalid="true"] {
 }
 
 .logout-button {
-  border:
-    1px solid
-    rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.5);
 
   border-radius: 999px;
 
-  padding:
-    8px 13px;
+  padding: 8px 13px;
 
   color: var(--white);
 
-  background:
-    rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.14);
 
   font-size: 13px;
   font-weight: 800;
 }
 
 .logout-button:hover {
-  background:
-    rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.28);
 }
 
 .app-status {
-  padding:
-    8px 13px;
+  padding: 8px 13px;
 
-  background:
-    rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.18);
 
   border-radius: 999px;
 
@@ -1107,23 +1119,15 @@ textarea[aria-invalid="true"] {
 }
 
 .app-status.expired {
-  background:
-    rgba(225, 61, 61, 0.95);
+  background: rgba(225, 61, 61, 0.95);
 }
 
 .app-main {
-  width:
-    min(900px, 100%);
+  width: min(900px, 100%);
 
   margin: auto;
 
-  padding:
-    30px
-    20px
-    calc(
-      105px +
-      env(safe-area-inset-bottom)
-    );
+  padding: 30px 20px calc(105px + env(safe-area-inset-bottom));
 }
 
 .app-page {
@@ -1135,11 +1139,9 @@ textarea[aria-invalid="true"] {
 }
 
 .app-page > h1 {
-  margin:
-    10px 0 30px;
+  margin: 10px 0 30px;
 
-  font-size:
-    clamp(36px, 7vw, 55px);
+  font-size: clamp(36px, 7vw, 55px);
 }
 
 .dashboard-grid {
@@ -1160,13 +1162,11 @@ textarea[aria-invalid="true"] {
 }
 
 .announcement-item {
-  border-top:
-    1px solid var(--border);
+  border-top: 1px solid var(--border);
 }
 
 .announcement-item:last-child {
-  border-bottom:
-    1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 
 .announcement-item > span,
@@ -1212,12 +1212,9 @@ textarea[aria-invalid="true"] {
 
   color: var(--subtext);
 
-  border-top:
-    1px solid var(--border);
-  border-bottom:
-    1px solid var(--border);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
-
 
 /* ========================================
    管理画面カード
@@ -1228,14 +1225,11 @@ textarea[aria-invalid="true"] {
 
   background: var(--white);
 
-  border:
-    1px solid var(--border);
+  border: 1px solid var(--border);
 
   border-radius: 24px;
 
-  box-shadow:
-    0 10px 30px
-    rgba(16, 24, 40, 0.06);
+  box-shadow: 0 10px 30px rgba(16, 24, 40, 0.06);
 }
 
 .card h2 {
@@ -1261,13 +1255,11 @@ textarea[aria-invalid="true"] {
 }
 
 .status-display {
-  margin:
-    22px 0;
+  margin: 22px 0;
 
   color: var(--green);
 
-  font-size:
-    clamp(35px, 8vw, 60px);
+  font-size: clamp(35px, 8vw, 60px);
 
   font-weight: 900;
 }
@@ -1276,7 +1268,6 @@ textarea[aria-invalid="true"] {
   color: var(--red);
 }
 
-
 /* ========================================
    通知テスト
 ======================================== */
@@ -1284,13 +1275,11 @@ textarea[aria-invalid="true"] {
 .test-grid {
   display: grid;
 
-  grid-template-columns:
-    repeat(2, 1fr);
+  grid-template-columns: repeat(2, 1fr);
 
   gap: 18px;
 
-  margin:
-    25px 0;
+  margin: 25px 0;
 }
 
 .test-card {
@@ -1298,14 +1287,11 @@ textarea[aria-invalid="true"] {
 
   background: var(--white);
 
-  border:
-    1px solid var(--border);
+  border: 1px solid var(--border);
 
   border-radius: 22px;
 
-  box-shadow:
-    0 8px 25px
-    rgba(16, 24, 40, 0.06);
+  box-shadow: 0 8px 25px rgba(16, 24, 40, 0.06);
 }
 
 .test-card h2 {
@@ -1353,7 +1339,6 @@ textarea[aria-invalid="true"] {
   font-size: 20px;
 }
 
-
 /* ========================================
    契約情報
 ======================================== */
@@ -1365,11 +1350,9 @@ textarea[aria-invalid="true"] {
 
   gap: 15px;
 
-  padding:
-    16px 0;
+  padding: 16px 0;
 
-  border-bottom:
-    1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 
 .contract-row:last-of-type {
@@ -1387,7 +1370,6 @@ textarea[aria-invalid="true"] {
 .renewal-button {
   margin-top: 22px;
 }
-
 
 .contract-settings-card {
   display: grid;
@@ -1456,10 +1438,9 @@ textarea[aria-invalid="true"] {
 
 .contract-keyword-row {
   display: grid;
-  grid-template-columns: minmax(
-      0,
-      1fr
-    ) auto;
+  grid-template-columns:
+    minmax(0, 1fr)
+    auto;
   gap: 10px;
 }
 
@@ -1479,8 +1460,7 @@ textarea[aria-invalid="true"] {
 .contract-seat-editor input:focus {
   border-color: #0862c7;
   outline: none;
-  box-shadow: 0 0 0 4px
-    rgb(8 98 199 / 10%);
+  box-shadow: 0 0 0 4px rgb(8 98 199 / 10%);
 }
 
 .contract-keyword-remove {
@@ -1581,14 +1561,12 @@ textarea[aria-invalid="true"] {
   border-radius: 50%;
 }
 
-
 /* ========================================
    ヘルプ・フィードバック
 ======================================== */
 
 #helpFeedbackPage > h1 {
-  font-size:
-    clamp(28px, 7vw, 55px);
+  font-size: clamp(28px, 7vw, 55px);
 }
 
 .help-intro {
@@ -1620,20 +1598,17 @@ textarea[aria-invalid="true"] {
 }
 
 .help-item {
-  border-top:
-    1px solid var(--border);
+  border-top: 1px solid var(--border);
 }
 
 .help-item:last-child {
-  border-bottom:
-    1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 
 .help-item summary {
   position: relative;
 
-  padding:
-    17px 42px 17px 0;
+  padding: 17px 42px 17px 0;
 
   font-weight: 800;
 
@@ -1666,15 +1641,13 @@ textarea[aria-invalid="true"] {
 }
 
 .help-item p {
-  margin:
-    0 0 18px;
+  margin: 0 0 18px;
 
   color: var(--subtext);
 }
 
 .help-check-list {
-  margin:
-    0;
+  margin: 0;
 
   padding-left: 24px;
 
@@ -1686,13 +1659,11 @@ textarea[aria-invalid="true"] {
 }
 
 .support-card {
-  border:
-    2px solid #acd0f8;
+  border: 2px solid #acd0f8;
 }
 
 .help-note {
-  margin:
-    20px 0 0;
+  margin: 20px 0 0;
 
   padding: 15px;
 
@@ -1956,11 +1927,7 @@ textarea[aria-invalid="true"] {
 .store-review-links {
   display: grid;
 
-  grid-template-columns:
-    repeat(
-      auto-fit,
-      minmax(180px, 1fr)
-    );
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 
   gap: 12px;
 
@@ -1970,7 +1937,6 @@ textarea[aria-invalid="true"] {
 .store-review-links .btn {
   margin-top: 0;
 }
-
 
 /* ========================================
    下部の5タブ
@@ -1987,32 +1953,19 @@ textarea[aria-invalid="true"] {
 
   display: grid;
 
-  grid-template-columns:
-    repeat(
-      5,
-      minmax(0, 1fr)
-    );
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 
   width: 100%;
 
-  padding:
-    8px
-    5px
-    calc(
-      8px +
-      env(safe-area-inset-bottom)
-    );
+  padding: 8px 5px calc(8px + env(safe-area-inset-bottom));
 
   overflow: hidden;
 
   background: var(--white);
 
-  border-top:
-    1px solid var(--border);
+  border-top: 1px solid var(--border);
 
-  box-shadow:
-    0 -8px 25px
-    rgba(16, 24, 40, 0.09);
+  box-shadow: 0 -8px 25px rgba(16, 24, 40, 0.09);
 }
 
 .tab-button {
@@ -2020,8 +1973,7 @@ textarea[aria-invalid="true"] {
 
   border: none;
 
-  padding:
-    7px 2px;
+  padding: 7px 2px;
 
   color: var(--subtext);
 
@@ -2058,7 +2010,6 @@ textarea[aria-invalid="true"] {
 
   border-radius: 13px;
 }
-
 
 /* ========================================
    共通ダイアログ
@@ -2165,13 +2116,7 @@ body.app-dialog-open {
   .app-dialog {
     align-items: flex-end;
 
-    padding:
-      16px
-      16px
-      calc(
-        16px +
-        env(safe-area-inset-bottom)
-      );
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
   }
 
   .app-dialog-card {
@@ -2191,7 +2136,6 @@ body.app-dialog-open {
     font-size: 24px;
   }
 }
-
 
 /* ========================================
    警報画面
@@ -2323,7 +2267,6 @@ body.app-dialog-open {
   }
 }
 
-
 /* ========================================
    タブレット・スマホ対応
 ======================================== */
@@ -2338,7 +2281,6 @@ body.app-dialog-open {
   }
 }
 
-
 /* ========================================
    小さいスマホ対応
 ======================================== */
@@ -2349,8 +2291,7 @@ body.app-dialog-open {
   }
 
   .google-account-card {
-    grid-template-columns:
-      48px 1fr;
+    grid-template-columns: 48px 1fr;
   }
 
   .linked-accounts-card {
@@ -2394,8 +2335,7 @@ body.app-dialog-open {
   }
 
   .account-select-button {
-    grid-column:
-      1 / -1;
+    grid-column: 1 / -1;
 
     width: 100%;
   }
@@ -2404,7 +2344,6 @@ body.app-dialog-open {
     align-items: flex-start;
   }
 }
-
 
 @media (max-width: 390px) {
   .app-header {
@@ -2513,15 +2452,13 @@ body.app-dialog-open {
 
   .logout-button,
   .app-status {
-    padding:
-      7px 9px;
+    padding: 7px 9px;
 
     font-size: 11px;
   }
 
   .keyword-input-row {
-    grid-template-columns:
-      40px 1fr 43px;
+    grid-template-columns: 40px 1fr 43px;
   }
 }
 .guest-home-screen {
@@ -2743,7 +2680,6 @@ body.app-dialog-open {
   align-items: center;
   gap: 8px;
 }
-
 
 .member-management-card {
   margin-top: 24px;
@@ -3188,7 +3124,7 @@ body.app-dialog-open {
 
   .member-management-heading,
   .notification-member-item,
-  .alert-list-item ,
+  .alert-list-item,
   .contract-settings-heading,
   .contract-provider-heading,
   .contract-price-preview {
@@ -3222,8 +3158,7 @@ body.app-dialog-open {
     width: 100%;
   }
 
-  .contract-price-preview
-    div:last-child {
+  .contract-price-preview div:last-child {
     text-align: left;
   }
 
@@ -3264,5 +3199,1123 @@ body.app-dialog-open {
 
   .seat-count-field input {
     width: 100%;
+  }
+}
+
+/* ========================================
+   最終UIポリッシュ
+   機能・文言・DOMを変えず、視覚階層と操作性を統一
+======================================== */
+
+body {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+p,
+li,
+dd,
+label,
+button,
+input,
+textarea {
+  overflow-wrap: anywhere;
+}
+
+h1,
+h2,
+h3,
+p {
+  text-wrap: pretty;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.35;
+}
+
+.flow-screen {
+  padding: var(--space-6) var(--space-5) 80px;
+  background: var(--color-background);
+}
+
+.flow-container {
+  width: min(var(--flow-width), 100%);
+}
+
+.flow-container > h1,
+.app-page > h1,
+.member-page > h1 {
+  color: var(--color-text);
+  font-size: var(--font-size-page);
+  letter-spacing: -0.025em;
+}
+
+.flow-container > h1 {
+  margin: 0 0 var(--space-3);
+}
+
+.description,
+.help-intro {
+  max-width: 66ch;
+  margin-bottom: var(--space-6);
+  color: var(--color-text-muted);
+  font-size: 1rem;
+  line-height: var(--line-height-body);
+}
+
+.back-button {
+  min-height: 44px;
+  margin-bottom: var(--space-3);
+  padding: 8px 2px;
+  border-radius: var(--radius-small);
+  text-underline-offset: 4px;
+}
+
+.back-button:hover {
+  text-decoration: underline;
+}
+
+.step-label,
+.small-label,
+.member-credential-eyebrow {
+  letter-spacing: 0.02em;
+}
+
+.setup-progress {
+  justify-content: flex-start;
+  gap: var(--space-2);
+  margin: var(--space-4) 0 var(--space-6);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-small);
+}
+
+.setup-progress span {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+}
+
+.setup-progress .active {
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  border-color: #b8d5f4;
+}
+
+.plan-card,
+.price-card,
+.payment-card,
+.notice-box,
+.google-account-card,
+.google-card,
+.monitoring-provider-card,
+.seat-setup-card,
+.card,
+.test-card,
+.guest-home-card {
+  border-color: var(--color-border);
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-small);
+}
+
+.plan-card,
+.price-card,
+.payment-card,
+.notice-box,
+.google-account-card,
+.google-card,
+.card,
+.test-card {
+  padding: var(--space-5);
+}
+
+.monitoring-provider-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: var(--space-4);
+}
+
+.monitoring-provider-card {
+  display: grid;
+  min-width: 0;
+  grid-template-rows: auto 1fr auto auto;
+  padding: var(--space-5);
+  box-shadow: var(--shadow-small);
+}
+
+.monitoring-provider-card > p {
+  color: var(--color-text-muted);
+}
+
+.monitoring-provider-status {
+  min-height: 3.4em;
+  margin: var(--space-4) 0;
+}
+
+.monitoring-provider-status strong {
+  color: var(--color-success);
+}
+
+.monitoring-provider-actions {
+  align-self: end;
+}
+
+.owner-keyword-provider-heading,
+.single-google-account-section,
+.contract-provider-card,
+.member-create-panel,
+.member-login-info-panel,
+.member-credential-panel {
+  border-color: var(--color-border);
+  border-radius: var(--radius-medium);
+  box-shadow: none;
+}
+
+.owner-keyword-provider-heading,
+.single-google-account-section,
+.contract-provider-card,
+.member-create-panel,
+.member-login-info-panel,
+.member-credential-panel,
+.emergency-notification-details {
+  background: #f8fbff;
+}
+
+.owner-keyword-provider-tab {
+  min-height: 46px;
+}
+
+.owner-keyword-provider-tab.active {
+  box-shadow: var(--shadow-small);
+}
+
+.section-title-row {
+  gap: var(--space-4);
+}
+
+.section-title-row h2 {
+  margin-bottom: var(--space-3);
+}
+
+.keyword-input-row {
+  min-width: 0;
+  align-items: stretch;
+}
+
+.keyword-number,
+.remove-keyword {
+  min-height: var(--button-height);
+}
+
+.keyword-input-row input,
+.google-card input,
+.contract-keyword-row input,
+.contract-seat-editor input,
+.member-create-field input,
+.member-login-field input,
+.seat-count-field input,
+.feedback-form textarea {
+  min-height: var(--button-height);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-medium);
+}
+
+.keyword-input-row input:focus-visible,
+.google-card input:focus-visible,
+.contract-keyword-row input:focus-visible,
+.contract-seat-editor input:focus-visible,
+.member-create-field input:focus-visible,
+.member-login-field input:focus-visible,
+.seat-count-field input:focus-visible,
+.feedback-form textarea:focus-visible {
+  border-color: var(--color-focus);
+  outline: 3px solid rgb(11 111 216 / 22%);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+
+.remove-keyword,
+.contract-keyword-remove,
+.account-remove-button,
+.danger-outline {
+  min-height: 44px;
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  border-color: #efb2ae;
+}
+
+.remove-keyword:hover,
+.contract-keyword-remove:hover,
+.account-remove-button:hover,
+.danger-outline:hover {
+  color: var(--color-danger-hover);
+  background: #ffe8e5;
+}
+
+.price-row,
+.payment-detail,
+.contract-row {
+  align-items: baseline;
+  gap: var(--space-5);
+}
+
+.price-row strong,
+.payment-detail strong,
+.contract-row strong,
+.contract-price-preview strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.price-row strong,
+.payment-detail strong,
+.contract-row strong {
+  margin-left: auto;
+  text-align: right;
+}
+
+.total-row,
+.total-payment {
+  margin-top: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 2px solid #b8d5f4;
+  font-size: 1.3rem;
+  font-weight: 900;
+}
+
+.notice-box {
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+  border-color: #e7c66f;
+}
+
+.error-message,
+.form-error,
+.field-error,
+.form-success,
+.feedback-status,
+.member-copy-status {
+  min-height: 1.65em;
+  line-height: 1.55;
+}
+
+.error-message,
+.form-error,
+.field-error,
+.feedback-status.error {
+  color: var(--color-danger);
+}
+
+.form-success {
+  color: var(--color-success);
+}
+
+.guest-home-screen {
+  padding: var(--space-5);
+  background: linear-gradient(180deg, #eef5fd 0, var(--color-background) 38%);
+}
+
+.guest-home-card {
+  width: min(100%, 600px);
+  padding: var(--space-7);
+}
+
+.guest-home-logo {
+  margin-bottom: var(--space-6);
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
+}
+
+.guest-home-card h1 {
+  margin: 0 0 var(--space-4);
+  font-size: var(--font-size-page);
+}
+
+.guest-home-status {
+  margin: 0 0 var(--space-5);
+  padding: 12px 14px;
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+  border: 1px solid #e7c66f;
+}
+
+.guest-home-card .btn {
+  min-height: 52px;
+}
+
+.guest-home-card .btn + .btn {
+  margin-top: var(--space-3);
+}
+
+.app-header {
+  min-height: 68px;
+  padding: calc(10px + env(safe-area-inset-top))
+    max(16px, calc((100% - var(--content-width)) / 2)) 10px;
+  background: var(--color-primary);
+  box-shadow: 0 2px 10px rgb(4 75 154 / 16%);
+}
+
+.app-logo {
+  min-width: 0;
+  white-space: nowrap;
+  letter-spacing: -0.02em;
+}
+
+.app-actions {
+  flex: 0 0 auto;
+  gap: var(--space-2);
+}
+
+.sound-toggle-button,
+.notification-bell-button,
+.logout-button {
+  min-height: 44px;
+  border: 1px solid rgb(255 255 255 / 62%);
+  background: rgb(255 255 255 / 14%);
+}
+
+.sound-toggle-button {
+  padding: 8px 13px;
+  font-size: 0.8rem;
+}
+
+.notification-bell-button {
+  width: 46px;
+  min-width: 46px;
+  height: 46px;
+}
+
+.notification-unread-badge {
+  top: -3px;
+  right: -3px;
+  min-width: 22px;
+  height: 22px;
+  background: var(--color-danger);
+  border-color: var(--color-primary-hover);
+  font-variant-numeric: tabular-nums;
+}
+
+.app-main {
+  width: min(var(--content-width), 100%);
+  padding: var(--space-6) var(--space-5)
+    calc(104px + env(safe-area-inset-bottom));
+}
+
+.app-page > h1 {
+  margin: 0 0 var(--space-6);
+}
+
+.app-page > h1 + p {
+  max-width: 70ch;
+  margin-top: calc(-1 * var(--space-4));
+  margin-bottom: var(--space-5);
+  color: var(--color-text-muted);
+}
+
+.dashboard-grid,
+.help-grid {
+  gap: var(--space-5);
+}
+
+.card h2,
+.test-card h2 {
+  margin-bottom: var(--space-3);
+  font-size: var(--font-size-section);
+}
+
+.card p,
+.test-card p {
+  line-height: var(--line-height-body);
+}
+
+.connected-account-summary,
+.contract-provider-status,
+.monitoring-provider-status strong,
+.owner-keyword-decision-status,
+.alert-stream-status {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 10px;
+  border-radius: var(--radius-pill);
+}
+
+.connected-account-summary,
+.monitoring-provider-status strong,
+.owner-keyword-decision-status,
+.alert-stream-status {
+  color: var(--color-success);
+  background: var(--color-success-soft);
+}
+
+.account-manage-button,
+.renewal-button {
+  margin-top: var(--space-5);
+}
+
+.test-grid {
+  align-items: stretch;
+  gap: var(--space-4);
+}
+
+.test-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.test-card .test-button,
+.test-card .btn {
+  margin-top: auto;
+}
+
+.test-button {
+  min-height: var(--button-height);
+  border-radius: var(--radius-medium);
+}
+
+.test-button:disabled,
+.btn:disabled,
+.login-provider-button:disabled,
+.mail-provider-choices button:disabled,
+.mail-account-actions button:disabled {
+  opacity: 0.65;
+}
+
+.contract-settings-card {
+  gap: var(--space-5);
+}
+
+.contract-provider-card {
+  padding: var(--space-5);
+}
+
+.contract-price-preview {
+  align-items: stretch;
+  padding: var(--space-4) var(--space-5);
+  background: #f1f7ff;
+  border: 1px solid #b8d5f4;
+}
+
+.contract-price-preview div {
+  min-width: 0;
+}
+
+.contract-price-preview strong {
+  font-size: 1.45rem;
+}
+
+.member-management-heading p,
+.member-create-panel-heading p,
+.member-login-info-password p {
+  color: var(--color-text-muted);
+}
+
+.member-seat-summary {
+  gap: var(--space-3);
+}
+
+.member-seat-item {
+  border: 1px solid #d8e5f3;
+  background: #f4f8fd;
+}
+
+.member-login-info-panel,
+.member-credential-panel {
+  padding: var(--space-5);
+}
+
+.member-credential-panel {
+  border-color: #8ab8e8;
+  background: #edf6ff;
+}
+
+.member-credential-warning {
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+  border: 1px solid #e7c66f;
+  border-radius: var(--radius-small);
+}
+
+.notification-member-list {
+  gap: var(--space-3);
+}
+
+.notification-member-item {
+  align-items: center;
+  padding: var(--space-4);
+  border-color: var(--color-border);
+  border-radius: var(--radius-medium);
+  background: var(--color-surface);
+}
+
+.notification-member-id,
+.member-login-info-value code,
+.member-credential-value code {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.member-create-actions,
+.notification-member-actions,
+.mail-account-actions {
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.text-button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px;
+}
+
+.member-app-main {
+  width: min(calc(100% - 40px), 820px);
+  padding: var(--space-6) 0 100px;
+}
+
+.member-status-card {
+  margin-top: 0;
+}
+
+.notification-center-heading {
+  align-items: flex-end;
+}
+
+.notification-center-heading h1 {
+  margin: 0;
+  font-size: var(--font-size-page);
+}
+
+.notification-selection-toolbar {
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: #f1f7ff;
+  border-color: #b8d5f4;
+  box-shadow: inset 4px 0 0 var(--color-primary);
+}
+
+.notification-selection-toolbar span {
+  color: var(--color-primary-hover);
+  font-variant-numeric: tabular-nums;
+}
+
+.notification-section-title {
+  margin-top: var(--space-7);
+  margin-bottom: var(--space-3);
+  font-size: var(--font-size-section);
+}
+
+.emergency-notification-list,
+.user-notification-list {
+  gap: var(--space-3);
+}
+
+.emergency-notification-item,
+.user-notification-item,
+.notification-empty {
+  position: relative;
+  min-width: 0;
+  padding: var(--space-5);
+  border-color: var(--color-border);
+  border-radius: var(--radius-medium);
+  box-shadow: none;
+}
+
+.emergency-notification-item {
+  border-left: 4px solid var(--color-danger);
+}
+
+.user-notification-item {
+  border-left: 4px solid var(--color-primary);
+}
+
+.emergency-notification-item.unread,
+.user-notification-item.unread {
+  background: #f8fbff;
+  box-shadow: var(--shadow-small);
+}
+
+.emergency-notification-item.unread {
+  border-color: #e99d96;
+  border-left-color: var(--color-danger);
+}
+
+.user-notification-item.unread {
+  border-color: #94bde8;
+  border-left-color: var(--color-primary);
+}
+
+.emergency-notification-item.selection-mode,
+.user-notification-item.selection-mode {
+  outline: 3px solid rgb(11 111 216 / 20%);
+  outline-offset: 1px;
+}
+
+.notification-select-control {
+  min-height: 44px;
+  margin: -8px 0 var(--space-2);
+  padding: 8px 0;
+}
+
+.notification-select-control input {
+  width: 24px;
+  height: 24px;
+}
+
+.alert-kind-badge,
+.notification-read-state {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+}
+
+.notification-read-state {
+  color: var(--color-text-muted);
+  background: #eef2f6;
+}
+
+.emergency-notification-item time,
+.user-notification-item time {
+  display: block;
+  margin-top: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-small);
+}
+
+.notification-read-button {
+  min-height: 44px;
+  margin-top: var(--space-4);
+  padding: 10px 14px;
+  border: 1px solid #b8d5f4;
+  border-radius: var(--radius-small);
+}
+
+.emergency-notification-details {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+}
+
+.notification-empty {
+  color: var(--color-text-muted);
+  background: #f8fafc;
+}
+
+.bottom-tabs {
+  min-height: 70px;
+  padding: 7px 8px calc(7px + env(safe-area-inset-bottom));
+  box-shadow: 0 -4px 16px rgb(16 24 40 / 8%);
+}
+
+.tab-button {
+  position: relative;
+  min-height: 56px;
+  padding: 6px 3px;
+  border-radius: var(--radius-small);
+}
+
+.tab-button span {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.tab-button small {
+  margin-top: 5px;
+  font-size: 0.7rem;
+  line-height: 1.2;
+}
+
+.tab-button.active {
+  color: var(--color-primary-hover);
+  background: var(--color-primary-soft);
+  box-shadow: inset 0 -3px 0 var(--color-primary);
+}
+
+.feedback-form {
+  gap: var(--space-3);
+}
+
+.feedback-form label {
+  margin-bottom: -4px;
+  font-size: 1.05rem;
+}
+
+.feedback-form textarea {
+  min-height: 200px;
+  padding: var(--space-4);
+}
+
+.app-dialog,
+.alarm-modal {
+  padding: var(--space-5);
+  background: rgb(8 19 38 / 72%);
+  backdrop-filter: blur(4px);
+}
+
+.app-dialog-card,
+.alarm-modal-card {
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-dialog);
+}
+
+.app-dialog-card {
+  padding: var(--space-6);
+  text-align: left;
+}
+
+.app-dialog-icon {
+  width: 60px;
+  height: 60px;
+  margin-bottom: var(--space-4);
+  font-size: 1.75rem;
+}
+
+.app-dialog-card h2 {
+  font-size: 1.65rem;
+}
+
+.app-dialog-message {
+  margin-top: var(--space-3);
+  color: var(--color-text-muted);
+}
+
+.app-dialog-actions {
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.btn.danger {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: var(--color-danger-hover);
+  border-color: var(--color-danger-hover);
+}
+
+.alarm-modal-card {
+  padding: var(--space-6);
+  border: 2px solid var(--color-danger);
+}
+
+.alarm-modal-icon {
+  width: 70px;
+  height: 70px;
+  font-size: 2.5rem;
+}
+
+.alarm-modal-card h2 {
+  font-size: clamp(1.75rem, 6vw, 2.25rem);
+}
+
+.alarm-modal-eyebrow,
+.alarm-sound-status {
+  color: var(--color-danger);
+}
+
+.alarm-detected-at,
+.alarm-action-help {
+  color: var(--color-text-muted);
+}
+
+.alarm-stop-button {
+  min-height: 52px;
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+@media (hover: hover) {
+  .btn.primary:hover,
+  .test-button:hover,
+  .account-select-button:hover {
+    background: var(--color-primary-hover);
+  }
+
+  .tab-button:hover {
+    color: var(--color-primary-hover);
+    background: #f2f7fd;
+  }
+}
+
+@media (max-width: 768px) {
+  .flow-screen {
+    padding: var(--space-5) var(--space-4) 72px;
+  }
+
+  .monitoring-provider-grid,
+  .test-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .monitoring-provider-card {
+    min-height: 0;
+  }
+
+  .app-header {
+    padding-right: var(--space-4);
+    padding-left: var(--space-4);
+  }
+
+  .app-main {
+    padding: var(--space-5) var(--space-4)
+      calc(100px + env(safe-area-inset-bottom));
+  }
+
+  .app-page > h1 {
+    margin-bottom: var(--space-5);
+  }
+
+  .card,
+  .test-card,
+  .plan-card,
+  .price-card,
+  .payment-card,
+  .notice-box,
+  .google-account-card,
+  .google-card {
+    padding: var(--space-5);
+  }
+
+  .notification-center-heading {
+    align-items: center;
+  }
+}
+
+@media (max-width: 600px) {
+  .guest-home-card {
+    padding: var(--space-6) var(--space-5);
+  }
+
+  .monitoring-provider-actions,
+  .member-create-actions,
+  .notification-member-actions,
+  .mail-account-actions,
+  .app-dialog-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .monitoring-provider-actions .btn,
+  .member-create-actions .btn,
+  .notification-member-actions .btn,
+  .mail-account-actions .btn,
+  .mail-account-actions .account-remove-button {
+    width: 100%;
+  }
+
+  .price-row,
+  .payment-detail,
+  .contract-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .member-app-main {
+    width: min(calc(100% - 32px), 820px);
+    padding-top: var(--space-5);
+  }
+
+  .notification-selection-toolbar {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .notification-selection-toolbar .btn,
+  .notification-selection-toolbar span {
+    width: 100%;
+  }
+
+  .notification-center-heading {
+    align-items: flex-start;
+  }
+
+  .notification-center-heading .btn {
+    flex: 0 0 auto;
+    width: auto;
+  }
+
+  .app-dialog {
+    align-items: center;
+  }
+}
+
+@media (max-width: 390px) {
+  .app-header {
+    gap: 6px;
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .app-logo {
+    font-size: 1.05rem;
+  }
+
+  .app-actions {
+    gap: 5px;
+  }
+
+  .sound-toggle-button {
+    width: 44px;
+    min-width: 44px;
+    padding: 7px;
+  }
+
+  .sound-toggle-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .notification-bell-button {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .logout-button,
+  .app-status {
+    min-height: 44px;
+    padding: 7px 9px;
+    font-size: 0.72rem;
+  }
+
+  .app-main {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .card,
+  .test-card,
+  .plan-card,
+  .price-card,
+  .payment-card,
+  .notice-box,
+  .google-account-card,
+  .google-card,
+  .monitoring-provider-card,
+  .seat-setup-card {
+    padding: 18px;
+    border-radius: var(--radius-medium);
+  }
+
+  .keyword-input-row {
+    grid-template-columns: 38px minmax(0, 1fr) 44px;
+    gap: 7px;
+  }
+
+  .keyword-input-row input {
+    padding: 12px 10px;
+  }
+
+  .price-row,
+  .payment-detail,
+  .contract-row {
+    gap: var(--space-3);
+  }
+
+  .bottom-tabs {
+    padding-right: 4px;
+    padding-left: 4px;
+  }
+
+  .tab-button {
+    min-height: 58px;
+    padding-right: 2px;
+    padding-left: 2px;
+  }
+
+  .tab-button span {
+    font-size: 1.15rem;
+  }
+
+  .tab-button small {
+    overflow: visible;
+    font-size: 0.62rem;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .emergency-notification-item,
+  .user-notification-item,
+  .notification-empty {
+    padding: var(--space-4);
+  }
+
+  .alarm-modal,
+  .app-dialog {
+    padding: 12px;
+  }
+
+  .alarm-modal-card,
+  .app-dialog-card {
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
+    padding: var(--space-5) var(--space-4);
+  }
+}
+
+@media (max-width: 340px) {
+  .app-logo {
+    font-size: 0.95rem;
+  }
+
+  .sound-toggle-button {
+    width: 44px;
+    min-width: 44px;
+    padding: 7px;
+  }
+
+  .sound-toggle-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .logout-button {
+    padding-right: 7px;
+    padding-left: 7px;
+  }
+
+  .setup-progress {
+    gap: 2px;
+    font-size: 0.66rem;
+  }
+
+  .setup-progress span {
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

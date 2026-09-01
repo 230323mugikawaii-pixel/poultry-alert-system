@@ -10,6 +10,48 @@ const htmlSource = readFileSync(
   new URL("../index.html", import.meta.url),
   "utf8"
 );
+const cssSource = readFileSync(
+  new URL("../css/style.css", import.meta.url),
+  "utf8"
+);
+
+test("the shared interface tokens and accessible interaction states are defined", () => {
+  for (const token of [
+    "--color-primary",
+    "--color-text",
+    "--color-background",
+    "--color-surface",
+    "--color-border",
+    "--color-success",
+    "--color-warning",
+    "--color-danger",
+    "--color-focus",
+    "--space-1",
+    "--space-7",
+    "--radius-small",
+    "--radius-large",
+    "--shadow-small",
+    "--shadow-dialog",
+    "--font-size-body",
+    "--font-size-page",
+    "--button-height",
+  ]) {
+    assert.match(cssSource, new RegExp(`${token}:`));
+  }
+
+  assert.match(
+    cssSource,
+    /\.btn\s*\{[\s\S]*?min-height:\s*var\(--button-height\)/
+  );
+  assert.match(
+    cssSource,
+    /button:focus-visible[\s\S]*?outline:\s*3px solid var\(--color-focus\)/
+  );
+  assert.match(cssSource, /@media \(prefers-reduced-motion:\s*reduce\)/);
+  assert.match(cssSource, /@media \(max-width:\s*390px\)/);
+  assert.match(cssSource, /@media \(max-width:\s*340px\)/);
+  assert.match(htmlSource, /css\/style\.css\?v=32/);
+});
 
 test("Home keeps monitoring controls without a duplicate alert surface", () => {
   const home = htmlSource.match(
