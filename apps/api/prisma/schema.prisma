@@ -646,6 +646,10 @@ model MailConnection {
   status               MailConnectionStatus  @default(ACTIVE)
   keywords             String[]              @default([])
   providerCursor       String?               @db.VarChar(2048)
+  providerSubscriptionExpiresAt DateTime?     @db.Timestamptz(3)
+  providerSubscriptionRenewedAt DateTime?     @db.Timestamptz(3)
+  syncLeaseToken       String?               @db.VarChar(64)
+  syncLeaseExpiresAt   DateTime?              @db.Timestamptz(3)
   lastSyncAt           DateTime?             @db.Timestamptz(3)
   lastErrorCode        String?               @db.VarChar(100)
   createdAt            DateTime              @default(now()) @db.Timestamptz(3)
@@ -659,6 +663,8 @@ model MailConnection {
   @@unique([teamId, mailAuthorizationId])
   @@index([teamId, status])
   @@index([mailAuthorizationId, status])
+  @@index([status, providerSubscriptionExpiresAt])
+  @@index([syncLeaseExpiresAt])
   @@map("mail_connections")
 }
 

@@ -391,6 +391,10 @@ export class PrismaOwnerOnboardingRepository implements OwnerOnboardingRepositor
                 status: "ACTIVE",
                 keywords: [...choice.keywords],
                 providerCursor: null,
+                providerSubscriptionExpiresAt: null,
+                providerSubscriptionRenewedAt: null,
+                syncLeaseToken: null,
+                syncLeaseExpiresAt: null,
                 lastErrorCode: null,
                 revokedAt: null
               }

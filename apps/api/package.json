@@ -11,6 +11,7 @@
     "dev": "tsx watch src/server.ts",
     "format:check": "prettier --check .",
     "lint": "eslint .",
+    "mail:gmail:renew-watches": "tsx src/cli/gmail-renew-watches.ts",
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:postgres": "RUN_POSTGRES_TESTS=true vitest run tests/postgres-concurrency.integration.test.ts --maxWorkers=1",

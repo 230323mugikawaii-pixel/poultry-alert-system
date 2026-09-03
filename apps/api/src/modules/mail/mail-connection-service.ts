@@ -200,6 +200,7 @@ export class MailConnectionService {
       requestId: input.requestId ?? null,
       now: this.now()
     });
+    await this.stopObsoleteWatch(result.tokenToRevoke);
     await this.revokeObsoleteToken(result.tokenToRevoke);
   }
 
@@ -278,6 +279,23 @@ export class MailConnectionService {
     } catch {
       // The credential is already disabled in Call Now. Provider revocation is
       // deliberately best-effort and never re-enables local monitoring.
+    }
+  }
+
+  private async stopObsoleteWatch(
+    providerToken: ProviderToken | null
+  ): Promise<void> {
+    if (!providerToken) return;
+    const provider = this.requireProvider(providerToken.provider);
+    if (!provider.stopMailboxWatch) return;
+    try {
+      const plaintext = await this.options.tokenEncryption.decrypt(
+        providerToken.token
+      );
+      await provider.stopMailboxWatch(plaintext);
+    } catch {
+      // Local revocation is authoritative. Provider watch shutdown is
+      // deliberately best-effort and must not restore a disconnected account.
     }
   }
 

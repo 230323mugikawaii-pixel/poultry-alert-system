@@ -53,6 +53,7 @@ export interface MailProviderAdapter {
   }): Promise<MailOAuthGrant>;
   refreshAccessToken(refreshToken: string): Promise<RefreshedMailAccess>;
   revokeAuthorization(refreshToken: string): Promise<void>;
+  stopMailboxWatch?(refreshToken: string): Promise<void>;
   classifyProviderError(error: unknown): MailProviderErrorKind;
 }
 

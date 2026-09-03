@@ -6,6 +6,7 @@ import {
   type MailProviderErrorKind,
   type RefreshedMailAccess
 } from "../mail-provider.js";
+import { GoogleGmailApiClient } from "../gmail/gmail-api-client.js";
 
 export const GMAIL_READONLY_SCOPE =
   "https://www.googleapis.com/auth/gmail.readonly";
@@ -125,6 +126,11 @@ export class GoogleMailProvider implements MailProviderAdapter {
 
   public async revokeAuthorization(refreshToken: string): Promise<void> {
     await this.client.revokeToken(refreshToken);
+  }
+
+  public async stopMailboxWatch(refreshToken: string): Promise<void> {
+    const refreshed = await this.refreshAccessToken(refreshToken);
+    await new GoogleGmailApiClient().stopWatch(refreshed.accessToken);
   }
 
   public classifyProviderError(error: unknown): MailProviderErrorKind {
