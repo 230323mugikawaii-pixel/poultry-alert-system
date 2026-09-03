@@ -136,6 +136,13 @@ const notificationDismissalMigration = readFileSync(
   ),
   "utf8"
 );
+const prismaSchemaAlignmentMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260903000100_align_prisma_schema/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 const migration =
   baseMigration +
   gmailMigration +
@@ -151,7 +158,8 @@ const migration =
   contractChangeQuoteMigration +
   notificationTestAlertMigration +
   alertRecipientReadStateMigration +
-  notificationDismissalMigration;
+  notificationDismissalMigration +
+  prismaSchemaAlignmentMigration;
 
 const databases: PGlite[] = [];
 
@@ -277,6 +285,32 @@ describe("PostgreSQL migrations", () => {
       ) RETURNING "renewalAmountYen" AS renewal;
     `);
     expect(renewalAmount.rows).toEqual([{ renewal: 6000 }]);
+
+    const serverGeneratedUuidDefaults = await database.query<{
+      table_name: string;
+      column_default: string | null;
+    }>(`
+      SELECT table_name, column_default
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name IN ('contract_change_quotes', 'notification_tests')
+        AND column_name = 'id'
+      ORDER BY table_name;
+    `);
+    expect(serverGeneratedUuidDefaults.rows).toEqual([
+      { table_name: "contract_change_quotes", column_default: null },
+      { table_name: "notification_tests", column_default: null }
+    ]);
+
+    const alertRecipientIndex = await database.query<{ indexname: string }>(`
+      SELECT indexname
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND indexname = 'alert_recipients_member_dismissed_read_created_idx';
+    `);
+    expect(alertRecipientIndex.rows).toEqual([
+      { indexname: "alert_recipients_member_dismissed_read_created_idx" }
+    ]);
 
     const mailProviders = await database.query<{ enumlabel: string }>(`
       SELECT enumlabel

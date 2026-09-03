@@ -7,6 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "db:check-drift": "prisma migrate diff --from-config-datasource --to-schema ../api/prisma/schema.prisma --exit-code",
     "db:generate": "prisma generate --config prisma.config.ts",
     "db:migrate:deploy": "prisma migrate deploy --config prisma.config.ts",
     "db:validate": "prisma validate --config prisma.config.ts"
