@@ -5,6 +5,7 @@
   "scripts": {
     "build": "pnpm --filter @call-now/api build",
     "db:generate": "pnpm --filter @call-now/migrations db:generate",
+    "db:check-drift": "pnpm --filter @call-now/migrations db:check-drift",
     "db:migrate:deploy": "pnpm --filter @call-now/migrations db:migrate:deploy",
     "db:validate": "pnpm --filter @call-now/migrations db:validate",
     "dev:api": "pnpm --filter @call-now/api dev",

@@ -737,7 +737,7 @@ model AlertRecipient {
   @@index([userId, readAt, createdAt])
   @@index([notificationMemberId, readAt, createdAt])
   @@index([userId, dismissedAt, readAt, createdAt])
-  @@index([notificationMemberId, dismissedAt, readAt, createdAt])
+  @@index([notificationMemberId, dismissedAt, readAt, createdAt], map: "alert_recipients_member_dismissed_read_created_idx")
   @@map("alert_recipients")
 }
 

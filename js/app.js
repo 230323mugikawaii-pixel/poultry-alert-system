@@ -6196,7 +6196,6 @@ function openApp() {
     "appScreen"
   );
 
-  renderSavedKeywordList();
 
   renderTestKeywordCards();
 
@@ -6512,50 +6511,6 @@ async function performLogout() {
     top: 0,
     behavior: "smooth"
   });
-}
-
-
-/* ========================================
-   保存キーワード一覧
-======================================== */
-
-function renderSavedKeywordList() {
-  const container =
-    document.getElementById(
-      "savedKeywordList"
-    );
-
-  if (!container) {
-    return;
-  }
-
-  container.innerHTML = "";
-
-  keywords.forEach(
-    (keyword, index) => {
-      const item =
-        document.createElement(
-          "div"
-        );
-
-      item.className =
-        "saved-keyword";
-
-      item.innerHTML = `
-        <span class="saved-keyword-number">
-          ${index + 1}
-        </span>
-
-        <span>
-          ${escapeHtml(keyword)}
-        </span>
-      `;
-
-      container.appendChild(
-        item
-      );
-    }
-  );
 }
 
 

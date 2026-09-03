@@ -74,7 +74,7 @@ describe("database foundation", () => {
       "@@index([userId, dismissedAt, readAt, createdAt])"
     );
     expect(schema).toContain(
-      "@@index([notificationMemberId, dismissedAt, readAt, createdAt])"
+      '@@index([notificationMemberId, dismissedAt, readAt, createdAt], map: "alert_recipients_member_dismissed_read_created_idx")'
     );
     expect(schema).toContain("model NotificationTest {");
     expect(schema).toContain("enum NotificationTestStatus");
