@@ -25,6 +25,7 @@ import type {
 } from "../src/modules/mail/mail-provider.js";
 import { GMAIL_READONLY_SCOPE } from "../src/modules/mail/providers/google-mail-provider.js";
 import { PrismaMailConnectionRepository } from "../src/modules/mail/prisma-mail-connection-repository.js";
+import { PrismaGmailMonitoringRepository } from "../src/modules/mail/gmail/prisma-gmail-monitoring-repository.js";
 import { NotificationMemberService } from "../src/modules/notification-members/notification-member-service.js";
 import { PrismaNotificationMemberRepository } from "../src/modules/notification-members/prisma-notification-member-repository.js";
 import { LocalAesGcmTokenEncryptionProvider } from "../src/modules/mail/token-encryption.js";
@@ -2941,6 +2942,164 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     expect(JSON.stringify(audits)).not.toContain(
       "監視アカウント画面を改善してほしいです。"
     );
+  });
+
+  it("persists Gmail watch state, serializes cursor updates, enforces eligibility, and clears state on disconnect", async () => {
+    const clock = { value: new Date("2026-09-03T12:00:00.000Z") };
+    const owner = await createUser("gmail-worker-owner@example.com");
+    const team = await createServices(clock, "482760").teamService.createTeam({
+      ownerUserId: owner.id,
+      seatLimit: 0
+    });
+    const authorization = await database.mailAuthorization.create({
+      data: {
+        userId: owner.id,
+        provider: "GOOGLE",
+        providerSubject: "gmail-worker-subject",
+        email: "gmail-worker@example.com",
+        encryptedRefreshToken: "synthetic-encrypted-token",
+        encryptionProvider: "TEST",
+        encryptionKeyVersion: "test-v1",
+        grantedScopes: [GMAIL_READONLY_SCOPE],
+        status: "ACTIVE"
+      }
+    });
+    const connection = await database.mailConnection.create({
+      data: {
+        teamId: team.team.teamId,
+        mailAuthorizationId: authorization.id,
+        status: "ACTIVE",
+        keywords: ["停電", "Call Now"]
+      }
+    });
+    const repository = new PrismaGmailMonitoringRepository(database);
+    await expect(
+      repository.listWatchCandidates(
+        new Date(clock.value.getTime() + 48 * 60 * 60 * 1_000),
+        100
+      )
+    ).resolves.toHaveLength(1);
+
+    await repository.recordWatch({
+      connectionId: connection.id,
+      initialCursor: "90071992547409930000",
+      expiration: new Date("2026-09-10T00:00:00.000Z"),
+      renewedAt: clock.value
+    });
+    await repository.recordWatch({
+      connectionId: connection.id,
+      initialCursor: "90071992547409939999",
+      expiration: new Date("2026-09-11T00:00:00.000Z"),
+      renewedAt: new Date(clock.value.getTime() + 60_000)
+    });
+    await expect(
+      database.mailConnection.findUniqueOrThrow({
+        where: { id: connection.id }
+      })
+    ).resolves.toMatchObject({
+      providerCursor: "90071992547409930000",
+      providerSubscriptionExpiresAt: new Date("2026-09-11T00:00:00.000Z")
+    });
+
+    const leases = await Promise.all([
+      repository.acquireSyncLease({
+        connectionId: connection.id,
+        leaseToken: "lease-one",
+        now: clock.value,
+        expiresAt: new Date(clock.value.getTime() + 120_000)
+      }),
+      repository.acquireSyncLease({
+        connectionId: connection.id,
+        leaseToken: "lease-two",
+        now: clock.value,
+        expiresAt: new Date(clock.value.getTime() + 120_000)
+      })
+    ]);
+    const winnerIndex = leases.findIndex(Boolean);
+    expect(leases.filter(Boolean)).toHaveLength(1);
+    const leaseToken = winnerIndex === 0 ? "lease-one" : "lease-two";
+    await expect(
+      repository.advanceCursor({
+        connectionId: connection.id,
+        leaseToken,
+        cursor: "90071992547409930005",
+        now: clock.value
+      })
+    ).resolves.toBe(true);
+
+    expect(
+      await repository.acquireSyncLease({
+        connectionId: connection.id,
+        leaseToken: "lease-three",
+        now: clock.value,
+        expiresAt: new Date(clock.value.getTime() + 120_000)
+      })
+    ).not.toBeNull();
+    await repository.advanceCursor({
+      connectionId: connection.id,
+      leaseToken: "lease-three",
+      cursor: "90071992547409930001",
+      now: clock.value
+    });
+    await expect(
+      database.mailConnection.findUniqueOrThrow({
+        where: { id: connection.id }
+      })
+    ).resolves.toMatchObject({
+      providerCursor: "90071992547409930005",
+      syncLeaseToken: null,
+      syncLeaseExpiresAt: null
+    });
+
+    await database.subscription.update({
+      where: { teamId: team.team.teamId },
+      data: { status: "CANCELED" }
+    });
+    await expect(
+      repository.findEligibleByEmail("gmail-worker@example.com")
+    ).resolves.toHaveLength(0);
+    await expect(
+      new AlertService({
+        repository: new PrismaAlertRepository(database),
+        now: () => clock.value
+      }).ingest({
+        teamId: team.team.teamId,
+        sourceMailConnectionId: connection.id,
+        sourceEventId: "gmail-worker-canceled-subscription",
+        matchedKeyword: "停電",
+        detectedAt: clock.value
+      })
+    ).rejects.toMatchObject({ code: "MAIL_CONNECTION_NOT_ACTIVE" });
+    await database.subscription.update({
+      where: { teamId: team.team.teamId },
+      data: { status: "ACTIVE" }
+    });
+
+    await new PrismaMailConnectionRepository(database).disconnect({
+      teamId: team.team.teamId,
+      ownerUserId: owner.id,
+      connectionId: connection.id,
+      requestId: null,
+      now: clock.value
+    });
+    await expect(
+      database.mailConnection.findUniqueOrThrow({
+        where: { id: connection.id }
+      })
+    ).resolves.toMatchObject({
+      status: "REVOKED",
+      providerCursor: null,
+      providerSubscriptionExpiresAt: null,
+      providerSubscriptionRenewedAt: null,
+      syncLeaseToken: null,
+      syncLeaseExpiresAt: null
+    });
+    await expect(
+      repository.listWatchCandidates(
+        new Date(clock.value.getTime() + 48 * 60 * 60 * 1_000),
+        100
+      )
+    ).resolves.toHaveLength(0);
   });
 });
 

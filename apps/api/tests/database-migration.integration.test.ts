@@ -143,7 +143,14 @@ const prismaSchemaAlignmentMigration = readFileSync(
   ),
   "utf8"
 );
-const migration =
+const gmailPushMonitoringMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260903000200_gmail_push_monitoring/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const migrationBeforeGmailPush =
   baseMigration +
   gmailMigration +
   mailProviderMigration +
@@ -160,6 +167,7 @@ const migration =
   alertRecipientReadStateMigration +
   notificationDismissalMigration +
   prismaSchemaAlignmentMigration;
+const migration = migrationBeforeGmailPush + gmailPushMonitoringMigration;
 
 const databases: PGlite[] = [];
 
@@ -170,6 +178,64 @@ afterEach(async () => {
 });
 
 describe("PostgreSQL migrations", () => {
+  it("adds nullable Gmail watch state without changing existing connections", async () => {
+    const database = new PGlite();
+    databases.push(database);
+    await database.exec(migrationBeforeGmailPush);
+    await database.exec(`
+      INSERT INTO users (id, email, "updatedAt") VALUES
+        ('00000000-0000-0000-0000-000000000010', 'existing@example.com', now());
+      INSERT INTO teams (id, "publicCode", "updatedAt") VALUES
+        ('10000000-0000-0000-0000-000000000010', '582731', now());
+      INSERT INTO subscriptions (
+        id, "teamId", status, "currentTermStartedAt", "currentTermEndsAt", "updatedAt"
+      ) VALUES (
+        '20000000-0000-0000-0000-000000000010',
+        '10000000-0000-0000-0000-000000000010',
+        'ACTIVE', now(), now() + interval '1 year', now()
+      );
+      INSERT INTO mail_authorizations (
+        id, "userId", provider, "providerSubject", email, "updatedAt"
+      ) VALUES (
+        '30000000-0000-0000-0000-000000000010',
+        '00000000-0000-0000-0000-000000000010',
+        'GOOGLE', 'existing-subject', 'existing@example.com', now()
+      );
+      INSERT INTO mail_connections (
+        id, "teamId", "mailAuthorizationId", status, "updatedAt"
+      ) VALUES (
+        '40000000-0000-0000-0000-000000000010',
+        '10000000-0000-0000-0000-000000000010',
+        '30000000-0000-0000-0000-000000000010',
+        'ACTIVE', now()
+      );
+    `);
+
+    await database.exec(gmailPushMonitoringMigration);
+    const result = await database.query<{
+      providerSubscriptionExpiresAt: Date | null;
+      providerSubscriptionRenewedAt: Date | null;
+      syncLeaseToken: string | null;
+      syncLeaseExpiresAt: Date | null;
+    }>(`
+      SELECT
+        "providerSubscriptionExpiresAt",
+        "providerSubscriptionRenewedAt",
+        "syncLeaseToken",
+        "syncLeaseExpiresAt"
+      FROM mail_connections
+      WHERE id = '40000000-0000-0000-0000-000000000010';
+    `);
+    expect(result.rows).toEqual([
+      {
+        providerSubscriptionExpiresAt: null,
+        providerSubscriptionRenewedAt: null,
+        syncLeaseToken: null,
+        syncLeaseExpiresAt: null
+      }
+    ]);
+  });
+
   it("apply cleanly and enforce identity, team, and owner invariants", async () => {
     const database = new PGlite();
     databases.push(database);
@@ -260,6 +326,28 @@ describe("PostgreSQL migrations", () => {
     expect(mailTables.rows).toEqual([
       { table_name: "mail_authorizations" },
       { table_name: "mail_connections" }
+    ]);
+
+    const gmailMonitoringColumns = await database.query<{
+      column_name: string;
+    }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'mail_connections'
+        AND column_name IN (
+          'providerSubscriptionExpiresAt',
+          'providerSubscriptionRenewedAt',
+          'syncLeaseToken',
+          'syncLeaseExpiresAt'
+        )
+      ORDER BY column_name;
+    `);
+    expect(gmailMonitoringColumns.rows).toEqual([
+      { column_name: "providerSubscriptionExpiresAt" },
+      { column_name: "providerSubscriptionRenewedAt" },
+      { column_name: "syncLeaseExpiresAt" },
+      { column_name: "syncLeaseToken" }
     ]);
 
     const contractChangeTables = await database.query<{

@@ -12,6 +12,9 @@ describe("loadEnvironment", () => {
       APPLE_OAUTH_CLIENT_ID: "",
       GMAIL_OAUTH_REDIRECT_URI:
         "http://127.0.0.1:8080/api/v1/auth/gmail/callback",
+      GMAIL_PUSH_MONITORING_ENABLED: false,
+      GMAIL_WATCH_RENEW_BEFORE_HOURS: 48,
+      GMAIL_HISTORY_RECOVERY_LOOKBACK_HOURS: 72,
       MICROSOFT_OAUTH_REDIRECT_URI:
         "http://127.0.0.1:8080/api/v1/auth/mail/microsoft/callback",
       MICROSOFT_OAUTH_TENANT: "common",
@@ -85,6 +88,23 @@ describe("loadEnvironment", () => {
     expect(() =>
       loadEnvironment({ MICROSOFT_OAUTH_TENANT: "not/a/tenant" })
     ).toThrow("MICROSOFT_OAUTH_TENANT is invalid");
+  });
+
+  it("fails closed when Gmail push monitoring is enabled without authenticated Pub/Sub configuration", () => {
+    expect(() =>
+      loadEnvironment({ GMAIL_PUSH_MONITORING_ENABLED: "true" })
+    ).toThrow("GMAIL_PUBSUB_TOPIC_NAME");
+
+    expect(() =>
+      loadEnvironment({
+        GMAIL_PUSH_MONITORING_ENABLED: "true",
+        GMAIL_PUBSUB_TOPIC_NAME: "projects/call-now/topics/gmail-push",
+        GMAIL_PUBSUB_PUSH_AUDIENCE:
+          "https://api.call-now.example/api/v1/webhooks/mail/google/pubsub",
+        GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL:
+          "gmail-push@call-now.iam.gserviceaccount.com"
+      })
+    ).not.toThrow();
   });
 
   it("requires HTTPS in production", () => {

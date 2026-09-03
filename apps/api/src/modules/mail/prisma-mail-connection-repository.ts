@@ -302,6 +302,10 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
               update: {
                 status: "ACTIVE",
                 providerCursor: null,
+                providerSubscriptionExpiresAt: null,
+                providerSubscriptionRenewedAt: null,
+                syncLeaseToken: null,
+                syncLeaseExpiresAt: null,
                 lastSyncAt: null,
                 lastErrorCode: null,
                 revokedAt: null
@@ -383,6 +387,10 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
               data: {
                 status: "REVOKED",
                 providerCursor: null,
+                providerSubscriptionExpiresAt: null,
+                providerSubscriptionRenewedAt: null,
+                syncLeaseToken: null,
+                syncLeaseExpiresAt: null,
                 lastErrorCode: null,
                 revokedAt: input.now
               }

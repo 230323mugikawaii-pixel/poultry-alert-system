@@ -94,6 +94,9 @@ describe("database foundation", () => {
     expect(mailAuthorization).toContain("@@index([userId, status, revokedAt])");
     expect(mailConnection).toContain("teamId");
     expect(mailConnection).toContain("mailAuthorizationId");
+    expect(mailConnection).toContain("providerCursor");
+    expect(mailConnection).toContain("providerSubscriptionExpiresAt");
+    expect(mailConnection).toContain("syncLeaseToken");
     expect(mailConnection).toContain("@@unique([teamId, mailAuthorizationId])");
     expect(mailConnection).not.toContain("encryptedRefreshToken");
     expect(schema).toContain("GMAIL_OAUTH");

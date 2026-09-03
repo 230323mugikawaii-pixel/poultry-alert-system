@@ -11,6 +11,7 @@
     "dev:api": "pnpm --filter @call-now/api dev",
     "format:check": "pnpm --filter @call-now/api format:check",
     "lint": "pnpm --filter @call-now/api lint",
+    "mail:gmail:renew-watches": "pnpm --filter @call-now/api mail:gmail:renew-watches",
     "test": "pnpm --filter @call-now/api test",
     "test:frontend-alerts": "node --test tests/frontend-alerts.test.mjs",
     "test:frontend-auth": "node --test tests/frontend-auth-foundation.test.mjs",

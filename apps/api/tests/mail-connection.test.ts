@@ -64,6 +64,13 @@ const environment: AppEnvironment = {
   GMAIL_OAUTH_REDIRECT_URI:
     "https://api.test.call-now.example/api/v1/auth/gmail/callback",
   GMAIL_OAUTH_STATE_TTL_MINUTES: 10,
+  GMAIL_PUSH_MONITORING_ENABLED: false,
+  GMAIL_PUBSUB_TOPIC_NAME: "",
+  GMAIL_PUBSUB_PUSH_AUDIENCE: "",
+  GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL: "",
+  GMAIL_WATCH_RENEW_BEFORE_HOURS: 48,
+  GMAIL_HISTORY_RECOVERY_LOOKBACK_HOURS: 72,
+  GMAIL_PUBSUB_MAX_BODY_BYTES: 262144,
   MICROSOFT_OAUTH_CLIENT_ID: "test-microsoft-client-id",
   MICROSOFT_OAUTH_CLIENT_SECRET: "test-microsoft-client-secret",
   MICROSOFT_OAUTH_REDIRECT_URI:
@@ -103,6 +110,16 @@ describe("mail provider configuration", () => {
         {
           ...environment,
           GMAIL_OAUTH_CLIENT_ID: "development-gmail-client-id"
+        },
+        "GOOGLE"
+      )
+    ).toBe("NOT_CONFIGURED");
+    expect(
+      getMailProviderAvailability(
+        {
+          ...environment,
+          APP_ENV: "production",
+          GMAIL_PUSH_MONITORING_ENABLED: false
         },
         "GOOGLE"
       )
@@ -495,6 +512,38 @@ describe("MailConnectionService", () => {
     expect(fixture.provider.revokedTokens).toContain(
       `${syntheticRefreshToken}-rotated`
     );
+    expect(fixture.provider.stoppedWatchTokens).toContain(
+      `${syntheticRefreshToken}-rotated`
+    );
+  });
+
+  it("keeps a local disconnect successful when Gmail watch shutdown fails", async () => {
+    const fixture = createServiceFixture();
+    const started = await fixture.service.createAuthorizationRequest(
+      "owner-user-id",
+      "team-id",
+      "CONNECT",
+      "GOOGLE"
+    );
+    const connected = await fixture.service.completeAuthorization({
+      provider: "GOOGLE",
+      state: started.state,
+      code: "valid-gmail-code",
+      authenticatedUserId: "owner-user-id"
+    });
+    fixture.provider.stopWatchError = true;
+
+    await expect(
+      fixture.service.disconnect({
+        teamId: "team-id",
+        ownerUserId: "owner-user-id",
+        connectionId: connected.id
+      })
+    ).resolves.toBeUndefined();
+    expect(fixture.repository.connections.get(connected.id)).toMatchObject({
+      connectionStatus: "REVOKED"
+    });
+    expect(fixture.provider.revokedTokens).toContain(syntheticRefreshToken);
   });
 
   it("does not revoke a refresh token that remains active after reauthorization", async () => {
@@ -924,6 +973,8 @@ class FakeMailProviderAdapter implements MailProviderAdapter {
   public readonly provider;
   public refreshToken = syntheticRefreshToken;
   public readonly revokedTokens: string[] = [];
+  public readonly stoppedWatchTokens: string[] = [];
+  public stopWatchError = false;
   private nonce: string | null = null;
 
   public constructor(
@@ -1001,6 +1052,11 @@ class FakeMailProviderAdapter implements MailProviderAdapter {
 
   public async revokeAuthorization(refreshToken: string): Promise<void> {
     this.revokedTokens.push(refreshToken);
+  }
+
+  public async stopMailboxWatch(refreshToken: string): Promise<void> {
+    this.stoppedWatchTokens.push(refreshToken);
+    if (this.stopWatchError) throw new Error("synthetic_watch_stop_failure");
   }
 
   public classifyProviderError(error: unknown) {

@@ -15,6 +15,13 @@ import type { PrimaryAuthProviderAdapter } from "./modules/auth/primary-auth-pro
 import { PrimaryAuthService } from "./modules/auth/primary-auth-service.js";
 import { PrismaAuthRepository } from "./modules/auth/prisma-auth-repository.js";
 import { MailConnectionService } from "./modules/mail/mail-connection-service.js";
+import { GoogleGmailApiClient } from "./modules/mail/gmail/gmail-api-client.js";
+import {
+  GmailMonitoringService,
+  type GmailMonitoringLogger
+} from "./modules/mail/gmail/gmail-monitoring-service.js";
+import { GooglePubSubPushAuthenticator } from "./modules/mail/gmail/gmail-pubsub-authenticator.js";
+import { PrismaGmailMonitoringRepository } from "./modules/mail/gmail/prisma-gmail-monitoring-repository.js";
 import {
   getMailProviderAvailability,
   getMailProviderStatuses
@@ -123,12 +130,13 @@ const teamService = new TeamService({
   maxConfiguredSeatCount:
     environment.MAX_CONFIGURED_SEAT_COUNT ?? DEFAULT_MAX_CONFIGURED_SEAT_COUNT
 });
+const googleMailProvider = new GoogleMailProvider({
+  clientId: environment.GMAIL_OAUTH_CLIENT_ID,
+  clientSecret: environment.GMAIL_OAUTH_CLIENT_SECRET,
+  redirectUri: environment.GMAIL_OAUTH_REDIRECT_URI
+});
 const mailProviderAdapters: MailProviderAdapter[] = [
-  new GoogleMailProvider({
-    clientId: environment.GMAIL_OAUTH_CLIENT_ID,
-    clientSecret: environment.GMAIL_OAUTH_CLIENT_SECRET,
-    redirectUri: environment.GMAIL_OAUTH_REDIRECT_URI
-  }),
+  googleMailProvider,
   new MicrosoftMailProvider({
     clientId: environment.MICROSOFT_OAUTH_CLIENT_ID,
     clientSecret: environment.MICROSOFT_OAUTH_CLIENT_SECRET,
@@ -195,6 +203,44 @@ const notificationTestService = new NotificationTestService({
   repository: new PrismaNotificationTestRepository(database),
   alertService
 });
+const appLoggerReference: {
+  current?: {
+    info(data: object, message: string): unknown;
+    warn(data: object, message: string): unknown;
+  };
+} = {};
+const gmailMonitoringLogger: GmailMonitoringLogger = {
+  info: (event, metadata) =>
+    appLoggerReference.current?.info(
+      { event, ...metadata },
+      "Gmail monitoring event"
+    ),
+  warn: (event, metadata) =>
+    appLoggerReference.current?.warn(
+      { event, ...metadata },
+      "Gmail monitoring warning"
+    )
+};
+const gmailMonitoringService = environment.GMAIL_PUSH_MONITORING_ENABLED
+  ? new GmailMonitoringService({
+      repository: new PrismaGmailMonitoringRepository(database),
+      api: new GoogleGmailApiClient(),
+      googleProvider: googleMailProvider,
+      tokenEncryption,
+      alertService,
+      topicName: environment.GMAIL_PUBSUB_TOPIC_NAME,
+      renewBeforeHours: environment.GMAIL_WATCH_RENEW_BEFORE_HOURS,
+      historyRecoveryLookbackHours:
+        environment.GMAIL_HISTORY_RECOVERY_LOOKBACK_HOURS,
+      logger: gmailMonitoringLogger
+    })
+  : undefined;
+const gmailPubSubAuthenticator = environment.GMAIL_PUSH_MONITORING_ENABLED
+  ? new GooglePubSubPushAuthenticator({
+      audience: environment.GMAIL_PUBSUB_PUSH_AUDIENCE,
+      serviceAccountEmail: environment.GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL
+    })
+  : undefined;
 const userCommunicationService = new UserCommunicationService(
   new PrismaUserCommunicationRepository(database)
 );
@@ -203,6 +249,9 @@ const app = await buildApp({
   authService,
   primaryAuthService,
   mailConnectionService,
+  ...(gmailMonitoringService && gmailPubSubAuthenticator
+    ? { gmailMonitoringService, gmailPubSubAuthenticator }
+    : {}),
   teamService,
   invitationService,
   notificationMemberService,
@@ -215,6 +264,7 @@ const app = await buildApp({
     await database.$queryRaw`SELECT 1`;
   }
 });
+appLoggerReference.current = app.log;
 app.log.info(
   { mailProviders: getMailProviderStatuses(environment) },
   "Mail OAuth provider configuration status"
@@ -253,6 +303,32 @@ const notificationTestCleanupTimer = setInterval(() => {
 }, 60 * 1_000);
 notificationTestCleanupTimer.unref();
 app.addHook("onClose", async () => clearInterval(notificationTestCleanupTimer));
+
+let gmailWatchRenewalTimer: NodeJS.Timeout | undefined;
+if (gmailMonitoringService) {
+  const renewGmailWatches = (): void => {
+    void gmailMonitoringService
+      .renewEligibleWatches()
+      .then((result) => {
+        app.log.info(
+          { event: "gmail_watch_reconciliation_completed", ...result },
+          "Gmail watch reconciliation completed"
+        );
+      })
+      .catch(() => {
+        app.log.warn(
+          { event: "gmail_watch_reconciliation_failed" },
+          "Gmail watch reconciliation failed"
+        );
+      });
+  };
+  gmailWatchRenewalTimer = setInterval(renewGmailWatches, 60 * 1_000);
+  gmailWatchRenewalTimer.unref();
+  setImmediate(renewGmailWatches);
+}
+app.addHook("onClose", async () => {
+  if (gmailWatchRenewalTimer) clearInterval(gmailWatchRenewalTimer);
+});
 
 const shutdown = async (signal: string): Promise<void> => {
   app.log.info({ signal }, "Shutting down");
