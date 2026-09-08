@@ -595,6 +595,7 @@ model MailAuthorization {
   onboardingChoices     OnboardingMailChoice[]
 
   @@unique([provider, providerSubject])
+  @@unique([id, provider])
   @@index([userId, status, revokedAt])
   @@index([status, revokedAt])
   @@map("mail_authorizations")
@@ -643,6 +644,7 @@ model MailConnection {
   id                   String                @id @default(uuid()) @db.Uuid
   teamId               String                @db.Uuid
   mailAuthorizationId  String                @db.Uuid
+  provider             MailProvider
   status               MailConnectionStatus  @default(ACTIVE)
   keywords             String[]              @default([])
   providerCursor       String?               @db.VarChar(2048)
@@ -656,12 +658,13 @@ model MailConnection {
   updatedAt            DateTime              @updatedAt @db.Timestamptz(3)
   revokedAt            DateTime?             @db.Timestamptz(3)
   team                 Team                  @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  mailAuthorization    MailAuthorization     @relation(fields: [mailAuthorizationId], references: [id], onDelete: Restrict)
+  mailAuthorization    MailAuthorization     @relation(fields: [mailAuthorizationId, provider], references: [id, provider], onDelete: Restrict)
   alerts               Alert[]
   notificationTests    NotificationTest[]
 
   @@unique([teamId, mailAuthorizationId])
   @@index([teamId, status])
+  @@index([teamId, provider, status])
   @@index([mailAuthorizationId, status])
   @@index([status, providerSubscriptionExpiresAt])
   @@index([syncLeaseExpiresAt])

@@ -158,7 +158,14 @@ const mailConnectionService = new MailConnectionService({
   stateTtlMinutes: {
     GOOGLE: environment.GMAIL_OAUTH_STATE_TTL_MINUTES,
     MICROSOFT: environment.MICROSOFT_OAUTH_STATE_TTL_MINUTES
-  }
+  },
+  ...(environment.GMAIL_PUSH_MONITORING_ENABLED
+    ? {
+        monitoringTopics: {
+          GOOGLE: environment.GMAIL_PUBSUB_TOPIC_NAME
+        }
+      }
+    : {})
 });
 const ownerOnboardingService = new OwnerOnboardingService({
   repository: new PrismaOwnerOnboardingRepository(database),

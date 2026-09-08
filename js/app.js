@@ -3455,7 +3455,7 @@ function renderMailMonitoringAccount() {
 
   status.innerHTML = `
     <p class="connected-account-summary">
-      ${mailConnections.length}件接続中
+      ${mailConnections.length}件の監視アカウントを接続済み
     </p>
     <div class="mail-connection-list">
       ${mailConnections.map(renderMailConnectionItem).join("")}
@@ -3486,6 +3486,11 @@ function renderMailConnectionItem(connection) {
     ] !== "AVAILABLE";
   const isPaused =
     connection.connectionStatus === "PAUSED";
+  const monitoringStateClass = requiresReauthorization
+    ? "requires-reauthorization"
+    : isPaused
+      ? "paused"
+      : "active";
   return `
     <article class="mail-connection-item">
       <div>
@@ -3495,12 +3500,12 @@ function renderMailConnectionItem(connection) {
         <p class="connected-account-email">
           ${escapeHtml(connection.email)}
         </p>
-        <p class="connected-account-empty">
+        <p class="mail-monitoring-state ${monitoringStateClass}">
           ${requiresReauthorization
-            ? "再認証が必要です"
+            ? "● 再認証が必要です"
             : isPaused
-              ? "監視停止中"
-              : "監視接続中"}
+              ? "● 監視停止中"
+              : "● 監視中"}
         </p>
       </div>
       <div class="mail-account-actions">
@@ -3517,7 +3522,7 @@ function renderMailConnectionItem(connection) {
             type="button"
             class="btn outline"
             onclick="setMailMonitoringState('${connection.id}', '${isPaused ? "resume" : "pause"}')"
-          >${isPaused ? "監視を開始" : "監視を停止"}</button>
+          >${isPaused ? "このアカウントで監視を開始" : "監視を停止"}</button>
         ` : ""}
         <button
           type="button"
@@ -3965,15 +3970,21 @@ function renderContractSettings() {
       const status =
         document.createElement("span");
       status.className =
-        "contract-provider-status";
+        `contract-provider-status ${
+          connection.connectionStatus === "ACTIVE"
+            ? "active"
+            : connection.connectionStatus === "PAUSED"
+              ? "paused"
+              : "requires-reauthorization"
+        }`;
       status.textContent =
         connection.connectionStatus ===
         "ACTIVE"
-          ? "監視中"
+          ? "● 監視中"
           : connection.connectionStatus ===
               "PAUSED"
-            ? "停止中"
-            : "再設定が必要";
+            ? "● 監視停止中"
+            : "● 再設定が必要";
       heading.append(title, status);
 
       const label =

@@ -40,6 +40,16 @@ export interface MailDisconnectResult {
   readonly tokenToRevoke: ProviderToken | null;
 }
 
+export interface MailMonitoringActivationTarget {
+  readonly connection: MailConnectionRecord;
+  readonly credential: ProviderToken;
+}
+
+export interface MailMonitoringStateResult {
+  readonly connection: MailConnectionRecord;
+  readonly tokensToStop: readonly ProviderToken[];
+}
+
 export interface ProviderToken {
   readonly provider: MailProviderId;
   readonly token: StoredEncryptedToken;
@@ -82,6 +92,7 @@ export interface MailConnectionRepository {
     readonly grantedScopes: readonly string[];
     readonly intent: MailOAuthIntent;
     readonly connectionId: string | null;
+    readonly deferActivation: boolean;
     readonly requestId: string | null;
     readonly now: Date;
   }): Promise<MailGrantPersistenceResult>;
@@ -92,14 +103,24 @@ export interface MailConnectionRepository {
     readonly requestId: string | null;
     readonly now: Date;
   }): Promise<MailDisconnectResult>;
+  getMonitoringActivationTarget(input: {
+    readonly teamId: string;
+    readonly ownerUserId: string;
+    readonly connectionId: string;
+  }): Promise<MailMonitoringActivationTarget>;
   setMonitoringState(input: {
     readonly teamId: string;
     readonly ownerUserId: string;
     readonly connectionId: string;
     readonly status: "ACTIVE" | "PAUSED";
+    readonly watch: {
+      readonly providerCursor: string;
+      readonly expiration: Date;
+      readonly renewedAt: Date;
+    } | null;
     readonly requestId: string | null;
     readonly now: Date;
-  }): Promise<MailConnectionRecord>;
+  }): Promise<MailMonitoringStateResult>;
   markAuthorizationFailure(input: {
     readonly authorizationId: string;
     readonly status: "REAUTH_REQUIRED" | "ERROR";

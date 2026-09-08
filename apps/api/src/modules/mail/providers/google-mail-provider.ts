@@ -128,6 +128,21 @@ export class GoogleMailProvider implements MailProviderAdapter {
     await this.client.revokeToken(refreshToken);
   }
 
+  public async startMailboxWatch(
+    refreshToken: string,
+    topicName: string
+  ): Promise<{ readonly providerCursor: string; readonly expiration: Date }> {
+    const refreshed = await this.refreshAccessToken(refreshToken);
+    const watch = await new GoogleGmailApiClient().startWatch(
+      refreshed.accessToken,
+      topicName
+    );
+    return {
+      providerCursor: watch.historyId,
+      expiration: watch.expiration
+    };
+  }
+
   public async stopMailboxWatch(refreshToken: string): Promise<void> {
     const refreshed = await this.refreshAccessToken(refreshToken);
     await new GoogleGmailApiClient().stopWatch(refreshed.accessToken);

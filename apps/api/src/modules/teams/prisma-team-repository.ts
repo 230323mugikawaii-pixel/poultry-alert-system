@@ -1178,10 +1178,12 @@ async function activatePurchasedMonitoringChoices(
       create: {
         teamId: input.teamId,
         mailAuthorizationId: choice.mailAuthorizationId,
+        provider: choice.provider,
         status: "ACTIVE",
         keywords: [...choice.keywords]
       },
       update: {
+        provider: choice.provider,
         status: "ACTIVE",
         keywords: [...choice.keywords],
         providerCursor: null,

@@ -8,6 +8,7 @@ import type {
 } from "./gmail-monitoring-repository.js";
 
 const eligibleWhere = {
+  provider: "GOOGLE" as const,
   status: "ACTIVE" as const,
   team: {
     status: "ACTIVE" as const,
@@ -175,6 +176,7 @@ export class PrismaGmailMonitoringRepository implements GmailMonitoringRepositor
         JOIN teams AS team ON team.id = connection."teamId"
         JOIN subscriptions AS subscription ON subscription."teamId" = team.id
         WHERE connection.id = ${input.connectionId}::uuid
+          AND connection.provider = 'GOOGLE'
           AND connection.status = 'ACTIVE'
           AND mail_authorization.provider = 'GOOGLE'
           AND mail_authorization.status = 'ACTIVE'

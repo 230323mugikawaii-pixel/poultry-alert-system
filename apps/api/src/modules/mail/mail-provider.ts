@@ -39,6 +39,11 @@ export interface RefreshedMailAccess {
   readonly rotatedRefreshToken: string | null;
 }
 
+export interface MailboxWatchStart {
+  readonly providerCursor: string;
+  readonly expiration: Date;
+}
+
 export interface MailProviderAdapter {
   readonly provider: MailProviderId;
   createAuthorizationUrl(input: {
@@ -53,6 +58,10 @@ export interface MailProviderAdapter {
   }): Promise<MailOAuthGrant>;
   refreshAccessToken(refreshToken: string): Promise<RefreshedMailAccess>;
   revokeAuthorization(refreshToken: string): Promise<void>;
+  startMailboxWatch?(
+    refreshToken: string,
+    topicName: string
+  ): Promise<MailboxWatchStart>;
   stopMailboxWatch?(refreshToken: string): Promise<void>;
   classifyProviderError(error: unknown): MailProviderErrorKind;
 }

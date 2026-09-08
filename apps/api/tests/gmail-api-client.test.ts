@@ -52,6 +52,23 @@ describe("Google Gmail API client", () => {
     expect(wait).toHaveBeenCalledTimes(2);
   });
 
+  it("stops only the selected mailbox watch through users.stop", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const client = new GoogleGmailApiClient({ fetch: fetcher });
+
+    await client.stopWatch("synthetic-access-token");
+
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(url).toBe("https://gmail.googleapis.com/gmail/v1/users/me/stop");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe("{}");
+    expect(new Headers(init?.headers).get("authorization")).toBe(
+      "Bearer synthetic-access-token"
+    );
+  });
+
   it("does not retry a stale-history 404 so recovery can run", async () => {
     const fetcher = vi.fn().mockResolvedValue(jsonResponse({}, 404));
     const client = new GoogleGmailApiClient({ fetch: fetcher });

@@ -150,6 +150,13 @@ const gmailPushMonitoringMigration = readFileSync(
   ),
   "utf8"
 );
+const singleActiveGoogleMonitoringMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260908000100_single_active_google_monitoring/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 const migrationBeforeGmailPush =
   baseMigration +
   gmailMigration +
@@ -167,7 +174,10 @@ const migrationBeforeGmailPush =
   alertRecipientReadStateMigration +
   notificationDismissalMigration +
   prismaSchemaAlignmentMigration;
-const migration = migrationBeforeGmailPush + gmailPushMonitoringMigration;
+const migrationBeforeSingleActiveGoogle =
+  migrationBeforeGmailPush + gmailPushMonitoringMigration;
+const migration =
+  migrationBeforeSingleActiveGoogle + singleActiveGoogleMonitoringMigration;
 
 const databases: PGlite[] = [];
 
@@ -178,6 +188,61 @@ afterEach(async () => {
 });
 
 describe("PostgreSQL migrations", () => {
+  it("pauses duplicate active Google connections without deleting their authorization", async () => {
+    const database = new PGlite();
+    databases.push(database);
+    await database.exec(migrationBeforeSingleActiveGoogle);
+    await database.exec(`
+      INSERT INTO users (id, email, "updatedAt") VALUES
+        ('00000000-0000-0000-0000-000000000020', 'switch-owner@example.com', now());
+      INSERT INTO teams (id, "publicCode", "updatedAt") VALUES
+        ('10000000-0000-0000-0000-000000000020', '682731', now());
+      INSERT INTO mail_authorizations (
+        id, "userId", provider, "providerSubject", email, "updatedAt"
+      ) VALUES
+        ('30000000-0000-0000-0000-000000000020',
+         '00000000-0000-0000-0000-000000000020',
+         'GOOGLE', 'switch-subject-a', 'switch-a@example.com', now()),
+        ('30000000-0000-0000-0000-000000000021',
+         '00000000-0000-0000-0000-000000000020',
+         'GOOGLE', 'switch-subject-b', 'switch-b@example.com', now());
+      INSERT INTO mail_connections (
+        id, "teamId", "mailAuthorizationId", status, "updatedAt"
+      ) VALUES
+        ('40000000-0000-0000-0000-000000000020',
+         '10000000-0000-0000-0000-000000000020',
+         '30000000-0000-0000-0000-000000000020', 'ACTIVE', now()),
+        ('40000000-0000-0000-0000-000000000021',
+         '10000000-0000-0000-0000-000000000020',
+         '30000000-0000-0000-0000-000000000021', 'ACTIVE', now());
+    `);
+
+    await database.exec(singleActiveGoogleMonitoringMigration);
+    const connections = await database.query<{
+      status: string;
+      provider: string;
+    }>(`
+      SELECT status, provider
+      FROM mail_connections
+      ORDER BY id;
+    `);
+    expect(connections.rows).toEqual([
+      { status: "PAUSED", provider: "GOOGLE" },
+      { status: "ACTIVE", provider: "GOOGLE" }
+    ]);
+    const authorizations = await database.query<{ count: number }>(`
+      SELECT COUNT(*)::integer AS count FROM mail_authorizations;
+    `);
+    expect(authorizations.rows).toEqual([{ count: 2 }]);
+    await expect(
+      database.exec(`
+        UPDATE mail_connections
+        SET status = 'ACTIVE'
+        WHERE id = '40000000-0000-0000-0000-000000000020';
+      `)
+    ).rejects.toThrow();
+  });
+
   it("adds nullable Gmail watch state without changing existing connections", async () => {
     const database = new PGlite();
     databases.push(database);
@@ -555,12 +620,12 @@ describe("PostgreSQL migrations", () => {
         'ACTIVE', now()
       );
       INSERT INTO mail_connections (
-        id, "teamId", "mailAuthorizationId", status, "updatedAt"
+        id, "teamId", "mailAuthorizationId", provider, status, "updatedAt"
       ) VALUES (
         '50000000-0000-0000-0000-000000000001',
         '10000000-0000-0000-0000-000000000001',
         '40000000-0000-0000-0000-000000000001',
-        'ACTIVE', now()
+        'GOOGLE', 'ACTIVE', now()
       );
     `);
     const separatedIdentities = await database.query<{

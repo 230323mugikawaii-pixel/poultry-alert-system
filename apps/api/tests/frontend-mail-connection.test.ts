@@ -9,6 +9,10 @@ const script = readFileSync(
   new URL("../../../js/app.js", import.meta.url),
   "utf8"
 );
+const stylesheet = readFileSync(
+  new URL("../../../css/style.css", import.meta.url),
+  "utf8"
+);
 const frontend = `${html}\n${script}`;
 
 describe("frontend mail connection boundary", () => {
@@ -68,5 +72,19 @@ describe("frontend mail connection boundary", () => {
     expect(script).toContain("disconnectMailConnection('${connection.id}')");
     expect(script).toContain("reauthorizeMailConnection('${connection.id}'");
     expect(frontend).not.toContain("接続先を変更");
+    expect(script).toContain("● 監視中");
+    expect(script).toContain("● 監視停止中");
+    expect(script).toContain("このアカウントで監視を開始");
+    expect(script).toContain("監視を停止");
+    expect(script).toContain("接続を解除");
+    expect(script).toContain(
+      'class="mail-monitoring-state ${monitoringStateClass}"'
+    );
+    expect(stylesheet).toMatch(
+      /\.mail-monitoring-state\.active\s*\{[^}]*var\(--color-success\)/su
+    );
+    expect(stylesheet).toMatch(
+      /\.mail-monitoring-state\.paused,[^{]*\{[^}]*var\(--color-danger\)/su
+    );
   });
 });

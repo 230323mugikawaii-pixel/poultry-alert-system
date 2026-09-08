@@ -707,6 +707,20 @@ textarea[aria-invalid="true"] {
   margin: 0 0 4px;
 }
 
+.mail-monitoring-state {
+  margin-top: 8px;
+  font-weight: 900;
+}
+
+.mail-monitoring-state.active {
+  color: var(--color-success);
+}
+
+.mail-monitoring-state.paused,
+.mail-monitoring-state.requires-reauthorization {
+  color: var(--color-danger);
+}
+
 .mail-connection-item .mail-account-actions {
   flex: 0 0 auto;
 }
@@ -1430,6 +1444,17 @@ textarea[aria-invalid="true"] {
   background: #e6f1ff;
   font-size: 0.86rem;
   font-weight: 900;
+}
+
+.contract-provider-status.active {
+  color: var(--color-success);
+  background: var(--color-success-soft);
+}
+
+.contract-provider-status.paused,
+.contract-provider-status.requires-reauthorization {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
 }
 
 .contract-provider-card h4 {
