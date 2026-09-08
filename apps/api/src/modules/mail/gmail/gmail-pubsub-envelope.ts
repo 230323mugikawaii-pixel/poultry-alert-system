@@ -19,13 +19,27 @@ export function parseGmailPubSubEnvelope(
   ]);
   const message = strictRecord(envelope.message, [
     "messageId",
+    "message_id",
     "data",
     "publishTime",
+    "publish_time",
     "attributes",
     "orderingKey"
   ]);
-  const messageId = boundedString(message.messageId, 1, 255);
-  const publishTimeValue = boundedString(message.publishTime, 1, 64);
+  const messageId = boundedAliasedString(
+    message,
+    "messageId",
+    "message_id",
+    1,
+    255
+  );
+  const publishTimeValue = boundedAliasedString(
+    message,
+    "publishTime",
+    "publish_time",
+    1,
+    64
+  );
   const encodedData = boundedString(message.data, 1, 16_384);
   if (/[^\x20-\x7e]/u.test(messageId)) throw invalidEnvelope();
   const publishTime = new Date(publishTimeValue);
@@ -42,7 +56,7 @@ export function parseGmailPubSubEnvelope(
   const emailAddress = boundedString(data.emailAddress, 3, 320)
     .trim()
     .toLowerCase();
-  const historyId = boundedString(data.historyId, 1, 64);
+  const historyId = boundedDecimalString(data.historyId, 1, 64);
   if (
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(emailAddress) ||
     !/^\d+$/u.test(historyId)
@@ -95,6 +109,40 @@ function boundedString(
     throw invalidEnvelope();
   }
   return value;
+}
+
+function boundedAliasedString(
+  record: Record<string, unknown>,
+  primaryKey: string,
+  aliasKey: string,
+  minimumLength: number,
+  maximumLength: number
+): string {
+  const primaryValue = record[primaryKey];
+  const aliasValue = record[aliasKey];
+  if (
+    primaryValue !== undefined &&
+    aliasValue !== undefined &&
+    primaryValue !== aliasValue
+  ) {
+    throw invalidEnvelope();
+  }
+  return boundedString(
+    primaryValue ?? aliasValue,
+    minimumLength,
+    maximumLength
+  );
+}
+
+function boundedDecimalString(
+  value: unknown,
+  minimumLength: number,
+  maximumLength: number
+): string {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+    return boundedString(String(value), minimumLength, maximumLength);
+  }
+  return boundedString(value, minimumLength, maximumLength);
 }
 
 function invalidEnvelope(): AppError {

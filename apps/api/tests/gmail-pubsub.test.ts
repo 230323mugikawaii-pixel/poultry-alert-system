@@ -102,6 +102,22 @@ describe("Pub/Sub envelope", () => {
     });
   });
 
+  it("accepts the aliases included by wrapped Pub/Sub push delivery", () => {
+    expect(
+      parseGmailPubSubEnvelope(envelopeWithPubSubAliases(9_876_543_210))
+    ).toMatchObject({
+      messageId: "pubsub-message-1",
+      emailAddress: "monitor@example.com",
+      historyId: "9876543210"
+    });
+  });
+
+  it("rejects conflicting Pub/Sub aliases", () => {
+    const value = envelopeWithPubSubAliases();
+    value.message.message_id = "different-message";
+    expect(() => parseGmailPubSubEnvelope(value)).toThrow();
+  });
+
   it.each([
     ["invalid base64", envelope("not@base64")],
     ["invalid JSON", envelope(Buffer.from("{").toString("base64"))],
@@ -125,6 +141,7 @@ describe("Pub/Sub envelope", () => {
       "oversized decoded payload",
       envelope(Buffer.alloc(8_193, 1).toString("base64"))
     ],
+    ["unsafe numeric history", envelopeForHistoryId(Number.MAX_VALUE)],
     ["unknown envelope property", { ...envelope(), unexpected: true }]
   ])("rejects %s", (_name, value) => {
     expect(() => parseGmailPubSubEnvelope(value)).toThrow();
@@ -297,4 +314,24 @@ function envelope(data?: string) {
     },
     subscription: "projects/call-now/subscriptions/gmail-push"
   };
+}
+
+function envelopeWithPubSubAliases(historyId: string | number = "10") {
+  const value = envelopeForHistoryId(historyId);
+  return {
+    ...value,
+    message: {
+      ...value.message,
+      message_id: value.message.messageId,
+      publish_time: value.message.publishTime
+    }
+  };
+}
+
+function envelopeForHistoryId(historyId: string | number) {
+  return envelope(
+    Buffer.from(
+      JSON.stringify({ emailAddress: "MONITOR@example.com", historyId })
+    ).toString("base64")
+  );
 }
