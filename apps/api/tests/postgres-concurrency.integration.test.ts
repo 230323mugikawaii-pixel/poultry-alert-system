@@ -2250,9 +2250,32 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       team.team.teamId,
       "notification-test-google-subject"
     );
-    await database.mailConnection.update({
-      where: { id: connection.id },
-      data: { keywords: ["停電のお知らせ", "システム障害"] }
+    await database.teamKeyword.createMany({
+      data: ["停電のお知らせ", "システム障害"].map((keyword, sortOrder) => ({
+        teamId: team.team.teamId,
+        keyword,
+        normalized: keyword.normalize("NFKC").toLocaleLowerCase("ja-JP"),
+        sortOrder
+      }))
+    });
+    const pausedAuthorization = await database.mailAuthorization.create({
+      data: {
+        userId: owner.id,
+        provider: "GOOGLE",
+        providerSubject: "notification-test-paused-google-subject",
+        email: "notification-test-paused@example.com",
+        grantedScopes: [GMAIL_READONLY_SCOPE],
+        status: "ACTIVE"
+      }
+    });
+    const pausedConnection = await database.mailConnection.create({
+      data: {
+        teamId: team.team.teamId,
+        mailAuthorizationId: pausedAuthorization.id,
+        provider: "GOOGLE",
+        status: "PAUSED",
+        keywords: ["停電のお知らせ", "システム障害"]
+      }
     });
     const repository = new PrismaNotificationTestRepository(database);
     const alertService = new AlertService({
@@ -2271,13 +2294,17 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     const started = await service.start({
       teamId: team.team.teamId,
       actorUserId: owner.id,
-      sourceMailConnectionId: connection.id,
       keyword: "停電のお知らせ"
     });
     expect(started).toMatchObject({
       created: true,
-      test: { status: "PENDING", requestId: "test-request-1" }
+      test: {
+        sourceMailConnectionId: connection.id,
+        status: "PENDING",
+        requestId: "test-request-1"
+      }
     });
+    expect(started.test.sourceMailConnectionId).not.toBe(pausedConnection.id);
     await expect(
       service.confirm({
         teamId: team.team.teamId,
@@ -2406,7 +2433,6 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     const expiring = await service.start({
       teamId: team.team.teamId,
       actorUserId: owner.id,
-      sourceMailConnectionId: connection.id,
       keyword: "システム障害"
     });
     clock.value = new Date(clock.value.getTime() + 181_000);
@@ -2429,6 +2455,40 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
         select: { status: true, alertId: true }
       })
     ).resolves.toEqual({ status: "EXPIRED", alertId: null });
+
+    await database.mailConnection.update({
+      where: { id: connection.id },
+      data: { status: "PAUSED" }
+    });
+    const microsoftAuthorization = await database.mailAuthorization.create({
+      data: {
+        userId: owner.id,
+        provider: "MICROSOFT",
+        providerSubject: "notification-test-microsoft-subject",
+        email: "notification-test-microsoft@example.com",
+        grantedScopes: ["Mail.Read"],
+        status: "ACTIVE"
+      }
+    });
+    await database.mailConnection.create({
+      data: {
+        teamId: team.team.teamId,
+        mailAuthorizationId: microsoftAuthorization.id,
+        provider: "MICROSOFT",
+        status: "ACTIVE",
+        keywords: ["停電のお知らせ"]
+      }
+    });
+    await expect(
+      service.start({
+        teamId: team.team.teamId,
+        actorUserId: owner.id,
+        keyword: "停電のお知らせ"
+      })
+    ).rejects.toMatchObject({
+      code: "MAIL_CONNECTION_NOT_ACTIVE",
+      statusCode: 409
+    });
   });
 
   it("keeps recipient reads independent and preserves legacy acknowledgement", async () => {

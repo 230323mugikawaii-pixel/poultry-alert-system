@@ -7795,8 +7795,6 @@ async function testNotification(keyword, button) {
       return;
     }
 
-    const connection =
-      findNotificationTestConnection(keyword);
     if (!currentTeam || currentTeam.role !== "OWNER") {
       setText(
         "notificationTestError",
@@ -7804,14 +7802,6 @@ async function testNotification(keyword, button) {
       );
       return;
     }
-    if (!connection) {
-      setText(
-        "notificationTestError",
-        "このキーワードを監視している有効なメールアカウントがありません。"
-      );
-      return;
-    }
-
     testButtons.forEach((testButton) => {
       testButton.dataset.originalText =
         testButton.textContent.trim();
@@ -7822,7 +7812,6 @@ async function testNotification(keyword, button) {
     });
 
     serverTest = await startServerNotificationTest(
-      connection.id,
       keyword
     );
 
@@ -7933,33 +7922,7 @@ async function testNotification(keyword, button) {
   }
 }
 
-function findNotificationTestConnection(keyword) {
-  const normalizedKeyword =
-    keyword
-      .trim()
-      .replace(/[ \u00a0\u3000]+/gu, " ")
-      .normalize("NFKC")
-      .toLocaleLowerCase("ja-JP");
-  return mailConnections.find(
-    (connection) =>
-      connection.connectionStatus === "ACTIVE" &&
-      connection.authorizationStatus === "ACTIVE" &&
-      connection.keywords.some(
-        (candidate) =>
-          candidate
-            .trim()
-            .replace(/[ \u00a0\u3000]+/gu, " ")
-            .normalize("NFKC")
-            .toLocaleLowerCase("ja-JP") ===
-          normalizedKeyword
-      )
-  ) || null;
-}
-
-async function startServerNotificationTest(
-  mailConnectionId,
-  keyword
-) {
+async function startServerNotificationTest(keyword) {
   const response = await fetch(
     apiUrl(
       `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/notification-tests`
@@ -7972,7 +7935,6 @@ async function startServerNotificationTest(
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        mailConnectionId,
         keyword
       })
     }

@@ -87,4 +87,17 @@ describe("frontend mail connection boundary", () => {
       /\.mail-monitoring-state\.paused,[^{]*\{[^}]*var\(--color-danger\)/su
     );
   });
+
+  it("lets the server select the current active Google connection for notification tests", () => {
+    const notificationTest = script.slice(
+      script.indexOf("async function testNotification("),
+      script.indexOf("async function confirmServerNotificationTest(")
+    );
+    expect(notificationTest).toContain("startServerNotificationTest(");
+    expect(notificationTest).toContain(
+      "body: JSON.stringify({\n        keyword"
+    );
+    expect(notificationTest).not.toContain("findNotificationTestConnection");
+    expect(notificationTest).not.toContain("mailConnectionId");
+  });
 });
