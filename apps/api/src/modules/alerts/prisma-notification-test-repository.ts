@@ -360,7 +360,7 @@ async function requireEligibleConnection(
     readonly now: Date;
   }
 ): Promise<string> {
-  const [subscription, connection, teamKeyword] = await Promise.all([
+  const [subscription, connection] = await Promise.all([
     transaction.subscription.findFirst({
       where: {
         teamId: input.teamId,
@@ -380,16 +380,7 @@ async function requireEligibleConnection(
         mailAuthorization: { provider: "GOOGLE", status: "ACTIVE" }
       },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      select: { id: true }
-    }),
-    transaction.teamKeyword.findUnique({
-      where: {
-        teamId_normalized: {
-          teamId: input.teamId,
-          normalized: comparableKeyword(input.keyword)
-        }
-      },
-      select: { id: true }
+      select: { id: true, keywords: true }
     })
   ]);
   if (!subscription) {
@@ -406,10 +397,15 @@ async function requireEligibleConnection(
       409
     );
   }
-  if (!teamKeyword) {
+  if (
+    !connection.keywords.some(
+      (keyword) =>
+        comparableKeyword(keyword) === comparableKeyword(input.keyword)
+    )
+  ) {
     throw new AppError(
       "NOTIFICATION_TEST_KEYWORD_NOT_CONFIGURED",
-      "この通知キーワードは契約に設定されていません。",
+      "この通知キーワードは現在監視中のGoogleアカウントに設定されていません。",
       409
     );
   }

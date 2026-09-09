@@ -157,6 +157,13 @@ const singleActiveGoogleMonitoringMigration = readFileSync(
   ),
   "utf8"
 );
+const mailConnectionKeywordBackfillMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260909000100_backfill_mail_connection_keywords/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 const migrationBeforeGmailPush =
   baseMigration +
   gmailMigration +
@@ -176,8 +183,11 @@ const migrationBeforeGmailPush =
   prismaSchemaAlignmentMigration;
 const migrationBeforeSingleActiveGoogle =
   migrationBeforeGmailPush + gmailPushMonitoringMigration;
-const migration =
+const migrationBeforeMailConnectionKeywordBackfill =
   migrationBeforeSingleActiveGoogle + singleActiveGoogleMonitoringMigration;
+const migration =
+  migrationBeforeMailConnectionKeywordBackfill +
+  mailConnectionKeywordBackfillMigration;
 
 const databases: PGlite[] = [];
 
@@ -241,6 +251,98 @@ describe("PostgreSQL migrations", () => {
         WHERE id = '40000000-0000-0000-0000-000000000020';
       `)
     ).rejects.toThrow();
+  });
+
+  it("backfills only empty connected account keyword sets and preserves existing data", async () => {
+    const database = new PGlite();
+    databases.push(database);
+    await database.exec(migrationBeforeMailConnectionKeywordBackfill);
+    await database.exec(`
+      INSERT INTO users (id, email, "updatedAt") VALUES
+        ('00000000-0000-0000-0000-000000000030', 'keyword-owner@example.com', now());
+      INSERT INTO teams (id, "publicCode", "updatedAt") VALUES
+        ('10000000-0000-0000-0000-000000000030', '782731', now());
+      INSERT INTO team_keywords (
+        id, "teamId", keyword, normalized, "sortOrder"
+      ) VALUES
+        ('20000000-0000-0000-0000-000000000030',
+         '10000000-0000-0000-0000-000000000030',
+         '停電', '停電', 0),
+        ('20000000-0000-0000-0000-000000000031',
+         '10000000-0000-0000-0000-000000000030',
+         '通電', '通電', 1);
+      INSERT INTO mail_authorizations (
+        id, "userId", provider, "providerSubject", email, "updatedAt"
+      ) VALUES
+        ('30000000-0000-0000-0000-000000000030',
+         '00000000-0000-0000-0000-000000000030',
+         'GOOGLE', 'keyword-subject-active', 'active@example.com', now()),
+        ('30000000-0000-0000-0000-000000000031',
+         '00000000-0000-0000-0000-000000000030',
+         'GOOGLE', 'keyword-subject-paused-empty', 'paused-empty@example.com', now()),
+        ('30000000-0000-0000-0000-000000000032',
+         '00000000-0000-0000-0000-000000000030',
+         'GOOGLE', 'keyword-subject-paused-custom', 'paused-custom@example.com', now()),
+        ('30000000-0000-0000-0000-000000000033',
+         '00000000-0000-0000-0000-000000000030',
+         'GOOGLE', 'keyword-subject-revoked', 'revoked@example.com', now());
+      INSERT INTO mail_connections (
+        id, "teamId", "mailAuthorizationId", provider, status, keywords, "updatedAt"
+      ) VALUES
+        ('40000000-0000-0000-0000-000000000030',
+         '10000000-0000-0000-0000-000000000030',
+         '30000000-0000-0000-0000-000000000030', 'GOOGLE', 'ACTIVE', ARRAY[]::TEXT[], now()),
+        ('40000000-0000-0000-0000-000000000031',
+         '10000000-0000-0000-0000-000000000030',
+         '30000000-0000-0000-0000-000000000031', 'GOOGLE', 'PAUSED', ARRAY[]::TEXT[], now()),
+        ('40000000-0000-0000-0000-000000000032',
+         '10000000-0000-0000-0000-000000000030',
+         '30000000-0000-0000-0000-000000000032', 'GOOGLE', 'PAUSED', ARRAY['固有語'], now()),
+        ('40000000-0000-0000-0000-000000000033',
+         '10000000-0000-0000-0000-000000000030',
+         '30000000-0000-0000-0000-000000000033', 'GOOGLE', 'REVOKED', ARRAY[]::TEXT[], now());
+    `);
+
+    await database.exec(mailConnectionKeywordBackfillMigration);
+
+    const connections = await database.query<{
+      id: string;
+      keywords: string[];
+    }>(`
+      SELECT id, keywords
+      FROM mail_connections
+      ORDER BY id;
+    `);
+    expect(connections.rows).toEqual([
+      {
+        id: "40000000-0000-0000-0000-000000000030",
+        keywords: ["停電", "通電"]
+      },
+      {
+        id: "40000000-0000-0000-0000-000000000031",
+        keywords: ["停電", "通電"]
+      },
+      {
+        id: "40000000-0000-0000-0000-000000000032",
+        keywords: ["固有語"]
+      },
+      {
+        id: "40000000-0000-0000-0000-000000000033",
+        keywords: []
+      }
+    ]);
+    const teamKeywords = await database.query<{
+      keyword: string;
+      sortOrder: number;
+    }>(`
+      SELECT keyword, "sortOrder"
+      FROM team_keywords
+      ORDER BY "sortOrder";
+    `);
+    expect(teamKeywords.rows).toEqual([
+      { keyword: "停電", sortOrder: 0 },
+      { keyword: "通電", sortOrder: 1 }
+    ]);
   });
 
   it("adds nullable Gmail watch state without changing existing connections", async () => {

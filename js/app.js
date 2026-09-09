@@ -161,8 +161,10 @@ function loadSavedData() {
 }
 const keywordPolicy =
   window.CallNowKeywordPolicy;
+const monitoringKeywordPolicy =
+  window.CallNowMonitoringKeywordPolicy;
 
-if (!keywordPolicy) {
+if (!keywordPolicy || !monitoringKeywordPolicy) {
   throw new Error(
     "キーワード検証機能を読み込めませんでした。"
   );
@@ -3598,6 +3600,7 @@ async function activateDeferredOwnerMonitoring(choiceId) {
   mailConnections = await fetchMailConnections();
   renderMailMonitoringAccount();
   renderConnectedGoogleAccounts();
+  renderTestKeywordCards();
 }
 
 
@@ -3629,6 +3632,7 @@ async function setMailMonitoringState(connectionId, action) {
     mailConnections = await fetchMailConnections();
     renderMailMonitoringAccount();
     renderConnectedGoogleAccounts();
+    renderTestKeywordCards();
   } catch (error) {
     await showAppAlert(
       error instanceof Error
@@ -3784,6 +3788,7 @@ async function disconnectMailConnection(
       await fetchMailConnections();
     renderMailMonitoringAccount();
     renderConnectedGoogleAccounts();
+    renderTestKeywordCards();
     await showAppAlert(
       "メール監視アカウントの接続を解除しました。"
     );
@@ -6366,6 +6371,10 @@ function showAppPage(
     renderContractSettings();
   }
 
+  if (pageId === "testPage") {
+    renderTestKeywordCards();
+  }
+
   document
     .querySelectorAll(
       ".app-page"
@@ -7692,25 +7701,40 @@ function renderTestKeywordCards() {
 
   container.innerHTML = "";
 
-  if (keywords.length === 0) {
+  const activeGoogleConnection =
+    monitoringKeywordPolicy.findActiveGoogleConnection(
+      mailConnections
+    );
+  const activeKeywords =
+    monitoringKeywordPolicy.getActiveGoogleKeywords(
+      mailConnections
+    );
+
+  if (!activeGoogleConnection || activeKeywords.length === 0) {
     const empty =
       document.createElement("article");
     empty.className =
       "card test-empty-card";
     const message =
       document.createElement("p");
-    message.textContent =
-      "通知キーワードが設定されていません。";
+    message.textContent = activeGoogleConnection
+      ? "監視中のGoogleアカウントに通知キーワードが設定されていません。"
+      : "監視中のGoogleアカウントがありません。";
     const button =
       document.createElement("button");
     button.type = "button";
     button.className = "btn primary";
-    button.textContent =
-      "契約内容を設定する";
+    button.textContent = activeGoogleConnection
+      ? "契約内容を設定する"
+      : "監視アカウント設定を開く";
     button.addEventListener(
       "click",
       () => {
-        showAppPage("keywordPage");
+        if (activeGoogleConnection) {
+          showAppPage("keywordPage");
+        } else {
+          openGoogleAccountManager();
+        }
       }
     );
     empty.append(message, button);
@@ -7719,7 +7743,7 @@ function renderTestKeywordCards() {
     return;
   }
 
-  keywords.forEach((keyword) => {
+  activeKeywords.forEach((keyword) => {
     const card =
       document.createElement(
         "article"

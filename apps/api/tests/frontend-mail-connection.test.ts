@@ -99,5 +99,8 @@ describe("frontend mail connection boundary", () => {
     );
     expect(notificationTest).not.toContain("findNotificationTestConnection");
     expect(notificationTest).not.toContain("mailConnectionId");
+    expect(script).toContain("getActiveGoogleKeywords");
+    expect(script).toContain("activeKeywords.forEach((keyword) =>");
+    expect(script).toContain("renderTestKeywordCards();");
   });
 });

@@ -2248,15 +2248,18 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     const connection = await createActiveMailConnection(
       owner.id,
       team.team.teamId,
-      "notification-test-google-subject"
+      "notification-test-google-subject",
+      ["停電のお知らせ", "システム障害"]
     );
     await database.teamKeyword.createMany({
-      data: ["停電のお知らせ", "システム障害"].map((keyword, sortOrder) => ({
-        teamId: team.team.teamId,
-        keyword,
-        normalized: keyword.normalize("NFKC").toLocaleLowerCase("ja-JP"),
-        sortOrder
-      }))
+      data: ["停電のお知らせ", "システム障害", "旧Team専用"].map(
+        (keyword, sortOrder) => ({
+          teamId: team.team.teamId,
+          keyword,
+          normalized: keyword.normalize("NFKC").toLocaleLowerCase("ja-JP"),
+          sortOrder
+        })
+      )
     });
     const pausedAuthorization = await database.mailAuthorization.create({
       data: {
@@ -2274,7 +2277,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
         mailAuthorizationId: pausedAuthorization.id,
         provider: "GOOGLE",
         status: "PAUSED",
-        keywords: ["停電のお知らせ", "システム障害"]
+        keywords: ["停止中専用"]
       }
     });
     const repository = new PrismaNotificationTestRepository(database);
@@ -2291,6 +2294,27 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       ttlMilliseconds: 180_000
     });
 
+    await expect(
+      service.start({
+        teamId: team.team.teamId,
+        actorUserId: owner.id,
+        keyword: "旧Team専用"
+      })
+    ).rejects.toMatchObject({
+      code: "NOTIFICATION_TEST_KEYWORD_NOT_CONFIGURED",
+      statusCode: 409
+    });
+    await expect(
+      service.start({
+        teamId: team.team.teamId,
+        actorUserId: owner.id,
+        keyword: "停止中専用"
+      })
+    ).rejects.toMatchObject({
+      code: "NOTIFICATION_TEST_KEYWORD_NOT_CONFIGURED",
+      statusCode: 409
+    });
+
     const started = await service.start({
       teamId: team.team.teamId,
       actorUserId: owner.id,
@@ -2301,7 +2325,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       test: {
         sourceMailConnectionId: connection.id,
         status: "PENDING",
-        requestId: "test-request-1"
+        requestId: "test-request-3"
       }
     });
     expect(started.test.sourceMailConnectionId).not.toBe(pausedConnection.id);
@@ -2456,8 +2480,36 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       })
     ).resolves.toEqual({ status: "EXPIRED", alertId: null });
 
+    await database.$transaction([
+      database.mailConnection.update({
+        where: { id: connection.id },
+        data: { status: "PAUSED" }
+      }),
+      database.mailConnection.update({
+        where: { id: pausedConnection.id },
+        data: { status: "ACTIVE" }
+      })
+    ]);
+    const switched = await service.start({
+      teamId: team.team.teamId,
+      actorUserId: owner.id,
+      keyword: "停止中専用"
+    });
+    expect(switched.test).toMatchObject({
+      sourceMailConnectionId: pausedConnection.id,
+      status: "PENDING"
+    });
+    clock.value = new Date(clock.value.getTime() + 181_000);
+    await expect(
+      service.confirm({
+        teamId: team.team.teamId,
+        testId: switched.test.id,
+        actorUserId: owner.id,
+        requestId: switched.test.requestId
+      })
+    ).rejects.toMatchObject({ code: "NOTIFICATION_TEST_EXPIRED" });
     await database.mailConnection.update({
-      where: { id: connection.id },
+      where: { id: pausedConnection.id },
       data: { status: "PAUSED" }
     });
     const microsoftAuthorization = await database.mailAuthorization.create({
@@ -3555,7 +3607,8 @@ function createUser(email: string) {
 async function createActiveMailConnection(
   userId: string,
   teamId: string,
-  providerSubject: string
+  providerSubject: string,
+  keywords: readonly string[] = []
 ) {
   const authorization = await database.mailAuthorization.create({
     data: {
@@ -3573,7 +3626,8 @@ async function createActiveMailConnection(
       teamId,
       mailAuthorizationId: authorization.id,
       provider: "GOOGLE",
-      status: "ACTIVE"
+      status: "ACTIVE",
+      keywords: [...keywords]
     }
   });
 }

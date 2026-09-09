@@ -19,6 +19,13 @@ const singleActiveGoogleMonitoringMigration = readFileSync(
   ),
   "utf8"
 );
+const mailConnectionKeywordBackfillMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260909000100_backfill_mail_connection_keywords/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 
 describe("database foundation", () => {
   it("defines the required Phase 1 models", () => {
@@ -124,6 +131,21 @@ describe("database foundation", () => {
       "SET \"status\" = 'PAUSED'"
     );
     expect(singleActiveGoogleMonitoringMigration).not.toMatch(
+      /(?:^|\n)\s*(?:DELETE\s+FROM|TRUNCATE|DROP\s+TABLE)\b/iu
+    );
+  });
+
+  it("preserves legacy keywords without overwriting account-specific sets", () => {
+    expect(mailConnectionKeywordBackfillMigration).toContain(
+      "legacy_team_keyword_sets"
+    );
+    expect(mailConnectionKeywordBackfillMigration).toContain(
+      `connection."status" <> 'REVOKED'`
+    );
+    expect(mailConnectionKeywordBackfillMigration).toContain(
+      'CARDINALITY(connection."keywords") = 0'
+    );
+    expect(mailConnectionKeywordBackfillMigration).not.toMatch(
       /(?:^|\n)\s*(?:DELETE\s+FROM|TRUNCATE|DROP\s+TABLE)\b/iu
     );
   });
