@@ -33,7 +33,6 @@ export class NotificationTestService {
   public start(input: {
     readonly teamId: string;
     readonly actorUserId: string;
-    readonly sourceMailConnectionId: string;
     readonly keyword: string;
   }): Promise<NotificationTestStartResult> {
     const now = this.now();

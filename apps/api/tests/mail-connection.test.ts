@@ -64,6 +64,13 @@ const environment: AppEnvironment = {
   GMAIL_OAUTH_REDIRECT_URI:
     "https://api.test.call-now.example/api/v1/auth/gmail/callback",
   GMAIL_OAUTH_STATE_TTL_MINUTES: 10,
+  GMAIL_PUSH_MONITORING_ENABLED: false,
+  GMAIL_PUBSUB_TOPIC_NAME: "",
+  GMAIL_PUBSUB_PUSH_AUDIENCE: "",
+  GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL: "",
+  GMAIL_WATCH_RENEW_BEFORE_HOURS: 48,
+  GMAIL_HISTORY_RECOVERY_LOOKBACK_HOURS: 72,
+  GMAIL_PUBSUB_MAX_BODY_BYTES: 262144,
   MICROSOFT_OAUTH_CLIENT_ID: "test-microsoft-client-id",
   MICROSOFT_OAUTH_CLIENT_SECRET: "test-microsoft-client-secret",
   MICROSOFT_OAUTH_REDIRECT_URI:
@@ -103,6 +110,16 @@ describe("mail provider configuration", () => {
         {
           ...environment,
           GMAIL_OAUTH_CLIENT_ID: "development-gmail-client-id"
+        },
+        "GOOGLE"
+      )
+    ).toBe("NOT_CONFIGURED");
+    expect(
+      getMailProviderAvailability(
+        {
+          ...environment,
+          APP_ENV: "production",
+          GMAIL_PUSH_MONITORING_ENABLED: false
         },
         "GOOGLE"
       )
@@ -495,6 +512,38 @@ describe("MailConnectionService", () => {
     expect(fixture.provider.revokedTokens).toContain(
       `${syntheticRefreshToken}-rotated`
     );
+    expect(fixture.provider.stoppedWatchTokens).toContain(
+      `${syntheticRefreshToken}-rotated`
+    );
+  });
+
+  it("keeps a local disconnect successful when Gmail watch shutdown fails", async () => {
+    const fixture = createServiceFixture();
+    const started = await fixture.service.createAuthorizationRequest(
+      "owner-user-id",
+      "team-id",
+      "CONNECT",
+      "GOOGLE"
+    );
+    const connected = await fixture.service.completeAuthorization({
+      provider: "GOOGLE",
+      state: started.state,
+      code: "valid-gmail-code",
+      authenticatedUserId: "owner-user-id"
+    });
+    fixture.provider.stopWatchError = true;
+
+    await expect(
+      fixture.service.disconnect({
+        teamId: "team-id",
+        ownerUserId: "owner-user-id",
+        connectionId: connected.id
+      })
+    ).resolves.toBeUndefined();
+    expect(fixture.repository.connections.get(connected.id)).toMatchObject({
+      connectionStatus: "REVOKED"
+    });
+    expect(fixture.provider.revokedTokens).toContain(syntheticRefreshToken);
   });
 
   it("does not revoke a refresh token that remains active after reauthorization", async () => {
@@ -526,6 +575,190 @@ describe("MailConnectionService", () => {
     });
 
     expect(fixture.provider.revokedTokens).not.toContain(syntheticRefreshToken);
+  });
+
+  it("switches the single active Google account after users.watch succeeds", async () => {
+    const fixture = createServiceFixture({ monitoringEnabled: true });
+    const firstStart = await fixture.service.createAuthorizationRequest(
+      "owner-user-id",
+      "team-id",
+      "CONNECT",
+      "GOOGLE"
+    );
+    const first = await fixture.service.completeAuthorization({
+      provider: "GOOGLE",
+      state: firstStart.state,
+      code: "valid-gmail-code",
+      authenticatedUserId: "owner-user-id"
+    });
+
+    fixture.provider.subject = "gmail-monitoring-subject-b";
+    fixture.provider.email = "monitoring-b@example.com";
+    fixture.provider.refreshToken = `${syntheticRefreshToken}-b`;
+    const secondStart = await fixture.service.createAuthorizationRequest(
+      "owner-user-id",
+      "team-id",
+      "CONNECT",
+      "GOOGLE"
+    );
+    const second = await fixture.service.completeAuthorization({
+      provider: "GOOGLE",
+      state: secondStart.state,
+      code: "valid-gmail-code",
+      authenticatedUserId: "owner-user-id"
+    });
+
+    expect(fixture.repository.connections.get(first.id)?.connectionStatus).toBe(
+      "PAUSED"
+    );
+    expect(
+      fixture.repository.connections.get(second.id)?.connectionStatus
+    ).toBe("ACTIVE");
+    expect(fixture.provider.startedWatchTokens).toEqual([
+      syntheticRefreshToken,
+      `${syntheticRefreshToken}-b`
+    ]);
+    expect(fixture.provider.stoppedWatchTokens).toContain(
+      syntheticRefreshToken
+    );
+
+    await fixture.service.setMonitoringState({
+      teamId: "team-id",
+      ownerUserId: "owner-user-id",
+      connectionId: first.id,
+      status: "ACTIVE"
+    });
+    const googleConnections = [
+      ...fixture.repository.connections.values()
+    ].filter(({ provider }) => provider === "GOOGLE");
+    expect(
+      googleConnections.filter(
+        ({ connectionStatus }) => connectionStatus === "ACTIVE"
+      )
+    ).toHaveLength(1);
+    expect(fixture.repository.connections.get(first.id)?.connectionStatus).toBe(
+      "ACTIVE"
+    );
+    expect(
+      fixture.repository.connections.get(second.id)?.connectionStatus
+    ).toBe("PAUSED");
+    expect(fixture.provider.startedWatchTokens.at(-1)).toBe(
+      syntheticRefreshToken
+    );
+    expect(fixture.provider.stoppedWatchTokens).toContain(
+      `${syntheticRefreshToken}-b`
+    );
+
+    await fixture.service.setMonitoringState({
+      teamId: "team-id",
+      ownerUserId: "owner-user-id",
+      connectionId: first.id,
+      status: "PAUSED"
+    });
+    expect(fixture.repository.connections.get(first.id)).toMatchObject({
+      authorizationStatus: "ACTIVE",
+      connectionStatus: "PAUSED"
+    });
+    expect(
+      fixture.repository.authorizations.get(first.authorizationId)?.token
+    ).not.toBeNull();
+  });
+
+  it("keeps the current Google account active when starting the replacement watch fails", async () => {
+    const fixture = createServiceFixture({ monitoringEnabled: true });
+    const firstStart = await fixture.service.createAuthorizationRequest(
+      "owner-user-id",
+      "team-id",
+      "CONNECT",
+      "GOOGLE"
+    );
+    const first = await fixture.service.completeAuthorization({
+      provider: "GOOGLE",
+      state: firstStart.state,
+      code: "valid-gmail-code",
+      authenticatedUserId: "owner-user-id"
+    });
+    fixture.provider.subject = "gmail-monitoring-subject-failing";
+    fixture.provider.email = "monitoring-failing@example.com";
+    fixture.provider.refreshToken = `${syntheticRefreshToken}-failing`;
+    fixture.provider.startWatchError = new Error(
+      "synthetic_watch_start_failure"
+    );
+    const replacementStart = await fixture.service.createAuthorizationRequest(
+      "owner-user-id",
+      "team-id",
+      "CONNECT",
+      "GOOGLE"
+    );
+
+    await expect(
+      fixture.service.completeAuthorization({
+        provider: "GOOGLE",
+        state: replacementStart.state,
+        code: "valid-gmail-code",
+        authenticatedUserId: "owner-user-id"
+      })
+    ).rejects.toMatchObject({ code: "MAIL_MONITORING_START_FAILED" });
+    expect(fixture.repository.connections.get(first.id)?.connectionStatus).toBe(
+      "ACTIVE"
+    );
+    const replacement = [...fixture.repository.connections.values()].find(
+      ({ email }) => email === "monitoring-failing@example.com"
+    );
+    expect(replacement?.connectionStatus).toBe("PAUSED");
+    expect(fixture.provider.stoppedWatchTokens).not.toContain(
+      syntheticRefreshToken
+    );
+  });
+
+  it("requires reauthorization only for the selected Google account when its token is invalid", async () => {
+    const fixture = createServiceFixture({ monitoringEnabled: true });
+    const firstStart = await fixture.service.createAuthorizationRequest(
+      "owner-user-id",
+      "team-id",
+      "CONNECT",
+      "GOOGLE"
+    );
+    const first = await fixture.service.completeAuthorization({
+      provider: "GOOGLE",
+      state: firstStart.state,
+      code: "valid-gmail-code",
+      authenticatedUserId: "owner-user-id"
+    });
+    fixture.provider.subject = "gmail-monitoring-subject-invalid-token";
+    fixture.provider.email = "monitoring-invalid-token@example.com";
+    fixture.provider.refreshToken = `${syntheticRefreshToken}-invalid`;
+    fixture.provider.startWatchError = Object.assign(
+      new Error("synthetic_invalid_grant"),
+      { code: "invalid_grant" }
+    );
+    const replacementStart = await fixture.service.createAuthorizationRequest(
+      "owner-user-id",
+      "team-id",
+      "CONNECT",
+      "GOOGLE"
+    );
+
+    await expect(
+      fixture.service.completeAuthorization({
+        provider: "GOOGLE",
+        state: replacementStart.state,
+        code: "valid-gmail-code",
+        authenticatedUserId: "owner-user-id"
+      })
+    ).rejects.toMatchObject({ code: "MAIL_REAUTHORIZATION_REQUIRED" });
+    expect(fixture.repository.connections.get(first.id)).toMatchObject({
+      authorizationStatus: "ACTIVE",
+      connectionStatus: "ACTIVE"
+    });
+    expect(
+      [...fixture.repository.connections.values()].find(
+        ({ email }) => email === "monitoring-invalid-token@example.com"
+      )
+    ).toMatchObject({
+      authorizationStatus: "REAUTH_REQUIRED",
+      connectionStatus: "REAUTH_REQUIRED"
+    });
   });
 });
 
@@ -902,7 +1135,9 @@ describe("Gmail connection routes", () => {
   });
 });
 
-function createServiceFixture(options: { failExchange?: boolean } = {}) {
+function createServiceFixture(
+  options: { failExchange?: boolean; monitoringEnabled?: boolean } = {}
+) {
   const repository = new MemoryMailConnectionRepository();
   const provider = new FakeMailProviderAdapter(options.failExchange);
   const clock = { value: new Date("2026-08-26T00:00:00.000Z") };
@@ -915,6 +1150,9 @@ function createServiceFixture(options: { failExchange?: boolean } = {}) {
     tokenEncryption: createEncryption(),
     tokenPepper: environment.AUTH_TOKEN_PEPPER,
     stateTtlMinutes: { GOOGLE: 10, MICROSOFT: 10 },
+    ...(options.monitoringEnabled
+      ? { monitoringTopics: { GOOGLE: "projects/test/topics/gmail" } }
+      : {}),
     now: () => clock.value
   });
   return { repository, provider, clock, service };
@@ -923,7 +1161,13 @@ function createServiceFixture(options: { failExchange?: boolean } = {}) {
 class FakeMailProviderAdapter implements MailProviderAdapter {
   public readonly provider;
   public refreshToken = syntheticRefreshToken;
+  public subject = "gmail-monitoring-subject";
+  public email = "monitoring@example.com";
   public readonly revokedTokens: string[] = [];
+  public readonly startedWatchTokens: string[] = [];
+  public readonly stoppedWatchTokens: string[] = [];
+  public startWatchError: Error | null = null;
+  public stopWatchError = false;
   private nonce: string | null = null;
 
   public constructor(
@@ -973,12 +1217,10 @@ class FakeMailProviderAdapter implements MailProviderAdapter {
       provider: this.provider,
       subject:
         this.provider === "GOOGLE"
-          ? "gmail-monitoring-subject"
+          ? this.subject
           : "microsoft-tenant:microsoft-monitoring-subject",
       email:
-        this.provider === "GOOGLE"
-          ? "monitoring@example.com"
-          : "monitoring@outlook.example",
+        this.provider === "GOOGLE" ? this.email : "monitoring@outlook.example",
       emailVerified: true,
       refreshToken: this.refreshToken,
       grantedScopes: [
@@ -1001,6 +1243,20 @@ class FakeMailProviderAdapter implements MailProviderAdapter {
 
   public async revokeAuthorization(refreshToken: string): Promise<void> {
     this.revokedTokens.push(refreshToken);
+  }
+
+  public async startMailboxWatch(refreshToken: string) {
+    this.startedWatchTokens.push(refreshToken);
+    if (this.startWatchError) throw this.startWatchError;
+    return {
+      providerCursor: String(100 + this.startedWatchTokens.length),
+      expiration: new Date("2026-08-27T00:00:00.000Z")
+    };
+  }
+
+  public async stopMailboxWatch(refreshToken: string): Promise<void> {
+    this.stoppedWatchTokens.push(refreshToken);
+    if (this.stopWatchError) throw new Error("synthetic_watch_stop_failure");
   }
 
   public classifyProviderError(error: unknown) {

@@ -11,6 +11,7 @@
     "dev": "tsx watch src/server.ts",
     "format:check": "prettier --check .",
     "lint": "eslint .",
+    "mail:gmail:renew-watches": "tsx src/cli/gmail-renew-watches.ts",
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:postgres": "RUN_POSTGRES_TESTS=true vitest run tests/postgres-concurrency.integration.test.ts --maxWorkers=1",
@@ -31,7 +32,7 @@
     "fastify": "5.12.1",
     "google-auth-library": "11.0.2",
     "jose": "6.2.10",
-    "nodemailer": "9.0.5",
+    "nodemailer": "9.1.1",
     "pg": "8.16.3"
   },
   "devDependencies": {

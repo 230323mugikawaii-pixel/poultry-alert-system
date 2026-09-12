@@ -154,6 +154,7 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
     readonly grantedScopes: readonly string[];
     readonly intent: MailOAuthIntent;
     readonly connectionId: string | null;
+    readonly deferActivation: boolean;
     readonly requestId: string | null;
     readonly now: Date;
   }): Promise<MailGrantPersistenceResult> {
@@ -248,6 +249,31 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
                   }
                 });
 
+            const existingTeamConnection =
+              targetConnection ??
+              (await transaction.mailConnection.findUnique({
+                where: {
+                  teamId_mailAuthorizationId: {
+                    teamId: input.teamId,
+                    mailAuthorizationId: authorization.id
+                  }
+                },
+                select: { id: true, status: true }
+              }));
+            const nextConnectionStatus =
+              input.provider === "GOOGLE" &&
+              existingTeamConnection?.status !== "ACTIVE" &&
+              (input.deferActivation ||
+                (await transaction.mailConnection.count({
+                  where: {
+                    teamId: input.teamId,
+                    provider: "GOOGLE",
+                    status: "ACTIVE"
+                  }
+                })) > 0)
+                ? "PAUSED"
+                : "ACTIVE";
+
             const restoredConnections =
               await transaction.mailConnection.findMany({
                 where: {
@@ -257,34 +283,46 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
                 },
                 select: { id: true, teamId: true }
               });
-            if (restoredConnections.length > 0) {
+            for (const restoredConnection of restoredConnections) {
+              const hasAnotherActiveGoogle =
+                authorization.provider === "GOOGLE" &&
+                (await transaction.mailConnection.count({
+                  where: {
+                    teamId: restoredConnection.teamId,
+                    provider: "GOOGLE",
+                    status: "ACTIVE",
+                    id: { not: restoredConnection.id }
+                  }
+                })) > 0;
+              const restoredStatus = hasAnotherActiveGoogle
+                ? "PAUSED"
+                : "ACTIVE";
               await transaction.mailConnection.updateMany({
                 where: {
-                  id: { in: restoredConnections.map(({ id }) => id) },
+                  id: restoredConnection.id,
                   status: "REAUTH_REQUIRED"
                 },
                 data: {
-                  status: "ACTIVE",
+                  status: restoredStatus,
                   lastErrorCode: null,
                   revokedAt: null
                 }
               });
-              for (const restoredConnection of restoredConnections) {
-                await transaction.auditEvent.create({
-                  data: {
-                    teamId: restoredConnection.teamId,
-                    actorUserId: input.ownerUserId,
-                    action: "MAIL_REAUTHORIZED",
-                    targetType: "MailConnection",
-                    targetId: restoredConnection.id,
-                    requestId: input.requestId,
-                    metadata: {
-                      authorizationStatus: "ACTIVE",
-                      restoredBySharedAuthorization: true
-                    }
+              await transaction.auditEvent.create({
+                data: {
+                  teamId: restoredConnection.teamId,
+                  actorUserId: input.ownerUserId,
+                  action: "MAIL_REAUTHORIZED",
+                  targetType: "MailConnection",
+                  targetId: restoredConnection.id,
+                  requestId: input.requestId,
+                  metadata: {
+                    authorizationStatus: "ACTIVE",
+                    connectionStatus: restoredStatus,
+                    restoredBySharedAuthorization: true
                   }
-                });
-              }
+                }
+              });
             }
 
             const connection = await transaction.mailConnection.upsert({
@@ -297,11 +335,17 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
               create: {
                 teamId: input.teamId,
                 mailAuthorizationId: authorization.id,
-                status: "ACTIVE"
+                provider: input.provider,
+                status: nextConnectionStatus
               },
               update: {
-                status: "ACTIVE",
+                provider: input.provider,
+                status: nextConnectionStatus,
                 providerCursor: null,
+                providerSubscriptionExpiresAt: null,
+                providerSubscriptionRenewedAt: null,
+                syncLeaseToken: null,
+                syncLeaseExpiresAt: null,
                 lastSyncAt: null,
                 lastErrorCode: null,
                 revokedAt: null
@@ -383,6 +427,10 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
               data: {
                 status: "REVOKED",
                 providerCursor: null,
+                providerSubscriptionExpiresAt: null,
+                providerSubscriptionRenewedAt: null,
+                syncLeaseToken: null,
+                syncLeaseExpiresAt: null,
                 lastErrorCode: null,
                 revokedAt: input.now
               }
@@ -450,14 +498,63 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
     );
   }
 
+  public async getMonitoringActivationTarget(input: {
+    readonly teamId: string;
+    readonly ownerUserId: string;
+    readonly connectionId: string;
+  }) {
+    await this.assertOwner(this.database, input.teamId, input.ownerUserId);
+    const connection = await this.database.mailConnection.findFirst({
+      where: {
+        id: input.connectionId,
+        teamId: input.teamId,
+        status: { not: "REVOKED" }
+      },
+      include: { mailAuthorization: true }
+    });
+    if (!connection) {
+      throw new AppError(
+        "MAIL_CONNECTION_NOT_FOUND",
+        "メール監視アカウントが見つかりません。",
+        404
+      );
+    }
+    if (
+      connection.mailAuthorization.status !== "ACTIVE" ||
+      !toProviderToken(connection.mailAuthorization)
+    ) {
+      throw new AppError(
+        "MAIL_REAUTHORIZATION_REQUIRED",
+        "監視を再開するにはメールアカウントの再設定が必要です。",
+        409
+      );
+    }
+    if (connection.status !== "ACTIVE" && connection.status !== "PAUSED") {
+      throw new AppError(
+        "MAIL_CONNECTION_STATE_INVALID",
+        "現在の状態では監視状態を変更できません。",
+        409
+      );
+    }
+    return {
+      connection: mapConnection(connection),
+      credential: toProviderToken(connection.mailAuthorization)!
+    };
+  }
+
   public setMonitoringState(input: {
     readonly teamId: string;
     readonly ownerUserId: string;
     readonly connectionId: string;
     readonly status: "ACTIVE" | "PAUSED";
+    readonly watch: {
+      readonly providerCursor: string;
+      readonly expiration: Date;
+      readonly renewedAt: Date;
+    } | null;
     readonly requestId: string | null;
     readonly now: Date;
-  }): Promise<MailConnectionRecord> {
+  }) {
     return retrySerializableTransaction(
       () =>
         this.database.$transaction(
@@ -504,35 +601,130 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
                 409
               );
             }
+            if (connection.status === input.status) {
+              return {
+                connection: mapConnection(connection),
+                tokensToStop: []
+              };
+            }
+
+            const automaticallyPaused =
+              input.status === "ACTIVE" &&
+              connection.mailAuthorization.provider === "GOOGLE"
+                ? await transaction.mailConnection.findMany({
+                    where: {
+                      teamId: input.teamId,
+                      provider: "GOOGLE",
+                      status: "ACTIVE",
+                      id: { not: connection.id }
+                    },
+                    include: { mailAuthorization: true },
+                    orderBy: [{ createdAt: "asc" }, { id: "asc" }]
+                  })
+                : [];
+            if (automaticallyPaused.length > 0) {
+              await transaction.mailConnection.updateMany({
+                where: {
+                  id: { in: automaticallyPaused.map(({ id }) => id) },
+                  status: "ACTIVE"
+                },
+                data: {
+                  status: "PAUSED",
+                  providerCursor: null,
+                  providerSubscriptionExpiresAt: null,
+                  providerSubscriptionRenewedAt: null,
+                  syncLeaseToken: null,
+                  syncLeaseExpiresAt: null,
+                  lastErrorCode: null
+                }
+              });
+            }
+
             const updated = await transaction.mailConnection.update({
               where: { id: connection.id },
               data: {
                 status: input.status,
                 ...(input.status === "ACTIVE"
-                  ? { lastErrorCode: null, revokedAt: null }
-                  : {})
+                  ? {
+                      lastErrorCode: null,
+                      revokedAt: null,
+                      syncLeaseToken: null,
+                      syncLeaseExpiresAt: null,
+                      ...(input.watch
+                        ? {
+                            providerCursor: input.watch.providerCursor,
+                            providerSubscriptionExpiresAt:
+                              input.watch.expiration,
+                            providerSubscriptionRenewedAt: input.watch.renewedAt
+                          }
+                        : {})
+                    }
+                  : {
+                      providerCursor: null,
+                      providerSubscriptionExpiresAt: null,
+                      providerSubscriptionRenewedAt: null,
+                      syncLeaseToken: null,
+                      syncLeaseExpiresAt: null,
+                      lastErrorCode: null
+                    })
               },
               include: { mailAuthorization: true }
             });
-            if (connection.status !== input.status) {
+            for (const paused of automaticallyPaused) {
               await transaction.auditEvent.create({
                 data: {
                   teamId: input.teamId,
                   actorUserId: input.ownerUserId,
-                  action:
-                    input.status === "ACTIVE"
-                      ? "MAIL_MONITORING_RESUMED"
-                      : "MAIL_MONITORING_PAUSED",
+                  action: "MAIL_MONITORING_PAUSED",
                   targetType: "MailConnection",
-                  targetId: connection.id,
+                  targetId: paused.id,
                   requestId: input.requestId,
                   metadata: {
-                    provider: connection.mailAuthorization.provider
+                    provider: "GOOGLE",
+                    reason: "GOOGLE_ACCOUNT_SWITCH"
                   }
                 }
               });
             }
-            return mapConnection(updated);
+            await transaction.auditEvent.create({
+              data: {
+                teamId: input.teamId,
+                actorUserId: input.ownerUserId,
+                action:
+                  input.status === "ACTIVE"
+                    ? "MAIL_MONITORING_RESUMED"
+                    : "MAIL_MONITORING_PAUSED",
+                targetType: "MailConnection",
+                targetId: connection.id,
+                requestId: input.requestId,
+                metadata: {
+                  provider: connection.mailAuthorization.provider
+                }
+              }
+            });
+
+            const stoppedConnections =
+              input.status === "PAUSED" ? [connection] : automaticallyPaused;
+            const tokensToStop: ProviderToken[] = [];
+            for (const stopped of new Map(
+              stoppedConnections.map((candidate) => [
+                candidate.mailAuthorizationId,
+                candidate
+              ])
+            ).values()) {
+              const remainingActive = await transaction.mailConnection.count({
+                where: {
+                  mailAuthorizationId: stopped.mailAuthorizationId,
+                  status: "ACTIVE"
+                }
+              });
+              const token = toProviderToken(stopped.mailAuthorization);
+              if (remainingActive === 0 && token) tokensToStop.push(token);
+            }
+            return {
+              connection: mapConnection(updated),
+              tokensToStop: deduplicateTokens(tokensToStop)
+            };
           },
           { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
         ),

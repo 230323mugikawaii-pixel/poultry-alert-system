@@ -8,6 +8,7 @@ const PLACEHOLDER_PATTERN =
 
 type MailConfigurationEnvironment = Pick<
   AppEnvironment,
+  | "APP_ENV"
   | "GMAIL_OAUTH_CLIENT_ID"
   | "GMAIL_OAUTH_CLIENT_SECRET"
   | "GMAIL_OAUTH_REDIRECT_URI"
@@ -18,6 +19,10 @@ type MailConfigurationEnvironment = Pick<
   | "MAIL_TOKEN_ENCRYPTION_PROVIDER"
   | "MAIL_TOKEN_ENCRYPTION_KEY"
   | "MAIL_KMS_KEY_NAME"
+  | "GMAIL_PUSH_MONITORING_ENABLED"
+  | "GMAIL_PUBSUB_TOPIC_NAME"
+  | "GMAIL_PUBSUB_PUSH_AUDIENCE"
+  | "GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL"
 >;
 
 export function getMailProviderAvailability(
@@ -34,7 +39,22 @@ export function getMailProviderAvailability(
         isConfiguredValue(environment.MICROSOFT_OAUTH_TENANT) &&
         isValidUrl(environment.MICROSOFT_OAUTH_REDIRECT_URI);
 
-  return providerConfigured && hasUsableEncryptionConfiguration(environment)
+  const pushMonitoringReady =
+    provider !== "GOOGLE" ||
+    environment.APP_ENV === "development" ||
+    environment.APP_ENV === "test" ||
+    (environment.GMAIL_PUSH_MONITORING_ENABLED &&
+      /^projects\/[^/]+\/topics\/[^/]+$/u.test(
+        environment.GMAIL_PUBSUB_TOPIC_NAME
+      ) &&
+      isValidUrl(environment.GMAIL_PUBSUB_PUSH_AUDIENCE) &&
+      /^[^@\s]+@[^@\s]+\.iam\.gserviceaccount\.com$/u.test(
+        environment.GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL
+      ));
+
+  return providerConfigured &&
+    hasUsableEncryptionConfiguration(environment) &&
+    pushMonitoringReady
     ? "AVAILABLE"
     : "NOT_CONFIGURED";
 }

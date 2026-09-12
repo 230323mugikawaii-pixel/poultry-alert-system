@@ -25,7 +25,6 @@ describe("NotificationTestService", () => {
     const started = await service.start({
       teamId: repository.record.teamId,
       actorUserId: repository.record.actorUserId,
-      sourceMailConnectionId: repository.record.sourceMailConnectionId,
       keyword: "  停電   のお知らせ  "
     });
     expect(started.test).toMatchObject({

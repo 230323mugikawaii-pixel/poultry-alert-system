@@ -384,13 +384,19 @@ export class PrismaOwnerOnboardingRepository implements OwnerOnboardingRepositor
               create: {
                 teamId: choice.onboarding.teamId,
                 mailAuthorizationId: choice.mailAuthorizationId,
+                provider: choice.provider,
                 status: "ACTIVE",
                 keywords: [...choice.keywords]
               },
               update: {
+                provider: choice.provider,
                 status: "ACTIVE",
                 keywords: [...choice.keywords],
                 providerCursor: null,
+                providerSubscriptionExpiresAt: null,
+                providerSubscriptionRenewedAt: null,
+                syncLeaseToken: null,
+                syncLeaseExpiresAt: null,
                 lastErrorCode: null,
                 revokedAt: null
               }

@@ -31,7 +31,6 @@ export interface NotificationTestRepository {
   start(input: {
     readonly teamId: string;
     readonly actorUserId: string;
-    readonly sourceMailConnectionId: string;
     readonly keyword: string;
     readonly requestId: string;
     readonly now: Date;

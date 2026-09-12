@@ -124,6 +124,7 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
     readonly grantedScopes: readonly string[];
     readonly intent: MailOAuthIntent;
     readonly connectionId: string | null;
+    readonly deferActivation: boolean;
     readonly requestId: string | null;
     readonly now: Date;
   }) {
@@ -213,7 +214,18 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
       provider: input.provider,
       email: input.email,
       authorizationStatus: "ACTIVE",
-      connectionStatus: "ACTIVE",
+      connectionStatus:
+        input.provider === "GOOGLE" &&
+        previousConnection?.connectionStatus !== "ACTIVE" &&
+        (input.deferActivation ||
+          [...this.connections.values()].some(
+            (candidate) =>
+              candidate.teamId === input.teamId &&
+              candidate.provider === "GOOGLE" &&
+              candidate.connectionStatus === "ACTIVE"
+          ))
+          ? "PAUSED"
+          : "ACTIVE",
       keywords: previousConnection?.keywords ?? [],
       grantedScopes: input.grantedScopes,
       lastVerifiedAt: input.now,
@@ -274,14 +286,50 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
     return { tokenToRevoke };
   }
 
+  public async getMonitoringActivationTarget(input: {
+    readonly teamId: string;
+    readonly ownerUserId: string;
+    readonly connectionId: string;
+  }) {
+    void input.ownerUserId;
+    const connection = this.connections.get(input.connectionId);
+    const authorization = connection
+      ? this.authorizations.get(connection.authorizationId)
+      : undefined;
+    if (!connection || connection.teamId !== input.teamId || !authorization) {
+      throw new AppError("MAIL_CONNECTION_NOT_FOUND", "missing", 404);
+    }
+    if (authorization.status !== "ACTIVE" || !authorization.token) {
+      throw new AppError("MAIL_REAUTHORIZATION_REQUIRED", "reauth", 409);
+    }
+    if (
+      connection.connectionStatus !== "ACTIVE" &&
+      connection.connectionStatus !== "PAUSED"
+    ) {
+      throw new AppError("MAIL_CONNECTION_STATE_INVALID", "invalid", 409);
+    }
+    return {
+      connection,
+      credential: {
+        provider: authorization.provider,
+        token: authorization.token
+      }
+    };
+  }
+
   public async setMonitoringState(input: {
     readonly teamId: string;
     readonly ownerUserId: string;
     readonly connectionId: string;
     readonly status: "ACTIVE" | "PAUSED";
+    readonly watch: {
+      readonly providerCursor: string;
+      readonly expiration: Date;
+      readonly renewedAt: Date;
+    } | null;
     readonly requestId: string | null;
     readonly now: Date;
-  }): Promise<MailConnectionRecord> {
+  }) {
     void input.ownerUserId;
     void input.requestId;
     void input.now;
@@ -295,6 +343,26 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
     ) {
       throw new AppError("MAIL_CONNECTION_STATE_INVALID", "invalid", 409);
     }
+    if (connection.connectionStatus === input.status) {
+      return { connection, tokensToStop: [] };
+    }
+    const automaticallyPaused =
+      input.status === "ACTIVE" && connection.provider === "GOOGLE"
+        ? [...this.connections.values()].filter(
+            (candidate) =>
+              candidate.teamId === input.teamId &&
+              candidate.provider === "GOOGLE" &&
+              candidate.connectionStatus === "ACTIVE" &&
+              candidate.id !== connection.id
+          )
+        : [];
+    for (const paused of automaticallyPaused) {
+      this.connections.set(paused.id, {
+        ...paused,
+        connectionStatus: "PAUSED"
+      });
+      this.auditActions.push("MAIL_MONITORING_PAUSED");
+    }
     const updated = { ...connection, connectionStatus: input.status };
     this.connections.set(connection.id, updated);
     this.auditActions.push(
@@ -302,7 +370,20 @@ export class MemoryMailConnectionRepository implements MailConnectionRepository 
         ? "MAIL_MONITORING_RESUMED"
         : "MAIL_MONITORING_PAUSED"
     );
-    return updated;
+    const stoppedConnections =
+      input.status === "PAUSED" ? [connection] : automaticallyPaused;
+    const tokensToStop = stoppedConnections.flatMap((stopped) => {
+      const stillActive = [...this.connections.values()].some(
+        (candidate) =>
+          candidate.authorizationId === stopped.authorizationId &&
+          candidate.connectionStatus === "ACTIVE"
+      );
+      const authorization = this.authorizations.get(stopped.authorizationId);
+      return !stillActive && authorization?.token
+        ? [{ provider: authorization.provider, token: authorization.token }]
+        : [];
+    });
+    return { connection: updated, tokensToStop };
   }
 
   public async markAuthorizationFailure(input: {

@@ -62,6 +62,22 @@ const EnvironmentSchema = Type.Object({
     minimum: 5,
     maximum: 30
   }),
+  GMAIL_PUSH_MONITORING_ENABLED: Type.Boolean(),
+  GMAIL_PUBSUB_TOPIC_NAME: Type.String(),
+  GMAIL_PUBSUB_PUSH_AUDIENCE: Type.String(),
+  GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL: Type.String(),
+  GMAIL_WATCH_RENEW_BEFORE_HOURS: Type.Integer({
+    minimum: 1,
+    maximum: 168
+  }),
+  GMAIL_HISTORY_RECOVERY_LOOKBACK_HOURS: Type.Integer({
+    minimum: 24,
+    maximum: 168
+  }),
+  GMAIL_PUBSUB_MAX_BODY_BYTES: Type.Integer({
+    minimum: 16_384,
+    maximum: 1_048_576
+  }),
   MICROSOFT_OAUTH_CLIENT_ID: Type.String({ minLength: 1 }),
   MICROSOFT_OAUTH_CLIENT_SECRET: Type.String({ minLength: 1 }),
   MICROSOFT_OAUTH_REDIRECT_URI: Type.String({ minLength: 1 }),
@@ -155,6 +171,21 @@ export function loadEnvironment(
       "http://127.0.0.1:8080/api/v1/auth/gmail/callback",
     GMAIL_OAUTH_STATE_TTL_MINUTES: Number(
       source.GMAIL_OAUTH_STATE_TTL_MINUTES ?? "10"
+    ),
+    GMAIL_PUSH_MONITORING_ENABLED:
+      source.GMAIL_PUSH_MONITORING_ENABLED === "true",
+    GMAIL_PUBSUB_TOPIC_NAME: source.GMAIL_PUBSUB_TOPIC_NAME ?? "",
+    GMAIL_PUBSUB_PUSH_AUDIENCE: source.GMAIL_PUBSUB_PUSH_AUDIENCE ?? "",
+    GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL:
+      source.GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL ?? "",
+    GMAIL_WATCH_RENEW_BEFORE_HOURS: Number(
+      source.GMAIL_WATCH_RENEW_BEFORE_HOURS ?? "48"
+    ),
+    GMAIL_HISTORY_RECOVERY_LOOKBACK_HOURS: Number(
+      source.GMAIL_HISTORY_RECOVERY_LOOKBACK_HOURS ?? "72"
+    ),
+    GMAIL_PUBSUB_MAX_BODY_BYTES: Number(
+      source.GMAIL_PUBSUB_MAX_BODY_BYTES ?? "262144"
     ),
     MICROSOFT_OAUTH_CLIENT_ID:
       source.MICROSOFT_OAUTH_CLIENT_ID ?? "development-microsoft-client-id",
@@ -324,6 +355,8 @@ export function loadEnvironment(
     );
   }
 
+  validateGmailPushConfiguration(candidate);
+
   let microsoftRedirectUri: URL;
   try {
     microsoftRedirectUri = new URL(candidate.MICROSOFT_OAUTH_REDIRECT_URI);
@@ -365,6 +398,45 @@ export function loadEnvironment(
   }
 
   return candidate;
+}
+
+function validateGmailPushConfiguration(environment: AppEnvironment): void {
+  if (!environment.GMAIL_PUSH_MONITORING_ENABLED) return;
+
+  if (
+    !/^projects\/[^/]+\/topics\/[^/]+$/u.test(
+      environment.GMAIL_PUBSUB_TOPIC_NAME
+    )
+  ) {
+    throw new Error(
+      "GMAIL_PUBSUB_TOPIC_NAME must be a fully qualified Pub/Sub topic"
+    );
+  }
+  if (
+    !/^[^@\s]+@[^@\s]+\.iam\.gserviceaccount\.com$/u.test(
+      environment.GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL
+    )
+  ) {
+    throw new Error(
+      "GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL must be a service account"
+    );
+  }
+
+  let audience: URL;
+  try {
+    audience = new URL(environment.GMAIL_PUBSUB_PUSH_AUDIENCE);
+  } catch {
+    throw new Error("GMAIL_PUBSUB_PUSH_AUDIENCE must be a valid URL");
+  }
+  if (
+    (environment.APP_ENV === "production" ||
+      environment.APP_ENV === "staging") &&
+    audience.protocol !== "https:"
+  ) {
+    throw new Error(
+      "GMAIL_PUBSUB_PUSH_AUDIENCE must use HTTPS outside development"
+    );
+  }
 }
 
 function isAllowedMicrosoftTenant(value: string): boolean {

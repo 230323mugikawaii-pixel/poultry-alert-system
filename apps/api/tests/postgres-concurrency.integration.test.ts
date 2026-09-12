@@ -25,6 +25,7 @@ import type {
 } from "../src/modules/mail/mail-provider.js";
 import { GMAIL_READONLY_SCOPE } from "../src/modules/mail/providers/google-mail-provider.js";
 import { PrismaMailConnectionRepository } from "../src/modules/mail/prisma-mail-connection-repository.js";
+import { PrismaGmailMonitoringRepository } from "../src/modules/mail/gmail/prisma-gmail-monitoring-repository.js";
 import { NotificationMemberService } from "../src/modules/notification-members/notification-member-service.js";
 import { PrismaNotificationMemberRepository } from "../src/modules/notification-members/prisma-notification-member-repository.js";
 import { LocalAesGcmTokenEncryptionProvider } from "../src/modules/mail/token-encryption.js";
@@ -423,6 +424,147 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
         { action: "MAIL_CONNECTED" },
         { action: "MAIL_AUTHORIZATION_REVOKED" },
         { action: "MAIL_CONNECTION_DISCONNECTED" }
+      ])
+    );
+  });
+
+  it("keeps one active Google monitor per team and switches without discarding credentials", async () => {
+    const owner = await createUser("gmail-switch-owner@example.com");
+    const clock = { value: new Date("2026-09-08T00:00:00.000Z") };
+    const team = await createServices(clock, "482799").teamService.createTeam({
+      ownerUserId: owner.id,
+      seatLimit: 0
+    });
+    const google = new PostgresMailProviderAdapter();
+    const service = new MailConnectionService({
+      repository: new PrismaMailConnectionRepository(database),
+      providerAdapters: [google, new PostgresMailProviderAdapter("MICROSOFT")],
+      tokenEncryption: new LocalAesGcmTokenEncryptionProvider(
+        Buffer.alloc(32, 21).toString("base64"),
+        "postgres-google-switch-v1"
+      ),
+      tokenPepper: testPepper,
+      stateTtlMinutes: { GOOGLE: 10, MICROSOFT: 10 },
+      monitoringTopics: { GOOGLE: "projects/test/topics/gmail-switch" },
+      now: () => clock.value
+    });
+
+    const firstRequest = await service.createAuthorizationRequest(
+      owner.id,
+      team.team.teamId,
+      "CONNECT",
+      "GOOGLE"
+    );
+    const first = await service.completeAuthorization({
+      provider: "GOOGLE",
+      state: firstRequest.state,
+      code: "postgres-gmail-code",
+      authenticatedUserId: owner.id
+    });
+    google.subject = "postgres-gmail-subject-b";
+    google.email = "monitoring-postgres-b@example.com";
+    google.refreshToken = `${PostgresMailProviderAdapter.refreshToken}-b`;
+    const secondRequest = await service.createAuthorizationRequest(
+      owner.id,
+      team.team.teamId,
+      "CONNECT",
+      "GOOGLE"
+    );
+    const second = await service.completeAuthorization({
+      provider: "GOOGLE",
+      state: secondRequest.state,
+      code: "postgres-gmail-code",
+      authenticatedUserId: owner.id
+    });
+
+    await expect(
+      database.mailConnection.findMany({
+        where: { teamId: team.team.teamId, provider: "GOOGLE" },
+        select: { id: true, status: true, providerCursor: true },
+        orderBy: { createdAt: "asc" }
+      })
+    ).resolves.toEqual([
+      { id: first.id, status: "PAUSED", providerCursor: null },
+      { id: second.id, status: "ACTIVE", providerCursor: "watch-2" }
+    ]);
+    await expect(
+      database.mailAuthorization.count({ where: { userId: owner.id } })
+    ).resolves.toBe(2);
+
+    await service.setMonitoringState({
+      teamId: team.team.teamId,
+      ownerUserId: owner.id,
+      connectionId: first.id,
+      status: "ACTIVE"
+    });
+    await expect(
+      database.mailConnection.count({
+        where: {
+          teamId: team.team.teamId,
+          provider: "GOOGLE",
+          status: "ACTIVE"
+        }
+      })
+    ).resolves.toBe(1);
+    await expect(
+      database.mailConnection.findUniqueOrThrow({
+        where: { id: first.id },
+        select: { status: true, providerCursor: true }
+      })
+    ).resolves.toEqual({ status: "ACTIVE", providerCursor: "watch-3" });
+    const monitoringRepository = new PrismaGmailMonitoringRepository(database);
+    await expect(
+      monitoringRepository.findEligibleById(first.id)
+    ).resolves.toMatchObject({ id: first.id, providerCursor: "watch-3" });
+    await expect(
+      monitoringRepository.findEligibleById(second.id)
+    ).resolves.toBeNull();
+    await expect(
+      monitoringRepository.listWatchCandidates(
+        new Date("2026-09-16T00:00:00.000Z"),
+        10
+      )
+    ).resolves.toEqual([
+      expect.objectContaining({ id: first.id, providerCursor: "watch-3" })
+    ]);
+    const stoppedBeforeFailure = [...google.stoppedWatchTokens];
+    google.startWatchError = new Error("synthetic_watch_start_failure");
+    await expect(
+      service.setMonitoringState({
+        teamId: team.team.teamId,
+        ownerUserId: owner.id,
+        connectionId: second.id,
+        status: "ACTIVE"
+      })
+    ).rejects.toMatchObject({ code: "MAIL_MONITORING_START_FAILED" });
+    await expect(
+      database.mailConnection.findMany({
+        where: { teamId: team.team.teamId, provider: "GOOGLE" },
+        select: { id: true, status: true },
+        orderBy: { createdAt: "asc" }
+      })
+    ).resolves.toEqual([
+      { id: first.id, status: "ACTIVE" },
+      { id: second.id, status: "PAUSED" }
+    ]);
+    expect(google.stoppedWatchTokens).toEqual(stoppedBeforeFailure);
+    google.startWatchError = null;
+    await expect(
+      database.mailConnection.update({
+        where: { id: second.id },
+        data: { status: "ACTIVE" }
+      })
+    ).rejects.toMatchObject({ code: "P2002" });
+    expect(google.startedWatchTokens).toEqual([
+      PostgresMailProviderAdapter.refreshToken,
+      `${PostgresMailProviderAdapter.refreshToken}-b`,
+      PostgresMailProviderAdapter.refreshToken,
+      `${PostgresMailProviderAdapter.refreshToken}-b`
+    ]);
+    expect(google.stoppedWatchTokens).toEqual(
+      expect.arrayContaining([
+        PostgresMailProviderAdapter.refreshToken,
+        `${PostgresMailProviderAdapter.refreshToken}-b`
       ])
     );
   });
@@ -1716,6 +1858,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       data: {
         teamId: team.team.teamId,
         mailAuthorizationId: microsoftAuthorization.id,
+        provider: "MICROSOFT",
         status: "ACTIVE"
       }
     });
@@ -2105,11 +2248,37 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     const connection = await createActiveMailConnection(
       owner.id,
       team.team.teamId,
-      "notification-test-google-subject"
+      "notification-test-google-subject",
+      ["停電のお知らせ", "システム障害"]
     );
-    await database.mailConnection.update({
-      where: { id: connection.id },
-      data: { keywords: ["停電のお知らせ", "システム障害"] }
+    await database.teamKeyword.createMany({
+      data: ["停電のお知らせ", "システム障害", "旧Team専用"].map(
+        (keyword, sortOrder) => ({
+          teamId: team.team.teamId,
+          keyword,
+          normalized: keyword.normalize("NFKC").toLocaleLowerCase("ja-JP"),
+          sortOrder
+        })
+      )
+    });
+    const pausedAuthorization = await database.mailAuthorization.create({
+      data: {
+        userId: owner.id,
+        provider: "GOOGLE",
+        providerSubject: "notification-test-paused-google-subject",
+        email: "notification-test-paused@example.com",
+        grantedScopes: [GMAIL_READONLY_SCOPE],
+        status: "ACTIVE"
+      }
+    });
+    const pausedConnection = await database.mailConnection.create({
+      data: {
+        teamId: team.team.teamId,
+        mailAuthorizationId: pausedAuthorization.id,
+        provider: "GOOGLE",
+        status: "PAUSED",
+        keywords: ["停止中専用"]
+      }
     });
     const repository = new PrismaNotificationTestRepository(database);
     const alertService = new AlertService({
@@ -2125,16 +2294,41 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       ttlMilliseconds: 180_000
     });
 
+    await expect(
+      service.start({
+        teamId: team.team.teamId,
+        actorUserId: owner.id,
+        keyword: "旧Team専用"
+      })
+    ).rejects.toMatchObject({
+      code: "NOTIFICATION_TEST_KEYWORD_NOT_CONFIGURED",
+      statusCode: 409
+    });
+    await expect(
+      service.start({
+        teamId: team.team.teamId,
+        actorUserId: owner.id,
+        keyword: "停止中専用"
+      })
+    ).rejects.toMatchObject({
+      code: "NOTIFICATION_TEST_KEYWORD_NOT_CONFIGURED",
+      statusCode: 409
+    });
+
     const started = await service.start({
       teamId: team.team.teamId,
       actorUserId: owner.id,
-      sourceMailConnectionId: connection.id,
       keyword: "停電のお知らせ"
     });
     expect(started).toMatchObject({
       created: true,
-      test: { status: "PENDING", requestId: "test-request-1" }
+      test: {
+        sourceMailConnectionId: connection.id,
+        status: "PENDING",
+        requestId: "test-request-3"
+      }
     });
+    expect(started.test.sourceMailConnectionId).not.toBe(pausedConnection.id);
     await expect(
       service.confirm({
         teamId: team.team.teamId,
@@ -2263,7 +2457,6 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     const expiring = await service.start({
       teamId: team.team.teamId,
       actorUserId: owner.id,
-      sourceMailConnectionId: connection.id,
       keyword: "システム障害"
     });
     clock.value = new Date(clock.value.getTime() + 181_000);
@@ -2286,6 +2479,68 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
         select: { status: true, alertId: true }
       })
     ).resolves.toEqual({ status: "EXPIRED", alertId: null });
+
+    await database.$transaction([
+      database.mailConnection.update({
+        where: { id: connection.id },
+        data: { status: "PAUSED" }
+      }),
+      database.mailConnection.update({
+        where: { id: pausedConnection.id },
+        data: { status: "ACTIVE" }
+      })
+    ]);
+    const switched = await service.start({
+      teamId: team.team.teamId,
+      actorUserId: owner.id,
+      keyword: "停止中専用"
+    });
+    expect(switched.test).toMatchObject({
+      sourceMailConnectionId: pausedConnection.id,
+      status: "PENDING"
+    });
+    clock.value = new Date(clock.value.getTime() + 181_000);
+    await expect(
+      service.confirm({
+        teamId: team.team.teamId,
+        testId: switched.test.id,
+        actorUserId: owner.id,
+        requestId: switched.test.requestId
+      })
+    ).rejects.toMatchObject({ code: "NOTIFICATION_TEST_EXPIRED" });
+    await database.mailConnection.update({
+      where: { id: pausedConnection.id },
+      data: { status: "PAUSED" }
+    });
+    const microsoftAuthorization = await database.mailAuthorization.create({
+      data: {
+        userId: owner.id,
+        provider: "MICROSOFT",
+        providerSubject: "notification-test-microsoft-subject",
+        email: "notification-test-microsoft@example.com",
+        grantedScopes: ["Mail.Read"],
+        status: "ACTIVE"
+      }
+    });
+    await database.mailConnection.create({
+      data: {
+        teamId: team.team.teamId,
+        mailAuthorizationId: microsoftAuthorization.id,
+        provider: "MICROSOFT",
+        status: "ACTIVE",
+        keywords: ["停電のお知らせ"]
+      }
+    });
+    await expect(
+      service.start({
+        teamId: team.team.teamId,
+        actorUserId: owner.id,
+        keyword: "停電のお知らせ"
+      })
+    ).rejects.toMatchObject({
+      code: "MAIL_CONNECTION_NOT_ACTIVE",
+      statusCode: 409
+    });
   });
 
   it("keeps recipient reads independent and preserves legacy acknowledgement", async () => {
@@ -2942,6 +3197,165 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       "監視アカウント画面を改善してほしいです。"
     );
   });
+
+  it("persists Gmail watch state, serializes cursor updates, enforces eligibility, and clears state on disconnect", async () => {
+    const clock = { value: new Date("2026-09-03T12:00:00.000Z") };
+    const owner = await createUser("gmail-worker-owner@example.com");
+    const team = await createServices(clock, "482760").teamService.createTeam({
+      ownerUserId: owner.id,
+      seatLimit: 0
+    });
+    const authorization = await database.mailAuthorization.create({
+      data: {
+        userId: owner.id,
+        provider: "GOOGLE",
+        providerSubject: "gmail-worker-subject",
+        email: "gmail-worker@example.com",
+        encryptedRefreshToken: "synthetic-encrypted-token",
+        encryptionProvider: "TEST",
+        encryptionKeyVersion: "test-v1",
+        grantedScopes: [GMAIL_READONLY_SCOPE],
+        status: "ACTIVE"
+      }
+    });
+    const connection = await database.mailConnection.create({
+      data: {
+        teamId: team.team.teamId,
+        mailAuthorizationId: authorization.id,
+        provider: "GOOGLE",
+        status: "ACTIVE",
+        keywords: ["停電", "Call Now"]
+      }
+    });
+    const repository = new PrismaGmailMonitoringRepository(database);
+    await expect(
+      repository.listWatchCandidates(
+        new Date(clock.value.getTime() + 48 * 60 * 60 * 1_000),
+        100
+      )
+    ).resolves.toHaveLength(1);
+
+    await repository.recordWatch({
+      connectionId: connection.id,
+      initialCursor: "90071992547409930000",
+      expiration: new Date("2026-09-10T00:00:00.000Z"),
+      renewedAt: clock.value
+    });
+    await repository.recordWatch({
+      connectionId: connection.id,
+      initialCursor: "90071992547409939999",
+      expiration: new Date("2026-09-11T00:00:00.000Z"),
+      renewedAt: new Date(clock.value.getTime() + 60_000)
+    });
+    await expect(
+      database.mailConnection.findUniqueOrThrow({
+        where: { id: connection.id }
+      })
+    ).resolves.toMatchObject({
+      providerCursor: "90071992547409930000",
+      providerSubscriptionExpiresAt: new Date("2026-09-11T00:00:00.000Z")
+    });
+
+    const leases = await Promise.all([
+      repository.acquireSyncLease({
+        connectionId: connection.id,
+        leaseToken: "lease-one",
+        now: clock.value,
+        expiresAt: new Date(clock.value.getTime() + 120_000)
+      }),
+      repository.acquireSyncLease({
+        connectionId: connection.id,
+        leaseToken: "lease-two",
+        now: clock.value,
+        expiresAt: new Date(clock.value.getTime() + 120_000)
+      })
+    ]);
+    const winnerIndex = leases.findIndex(Boolean);
+    expect(leases.filter(Boolean)).toHaveLength(1);
+    const leaseToken = winnerIndex === 0 ? "lease-one" : "lease-two";
+    await expect(
+      repository.advanceCursor({
+        connectionId: connection.id,
+        leaseToken,
+        cursor: "90071992547409930005",
+        now: clock.value
+      })
+    ).resolves.toBe(true);
+
+    expect(
+      await repository.acquireSyncLease({
+        connectionId: connection.id,
+        leaseToken: "lease-three",
+        now: clock.value,
+        expiresAt: new Date(clock.value.getTime() + 120_000)
+      })
+    ).not.toBeNull();
+    await repository.advanceCursor({
+      connectionId: connection.id,
+      leaseToken: "lease-three",
+      cursor: "90071992547409930001",
+      now: clock.value
+    });
+    await expect(
+      database.mailConnection.findUniqueOrThrow({
+        where: { id: connection.id }
+      })
+    ).resolves.toMatchObject({
+      providerCursor: "90071992547409930005",
+      syncLeaseToken: null,
+      syncLeaseExpiresAt: null
+    });
+
+    await database.subscription.update({
+      where: { teamId: team.team.teamId },
+      data: { status: "CANCELED" }
+    });
+    await expect(
+      repository.findEligibleByEmail("gmail-worker@example.com")
+    ).resolves.toHaveLength(0);
+    await expect(
+      new AlertService({
+        repository: new PrismaAlertRepository(database),
+        now: () => clock.value
+      }).ingest({
+        teamId: team.team.teamId,
+        sourceMailConnectionId: connection.id,
+        sourceEventId: "gmail-worker-canceled-subscription",
+        matchedKeyword: "停電",
+        detectedAt: clock.value
+      })
+    ).rejects.toMatchObject({ code: "MAIL_CONNECTION_NOT_ACTIVE" });
+    await database.subscription.update({
+      where: { teamId: team.team.teamId },
+      data: { status: "ACTIVE" }
+    });
+
+    await new PrismaMailConnectionRepository(database).disconnect({
+      teamId: team.team.teamId,
+      ownerUserId: owner.id,
+      connectionId: connection.id,
+      requestId: null,
+      now: clock.value
+    });
+    await expect(
+      database.mailConnection.findUniqueOrThrow({
+        where: { id: connection.id }
+      })
+    ).resolves.toMatchObject({
+      status: "REVOKED",
+      providerCursor: null,
+      providerSubscriptionExpiresAt: null,
+      providerSubscriptionRenewedAt: null,
+      syncLeaseToken: null,
+      syncLeaseExpiresAt: null
+    });
+    await expect(
+      repository.listWatchCandidates(
+        new Date(clock.value.getTime() + 48 * 60 * 60 * 1_000),
+        100
+      )
+    ).resolves.toHaveLength(0);
+  });
 });
 
 class PostgresGoogleOAuthProvider implements GoogleOAuthProvider {
@@ -3046,8 +3460,13 @@ class PostgresMailProviderAdapter implements MailProviderAdapter {
   public readonly provider;
   public static readonly refreshToken =
     "synthetic-postgres-refresh-token-for-tests-only";
-  public readonly refreshToken;
+  public refreshToken;
+  public subject;
+  public email;
   public readonly revokedTokens: string[] = [];
+  public readonly startedWatchTokens: string[] = [];
+  public readonly stoppedWatchTokens: string[] = [];
+  public startWatchError: Error | null = null;
   private nonce: string | null = null;
 
   public constructor(provider: "GOOGLE" | "MICROSOFT" = "GOOGLE") {
@@ -3056,6 +3475,14 @@ class PostgresMailProviderAdapter implements MailProviderAdapter {
       provider === "GOOGLE"
         ? PostgresMailProviderAdapter.refreshToken
         : "synthetic-postgres-microsoft-refresh-token-for-tests-only";
+    this.subject =
+      provider === "GOOGLE"
+        ? "postgres-gmail-subject"
+        : "tenant:postgres-microsoft-subject";
+    this.email =
+      provider === "GOOGLE"
+        ? "monitoring-postgres@example.com"
+        : "monitoring-postgres@outlook.example";
   }
 
   public createAuthorizationUrl(input: {
@@ -3088,14 +3515,8 @@ class PostgresMailProviderAdapter implements MailProviderAdapter {
     }
     return {
       provider: this.provider,
-      subject:
-        this.provider === "GOOGLE"
-          ? "postgres-gmail-subject"
-          : "tenant:postgres-microsoft-subject",
-      email:
-        this.provider === "GOOGLE"
-          ? "monitoring-postgres@example.com"
-          : "monitoring-postgres@outlook.example",
+      subject: this.subject,
+      email: this.email,
       emailVerified: true,
       refreshToken: this.refreshToken,
       grantedScopes: [
@@ -3116,6 +3537,19 @@ class PostgresMailProviderAdapter implements MailProviderAdapter {
 
   public async revokeAuthorization(refreshToken: string): Promise<void> {
     this.revokedTokens.push(refreshToken);
+  }
+
+  public async startMailboxWatch(refreshToken: string) {
+    this.startedWatchTokens.push(refreshToken);
+    if (this.startWatchError) throw this.startWatchError;
+    return {
+      providerCursor: `watch-${this.startedWatchTokens.length}`,
+      expiration: new Date("2026-09-15T00:00:00.000Z")
+    };
+  }
+
+  public async stopMailboxWatch(refreshToken: string): Promise<void> {
+    this.stoppedWatchTokens.push(refreshToken);
   }
 
   public classifyProviderError(error: unknown) {
@@ -3173,7 +3607,8 @@ function createUser(email: string) {
 async function createActiveMailConnection(
   userId: string,
   teamId: string,
-  providerSubject: string
+  providerSubject: string,
+  keywords: readonly string[] = []
 ) {
   const authorization = await database.mailAuthorization.create({
     data: {
@@ -3190,7 +3625,9 @@ async function createActiveMailConnection(
     data: {
       teamId,
       mailAuthorizationId: authorization.id,
-      status: "ACTIVE"
+      provider: "GOOGLE",
+      status: "ACTIVE",
+      keywords: [...keywords]
     }
   });
 }

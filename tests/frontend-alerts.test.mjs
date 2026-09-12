@@ -244,7 +244,7 @@ test("notification details no longer navigate to removed Home alert lists", () =
 
 test("notification tests create server TEST alerts instead of opening a local-only alarm", () => {
   const testFunction = appSource.match(
-    /async function testNotification\([\s\S]*?\n}\n\nfunction findNotificationTestConnection/,
+    /async function testNotification\([\s\S]*?\n}\n\nasync function startServerNotificationTest/,
   )?.[0];
   assert.ok(testFunction, "testNotification should be present");
   assert.match(testFunction, /startServerNotificationTest/);

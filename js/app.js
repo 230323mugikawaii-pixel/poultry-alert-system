@@ -161,8 +161,10 @@ function loadSavedData() {
 }
 const keywordPolicy =
   window.CallNowKeywordPolicy;
+const monitoringKeywordPolicy =
+  window.CallNowMonitoringKeywordPolicy;
 
-if (!keywordPolicy) {
+if (!keywordPolicy || !monitoringKeywordPolicy) {
   throw new Error(
     "キーワード検証機能を読み込めませんでした。"
   );
@@ -3455,7 +3457,7 @@ function renderMailMonitoringAccount() {
 
   status.innerHTML = `
     <p class="connected-account-summary">
-      ${mailConnections.length}件接続中
+      ${mailConnections.length}件の監視アカウントを接続済み
     </p>
     <div class="mail-connection-list">
       ${mailConnections.map(renderMailConnectionItem).join("")}
@@ -3486,6 +3488,11 @@ function renderMailConnectionItem(connection) {
     ] !== "AVAILABLE";
   const isPaused =
     connection.connectionStatus === "PAUSED";
+  const monitoringStateClass = requiresReauthorization
+    ? "requires-reauthorization"
+    : isPaused
+      ? "paused"
+      : "active";
   return `
     <article class="mail-connection-item">
       <div>
@@ -3495,12 +3502,12 @@ function renderMailConnectionItem(connection) {
         <p class="connected-account-email">
           ${escapeHtml(connection.email)}
         </p>
-        <p class="connected-account-empty">
+        <p class="mail-monitoring-state ${monitoringStateClass}">
           ${requiresReauthorization
-            ? "再認証が必要です"
+            ? "● 再認証が必要です"
             : isPaused
-              ? "監視停止中"
-              : "監視接続中"}
+              ? "● 監視停止中"
+              : "● 監視中"}
         </p>
       </div>
       <div class="mail-account-actions">
@@ -3517,7 +3524,7 @@ function renderMailConnectionItem(connection) {
             type="button"
             class="btn outline"
             onclick="setMailMonitoringState('${connection.id}', '${isPaused ? "resume" : "pause"}')"
-          >${isPaused ? "監視を開始" : "監視を停止"}</button>
+          >${isPaused ? "このアカウントで監視を開始" : "監視を停止"}</button>
         ` : ""}
         <button
           type="button"
@@ -3593,6 +3600,7 @@ async function activateDeferredOwnerMonitoring(choiceId) {
   mailConnections = await fetchMailConnections();
   renderMailMonitoringAccount();
   renderConnectedGoogleAccounts();
+  renderTestKeywordCards();
 }
 
 
@@ -3624,6 +3632,7 @@ async function setMailMonitoringState(connectionId, action) {
     mailConnections = await fetchMailConnections();
     renderMailMonitoringAccount();
     renderConnectedGoogleAccounts();
+    renderTestKeywordCards();
   } catch (error) {
     await showAppAlert(
       error instanceof Error
@@ -3779,6 +3788,7 @@ async function disconnectMailConnection(
       await fetchMailConnections();
     renderMailMonitoringAccount();
     renderConnectedGoogleAccounts();
+    renderTestKeywordCards();
     await showAppAlert(
       "メール監視アカウントの接続を解除しました。"
     );
@@ -3965,15 +3975,21 @@ function renderContractSettings() {
       const status =
         document.createElement("span");
       status.className =
-        "contract-provider-status";
+        `contract-provider-status ${
+          connection.connectionStatus === "ACTIVE"
+            ? "active"
+            : connection.connectionStatus === "PAUSED"
+              ? "paused"
+              : "requires-reauthorization"
+        }`;
       status.textContent =
         connection.connectionStatus ===
         "ACTIVE"
-          ? "監視中"
+          ? "● 監視中"
           : connection.connectionStatus ===
               "PAUSED"
-            ? "停止中"
-            : "再設定が必要";
+            ? "● 監視停止中"
+            : "● 再設定が必要";
       heading.append(title, status);
 
       const label =
@@ -6355,6 +6371,10 @@ function showAppPage(
     renderContractSettings();
   }
 
+  if (pageId === "testPage") {
+    renderTestKeywordCards();
+  }
+
   document
     .querySelectorAll(
       ".app-page"
@@ -7681,25 +7701,40 @@ function renderTestKeywordCards() {
 
   container.innerHTML = "";
 
-  if (keywords.length === 0) {
+  const activeGoogleConnection =
+    monitoringKeywordPolicy.findActiveGoogleConnection(
+      mailConnections
+    );
+  const activeKeywords =
+    monitoringKeywordPolicy.getActiveGoogleKeywords(
+      mailConnections
+    );
+
+  if (!activeGoogleConnection || activeKeywords.length === 0) {
     const empty =
       document.createElement("article");
     empty.className =
       "card test-empty-card";
     const message =
       document.createElement("p");
-    message.textContent =
-      "通知キーワードが設定されていません。";
+    message.textContent = activeGoogleConnection
+      ? "監視中のGoogleアカウントに通知キーワードが設定されていません。"
+      : "監視中のGoogleアカウントがありません。";
     const button =
       document.createElement("button");
     button.type = "button";
     button.className = "btn primary";
-    button.textContent =
-      "契約内容を設定する";
+    button.textContent = activeGoogleConnection
+      ? "契約内容を設定する"
+      : "監視アカウント設定を開く";
     button.addEventListener(
       "click",
       () => {
-        showAppPage("keywordPage");
+        if (activeGoogleConnection) {
+          showAppPage("keywordPage");
+        } else {
+          openGoogleAccountManager();
+        }
       }
     );
     empty.append(message, button);
@@ -7708,7 +7743,7 @@ function renderTestKeywordCards() {
     return;
   }
 
-  keywords.forEach((keyword) => {
+  activeKeywords.forEach((keyword) => {
     const card =
       document.createElement(
         "article"
@@ -7784,8 +7819,6 @@ async function testNotification(keyword, button) {
       return;
     }
 
-    const connection =
-      findNotificationTestConnection(keyword);
     if (!currentTeam || currentTeam.role !== "OWNER") {
       setText(
         "notificationTestError",
@@ -7793,14 +7826,6 @@ async function testNotification(keyword, button) {
       );
       return;
     }
-    if (!connection) {
-      setText(
-        "notificationTestError",
-        "このキーワードを監視している有効なメールアカウントがありません。"
-      );
-      return;
-    }
-
     testButtons.forEach((testButton) => {
       testButton.dataset.originalText =
         testButton.textContent.trim();
@@ -7811,7 +7836,6 @@ async function testNotification(keyword, button) {
     });
 
     serverTest = await startServerNotificationTest(
-      connection.id,
       keyword
     );
 
@@ -7922,33 +7946,7 @@ async function testNotification(keyword, button) {
   }
 }
 
-function findNotificationTestConnection(keyword) {
-  const normalizedKeyword =
-    keyword
-      .trim()
-      .replace(/[ \u00a0\u3000]+/gu, " ")
-      .normalize("NFKC")
-      .toLocaleLowerCase("ja-JP");
-  return mailConnections.find(
-    (connection) =>
-      connection.connectionStatus === "ACTIVE" &&
-      connection.authorizationStatus === "ACTIVE" &&
-      connection.keywords.some(
-        (candidate) =>
-          candidate
-            .trim()
-            .replace(/[ \u00a0\u3000]+/gu, " ")
-            .normalize("NFKC")
-            .toLocaleLowerCase("ja-JP") ===
-          normalizedKeyword
-      )
-  ) || null;
-}
-
-async function startServerNotificationTest(
-  mailConnectionId,
-  keyword
-) {
+async function startServerNotificationTest(keyword) {
   const response = await fetch(
     apiUrl(
       `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/notification-tests`
@@ -7961,7 +7959,6 @@ async function startServerNotificationTest(
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        mailConnectionId,
         keyword
       })
     }

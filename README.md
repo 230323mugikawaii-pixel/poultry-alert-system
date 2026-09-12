@@ -24,6 +24,14 @@ GmailやMicrosoft 365へ届く大切なメールを、停止するまで繰り�
 - 監視用refresh tokenはブラウザへ返さず、サーバー側で暗号化して保存します。
 - 旧形式のlocalStorageメールアドレスは本人確認に使用しません。
 
+## Gmail常時監視
+
+- Gmail / Google Workspaceの有効な契約では、Gmail `users.watch` と認証済みPub/Sub pushから
+  History APIの差分を取得し、Provider別キーワードに一致した新着INBOXメールだけをREAL Alertへ渡します。
+- 件名・本文は照合中だけ扱い、DB・監査ログ・アプリログへ保存しません。添付ファイルは検索しません。
+- watchは期限前の定期更新が必要です。運用設定、Google Cloud側の最小権限、障害復旧、staging E2E手順は
+  [docs/gmail-push-monitoring.md](docs/gmail-push-monitoring.md) を参照してください。
+
 ## 利用者向け通知とフィードバック
 
 - Homeは監視アカウントを中心に表示し、運営・システム・フィードバック返信は右上のベルから

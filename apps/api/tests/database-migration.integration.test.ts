@@ -143,7 +143,28 @@ const prismaSchemaAlignmentMigration = readFileSync(
   ),
   "utf8"
 );
-const migration =
+const gmailPushMonitoringMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260903000200_gmail_push_monitoring/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const singleActiveGoogleMonitoringMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260908000100_single_active_google_monitoring/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const mailConnectionKeywordBackfillMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260909000100_backfill_mail_connection_keywords/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const migrationBeforeGmailPush =
   baseMigration +
   gmailMigration +
   mailProviderMigration +
@@ -160,6 +181,13 @@ const migration =
   alertRecipientReadStateMigration +
   notificationDismissalMigration +
   prismaSchemaAlignmentMigration;
+const migrationBeforeSingleActiveGoogle =
+  migrationBeforeGmailPush + gmailPushMonitoringMigration;
+const migrationBeforeMailConnectionKeywordBackfill =
+  migrationBeforeSingleActiveGoogle + singleActiveGoogleMonitoringMigration;
+const migration =
+  migrationBeforeMailConnectionKeywordBackfill +
+  mailConnectionKeywordBackfillMigration;
 
 const databases: PGlite[] = [];
 
@@ -170,6 +198,211 @@ afterEach(async () => {
 });
 
 describe("PostgreSQL migrations", () => {
+  it("pauses duplicate active Google connections without deleting their authorization", async () => {
+    const database = new PGlite();
+    databases.push(database);
+    await database.exec(migrationBeforeSingleActiveGoogle);
+    await database.exec(`
+      INSERT INTO users (id, email, "updatedAt") VALUES
+        ('00000000-0000-0000-0000-000000000020', 'switch-owner@example.com', now());
+      INSERT INTO teams (id, "publicCode", "updatedAt") VALUES
+        ('10000000-0000-0000-0000-000000000020', '682731', now());
+      INSERT INTO mail_authorizations (
+        id, "userId", provider, "providerSubject", email, "updatedAt"
+      ) VALUES
+        ('30000000-0000-0000-0000-000000000020',
+         '00000000-0000-0000-0000-000000000020',
+         'GOOGLE', 'switch-subject-a', 'switch-a@example.com', now()),
+        ('30000000-0000-0000-0000-000000000021',
+         '00000000-0000-0000-0000-000000000020',
+         'GOOGLE', 'switch-subject-b', 'switch-b@example.com', now());
+      INSERT INTO mail_connections (
+        id, "teamId", "mailAuthorizationId", status, "updatedAt"
+      ) VALUES
+        ('40000000-0000-0000-0000-000000000020',
+         '10000000-0000-0000-0000-000000000020',
+         '30000000-0000-0000-0000-000000000020', 'ACTIVE', now()),
+        ('40000000-0000-0000-0000-000000000021',
+         '10000000-0000-0000-0000-000000000020',
+         '30000000-0000-0000-0000-000000000021', 'ACTIVE', now());
+    `);
+
+    await database.exec(singleActiveGoogleMonitoringMigration);
+    const connections = await database.query<{
+      status: string;
+      provider: string;
+    }>(`
+      SELECT status, provider
+      FROM mail_connections
+      ORDER BY id;
+    `);
+    expect(connections.rows).toEqual([
+      { status: "PAUSED", provider: "GOOGLE" },
+      { status: "ACTIVE", provider: "GOOGLE" }
+    ]);
+    const authorizations = await database.query<{ count: number }>(`
+      SELECT COUNT(*)::integer AS count FROM mail_authorizations;
+    `);
+    expect(authorizations.rows).toEqual([{ count: 2 }]);
+    await expect(
+      database.exec(`
+        UPDATE mail_connections
+        SET status = 'ACTIVE'
+        WHERE id = '40000000-0000-0000-0000-000000000020';
+      `)
+    ).rejects.toThrow();
+  });
+
+  it("backfills only empty connected account keyword sets and preserves existing data", async () => {
+    const database = new PGlite();
+    databases.push(database);
+    await database.exec(migrationBeforeMailConnectionKeywordBackfill);
+    await database.exec(`
+      INSERT INTO users (id, email, "updatedAt") VALUES
+        ('00000000-0000-0000-0000-000000000030', 'keyword-owner@example.com', now());
+      INSERT INTO teams (id, "publicCode", "updatedAt") VALUES
+        ('10000000-0000-0000-0000-000000000030', '782731', now());
+      INSERT INTO team_keywords (
+        id, "teamId", keyword, normalized, "sortOrder"
+      ) VALUES
+        ('20000000-0000-0000-0000-000000000030',
+         '10000000-0000-0000-0000-000000000030',
+         '停電', '停電', 0),
+        ('20000000-0000-0000-0000-000000000031',
+         '10000000-0000-0000-0000-000000000030',
+         '通電', '通電', 1);
+      INSERT INTO mail_authorizations (
+        id, "userId", provider, "providerSubject", email, "updatedAt"
+      ) VALUES
+        ('30000000-0000-0000-0000-000000000030',
+         '00000000-0000-0000-0000-000000000030',
+         'GOOGLE', 'keyword-subject-active', 'active@example.com', now()),
+        ('30000000-0000-0000-0000-000000000031',
+         '00000000-0000-0000-0000-000000000030',
+         'GOOGLE', 'keyword-subject-paused-empty', 'paused-empty@example.com', now()),
+        ('30000000-0000-0000-0000-000000000032',
+         '00000000-0000-0000-0000-000000000030',
+         'GOOGLE', 'keyword-subject-paused-custom', 'paused-custom@example.com', now()),
+        ('30000000-0000-0000-0000-000000000033',
+         '00000000-0000-0000-0000-000000000030',
+         'GOOGLE', 'keyword-subject-revoked', 'revoked@example.com', now());
+      INSERT INTO mail_connections (
+        id, "teamId", "mailAuthorizationId", provider, status, keywords, "updatedAt"
+      ) VALUES
+        ('40000000-0000-0000-0000-000000000030',
+         '10000000-0000-0000-0000-000000000030',
+         '30000000-0000-0000-0000-000000000030', 'GOOGLE', 'ACTIVE', ARRAY[]::TEXT[], now()),
+        ('40000000-0000-0000-0000-000000000031',
+         '10000000-0000-0000-0000-000000000030',
+         '30000000-0000-0000-0000-000000000031', 'GOOGLE', 'PAUSED', ARRAY[]::TEXT[], now()),
+        ('40000000-0000-0000-0000-000000000032',
+         '10000000-0000-0000-0000-000000000030',
+         '30000000-0000-0000-0000-000000000032', 'GOOGLE', 'PAUSED', ARRAY['固有語'], now()),
+        ('40000000-0000-0000-0000-000000000033',
+         '10000000-0000-0000-0000-000000000030',
+         '30000000-0000-0000-0000-000000000033', 'GOOGLE', 'REVOKED', ARRAY[]::TEXT[], now());
+    `);
+
+    await database.exec(mailConnectionKeywordBackfillMigration);
+
+    const connections = await database.query<{
+      id: string;
+      keywords: string[];
+    }>(`
+      SELECT id, keywords
+      FROM mail_connections
+      ORDER BY id;
+    `);
+    expect(connections.rows).toEqual([
+      {
+        id: "40000000-0000-0000-0000-000000000030",
+        keywords: ["停電", "通電"]
+      },
+      {
+        id: "40000000-0000-0000-0000-000000000031",
+        keywords: ["停電", "通電"]
+      },
+      {
+        id: "40000000-0000-0000-0000-000000000032",
+        keywords: ["固有語"]
+      },
+      {
+        id: "40000000-0000-0000-0000-000000000033",
+        keywords: []
+      }
+    ]);
+    const teamKeywords = await database.query<{
+      keyword: string;
+      sortOrder: number;
+    }>(`
+      SELECT keyword, "sortOrder"
+      FROM team_keywords
+      ORDER BY "sortOrder";
+    `);
+    expect(teamKeywords.rows).toEqual([
+      { keyword: "停電", sortOrder: 0 },
+      { keyword: "通電", sortOrder: 1 }
+    ]);
+  });
+
+  it("adds nullable Gmail watch state without changing existing connections", async () => {
+    const database = new PGlite();
+    databases.push(database);
+    await database.exec(migrationBeforeGmailPush);
+    await database.exec(`
+      INSERT INTO users (id, email, "updatedAt") VALUES
+        ('00000000-0000-0000-0000-000000000010', 'existing@example.com', now());
+      INSERT INTO teams (id, "publicCode", "updatedAt") VALUES
+        ('10000000-0000-0000-0000-000000000010', '582731', now());
+      INSERT INTO subscriptions (
+        id, "teamId", status, "currentTermStartedAt", "currentTermEndsAt", "updatedAt"
+      ) VALUES (
+        '20000000-0000-0000-0000-000000000010',
+        '10000000-0000-0000-0000-000000000010',
+        'ACTIVE', now(), now() + interval '1 year', now()
+      );
+      INSERT INTO mail_authorizations (
+        id, "userId", provider, "providerSubject", email, "updatedAt"
+      ) VALUES (
+        '30000000-0000-0000-0000-000000000010',
+        '00000000-0000-0000-0000-000000000010',
+        'GOOGLE', 'existing-subject', 'existing@example.com', now()
+      );
+      INSERT INTO mail_connections (
+        id, "teamId", "mailAuthorizationId", status, "updatedAt"
+      ) VALUES (
+        '40000000-0000-0000-0000-000000000010',
+        '10000000-0000-0000-0000-000000000010',
+        '30000000-0000-0000-0000-000000000010',
+        'ACTIVE', now()
+      );
+    `);
+
+    await database.exec(gmailPushMonitoringMigration);
+    const result = await database.query<{
+      providerSubscriptionExpiresAt: Date | null;
+      providerSubscriptionRenewedAt: Date | null;
+      syncLeaseToken: string | null;
+      syncLeaseExpiresAt: Date | null;
+    }>(`
+      SELECT
+        "providerSubscriptionExpiresAt",
+        "providerSubscriptionRenewedAt",
+        "syncLeaseToken",
+        "syncLeaseExpiresAt"
+      FROM mail_connections
+      WHERE id = '40000000-0000-0000-0000-000000000010';
+    `);
+    expect(result.rows).toEqual([
+      {
+        providerSubscriptionExpiresAt: null,
+        providerSubscriptionRenewedAt: null,
+        syncLeaseToken: null,
+        syncLeaseExpiresAt: null
+      }
+    ]);
+  });
+
   it("apply cleanly and enforce identity, team, and owner invariants", async () => {
     const database = new PGlite();
     databases.push(database);
@@ -260,6 +493,28 @@ describe("PostgreSQL migrations", () => {
     expect(mailTables.rows).toEqual([
       { table_name: "mail_authorizations" },
       { table_name: "mail_connections" }
+    ]);
+
+    const gmailMonitoringColumns = await database.query<{
+      column_name: string;
+    }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'mail_connections'
+        AND column_name IN (
+          'providerSubscriptionExpiresAt',
+          'providerSubscriptionRenewedAt',
+          'syncLeaseToken',
+          'syncLeaseExpiresAt'
+        )
+      ORDER BY column_name;
+    `);
+    expect(gmailMonitoringColumns.rows).toEqual([
+      { column_name: "providerSubscriptionExpiresAt" },
+      { column_name: "providerSubscriptionRenewedAt" },
+      { column_name: "syncLeaseExpiresAt" },
+      { column_name: "syncLeaseToken" }
     ]);
 
     const contractChangeTables = await database.query<{
@@ -467,12 +722,12 @@ describe("PostgreSQL migrations", () => {
         'ACTIVE', now()
       );
       INSERT INTO mail_connections (
-        id, "teamId", "mailAuthorizationId", status, "updatedAt"
+        id, "teamId", "mailAuthorizationId", provider, status, "updatedAt"
       ) VALUES (
         '50000000-0000-0000-0000-000000000001',
         '10000000-0000-0000-0000-000000000001',
         '40000000-0000-0000-0000-000000000001',
-        'ACTIVE', now()
+        'GOOGLE', 'ACTIVE', now()
       );
     `);
     const separatedIdentities = await database.query<{

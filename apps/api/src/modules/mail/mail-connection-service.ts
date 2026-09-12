@@ -29,6 +29,9 @@ export class MailConnectionService {
       readonly tokenEncryption: TokenEncryptionProvider;
       readonly tokenPepper: string;
       readonly stateTtlMinutes: Readonly<Record<MailProviderId, number>>;
+      readonly monitoringTopics?: Readonly<
+        Partial<Record<MailProviderId, string>>
+      >;
       readonly now?: () => Date;
     }
   ) {
@@ -169,6 +172,9 @@ export class MailConnectionService {
       grantedScopes: [...new Set(grant.grantedScopes)].sort(),
       intent: challenge.intent,
       connectionId: challenge.connectionId,
+      deferActivation: Boolean(
+        this.options.monitoringTopics?.[challenge.provider]
+      ),
       requestId: input.requestId ?? null,
       now: this.now()
     });
@@ -177,6 +183,18 @@ export class MailConnectionService {
         this.revokeObsoleteToken(token, challenge.provider, grant.refreshToken)
       )
     );
+    if (
+      persisted.connection.provider === "GOOGLE" &&
+      persisted.connection.connectionStatus === "PAUSED"
+    ) {
+      return this.setMonitoringState({
+        teamId: persisted.connection.teamId,
+        ownerUserId: challenge.userId,
+        connectionId: persisted.connection.id,
+        status: "ACTIVE",
+        ...(input.requestId ? { requestId: input.requestId } : {})
+      });
+    }
     return persisted.connection;
   }
 
@@ -200,24 +218,104 @@ export class MailConnectionService {
       requestId: input.requestId ?? null,
       now: this.now()
     });
+    await this.stopObsoleteWatch(result.tokenToRevoke);
     await this.revokeObsoleteToken(result.tokenToRevoke);
   }
 
-  public setMonitoringState(input: {
+  public async setMonitoringState(input: {
     readonly teamId: string;
     readonly ownerUserId: string;
     readonly connectionId: string;
     readonly status: "ACTIVE" | "PAUSED";
     readonly requestId?: string;
   }): Promise<MailConnectionRecord> {
-    return this.options.repository.setMonitoringState({
+    const now = this.now();
+    if (input.status === "PAUSED") {
+      const result = await this.options.repository.setMonitoringState({
+        teamId: input.teamId,
+        ownerUserId: input.ownerUserId,
+        connectionId: input.connectionId,
+        status: input.status,
+        watch: null,
+        requestId: input.requestId ?? null,
+        now
+      });
+      await this.stopMailboxWatches(result.tokensToStop);
+      return result.connection;
+    }
+
+    const target = await this.options.repository.getMonitoringActivationTarget({
       teamId: input.teamId,
       ownerUserId: input.ownerUserId,
-      connectionId: input.connectionId,
-      status: input.status,
-      requestId: input.requestId ?? null,
-      now: this.now()
+      connectionId: input.connectionId
     });
+    if (target.connection.connectionStatus === "ACTIVE") {
+      return target.connection;
+    }
+
+    const topicName =
+      this.options.monitoringTopics?.[target.connection.provider];
+    let watch: {
+      readonly providerCursor: string;
+      readonly expiration: Date;
+      readonly renewedAt: Date;
+    } | null = null;
+    let plaintextToken: string | null = null;
+    if (topicName) {
+      const provider = this.requireProvider(target.connection.provider);
+      if (!provider.startMailboxWatch) {
+        throw new AppError(
+          "MAIL_MONITORING_START_UNAVAILABLE",
+          "メール監視を開始できませんでした。しばらくしてからもう一度お試しください。",
+          503
+        );
+      }
+      plaintextToken = await this.options.tokenEncryption.decrypt(
+        target.credential.token
+      );
+      try {
+        const started = await provider.startMailboxWatch(
+          plaintextToken,
+          topicName
+        );
+        watch = {
+          providerCursor: started.providerCursor,
+          expiration: started.expiration,
+          renewedAt: now
+        };
+      } catch (error) {
+        await this.handleMonitoringStartFailure(target.connection, error);
+      }
+    }
+
+    try {
+      const result = await this.options.repository.setMonitoringState({
+        teamId: input.teamId,
+        ownerUserId: input.ownerUserId,
+        connectionId: input.connectionId,
+        status: input.status,
+        watch,
+        requestId: input.requestId ?? null,
+        now
+      });
+      await this.stopMailboxWatches(result.tokensToStop);
+      return result.connection;
+    } catch (error) {
+      if (watch && plaintextToken) {
+        const current = await this.options.repository.findConnectionById(
+          input.teamId,
+          input.ownerUserId,
+          input.connectionId
+        );
+        if (current?.connectionStatus !== "ACTIVE") {
+          await this.stopPlaintextWatch(
+            target.connection.provider,
+            plaintextToken
+          );
+        }
+      }
+      throw error;
+    }
   }
 
   public async markProviderFailure(input: {
@@ -279,6 +377,87 @@ export class MailConnectionService {
       // The credential is already disabled in Call Now. Provider revocation is
       // deliberately best-effort and never re-enables local monitoring.
     }
+  }
+
+  private async stopObsoleteWatch(
+    providerToken: ProviderToken | null
+  ): Promise<void> {
+    if (!providerToken) return;
+    const provider = this.requireProvider(providerToken.provider);
+    if (!provider.stopMailboxWatch) return;
+    try {
+      const plaintext = await this.options.tokenEncryption.decrypt(
+        providerToken.token
+      );
+      await provider.stopMailboxWatch(plaintext);
+    } catch {
+      // Local revocation is authoritative. Provider watch shutdown is
+      // deliberately best-effort and must not restore a disconnected account.
+    }
+  }
+
+  private async stopMailboxWatches(
+    providerTokens: readonly ProviderToken[]
+  ): Promise<void> {
+    await Promise.all(
+      providerTokens.map(async (providerToken) => {
+        if (!this.options.monitoringTopics?.[providerToken.provider]) return;
+        try {
+          const plaintext = await this.options.tokenEncryption.decrypt(
+            providerToken.token
+          );
+          await this.stopPlaintextWatch(providerToken.provider, plaintext);
+        } catch {
+          // The database state is authoritative. A provider-side stop is
+          // best-effort and a stale push cannot reactivate a paused connection.
+        }
+      })
+    );
+  }
+
+  private async stopPlaintextWatch(
+    providerId: MailProviderId,
+    plaintextToken: string
+  ): Promise<void> {
+    const provider = this.requireProvider(providerId);
+    if (!provider.stopMailboxWatch) return;
+    try {
+      await provider.stopMailboxWatch(plaintextToken);
+    } catch {
+      // Local state remains authoritative when the provider cannot stop a
+      // mailbox watch immediately.
+    }
+  }
+
+  private async handleMonitoringStartFailure(
+    connection: MailConnectionRecord,
+    error: unknown
+  ): Promise<never> {
+    const classification = this.requireProvider(
+      connection.provider
+    ).classifyProviderError(error);
+    if (
+      classification === "REAUTHORIZATION_REQUIRED" ||
+      classification === "CONSENT_REQUIRED" ||
+      classification === "FORBIDDEN"
+    ) {
+      await this.options.repository.markAuthorizationFailure({
+        authorizationId: connection.authorizationId,
+        status: "REAUTH_REQUIRED",
+        errorCode: classification,
+        now: this.now()
+      });
+      throw new AppError(
+        "MAIL_REAUTHORIZATION_REQUIRED",
+        "監視を開始するにはメールアカウントの再設定が必要です。",
+        409
+      );
+    }
+    throw new AppError(
+      "MAIL_MONITORING_START_FAILED",
+      "メール監視を開始できませんでした。現在監視中のアカウントは変更されていません。",
+      503
+    );
   }
 
   private hashSecret(value: string): string {

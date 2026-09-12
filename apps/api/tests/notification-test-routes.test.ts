@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/app.js";
 import { loadEnvironment } from "../src/config/env.js";
 import type { NotificationTestRecord } from "../src/modules/alerts/notification-test-repository.js";
@@ -55,8 +55,12 @@ describe("notification test routes", () => {
     });
     teamRepository.addMember(member.userId);
     const record = createNotificationTest(team.team.teamId, owner.userId);
+    const startNotificationTest = vi.fn(async () => ({
+      test: record,
+      created: true
+    }));
     const notificationTestService = {
-      start: async () => ({ test: record, created: true }),
+      start: startNotificationTest,
       confirm: async () => ({
         test: {
           ...record,
@@ -86,7 +90,6 @@ describe("notification test routes", () => {
     apps.push(app);
     const url = `/api/v1/teams/${team.team.teamId}/notification-tests`;
     const payload = {
-      mailConnectionId: record.sourceMailConnectionId,
       keyword: record.keyword
     };
 
@@ -131,6 +134,11 @@ describe("notification test routes", () => {
       });
       expect(response.headers["cache-control"]).toBe("no-store");
     }
+    expect(startNotificationTest).toHaveBeenLastCalledWith({
+      teamId: team.team.teamId,
+      actorUserId: owner.userId,
+      keyword: record.keyword
+    });
     const limited = await start();
     expect(limited.statusCode).toBe(429);
     expect(limited.json()).toMatchObject({

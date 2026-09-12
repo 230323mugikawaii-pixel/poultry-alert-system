@@ -68,9 +68,12 @@ test("contract validation is inline, focusable, and clears on correction", () =>
 });
 
 test("test cards are dynamic and explain the true zero-keyword state", () => {
-  assert.match(appSource, /keywords\.forEach\(\(keyword\) =>/);
-  assert.match(appSource, /通知キーワードが設定されていません。/);
+  assert.match(appSource, /getActiveGoogleKeywords/);
+  assert.match(appSource, /activeKeywords\.forEach\(\(keyword\) =>/);
+  assert.match(appSource, /監視中のGoogleアカウントに通知キーワードが設定されていません。/);
+  assert.match(appSource, /監視中のGoogleアカウントがありません。/);
   assert.match(appSource, /契約内容を設定する/);
+  assert.match(appSource, /監視アカウント設定を開く/);
   assert.doesNotMatch(
     htmlSource.match(/id="testKeywordCards"[\s\S]*?<\/div>/)?.[0] ?? "",
     /停電|通電|警報/,

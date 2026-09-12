@@ -50,11 +50,14 @@ export class PrismaAlertRepository implements AlertRepository {
                 JOIN teams AS team ON team.id = mail_connection."teamId"
                 JOIN mail_authorizations AS mail_authorization
                   ON mail_authorization.id = mail_connection."mailAuthorizationId"
+                JOIN subscriptions AS subscription
+                  ON subscription."teamId" = team.id
                 WHERE mail_connection.id = ${input.sourceMailConnectionId}::uuid
                   AND mail_connection."teamId" = ${input.teamId}::uuid
                   AND mail_connection.status = 'ACTIVE'
                   AND mail_authorization.status = 'ACTIVE'
                   AND team.status = 'ACTIVE'
+                  AND subscription.status = 'ACTIVE'
                 FOR UPDATE OF mail_connection
               `
             );

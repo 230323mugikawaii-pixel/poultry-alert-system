@@ -16,7 +16,6 @@ export class PrismaNotificationTestRepository implements NotificationTestReposit
   public start(input: {
     readonly teamId: string;
     readonly actorUserId: string;
-    readonly sourceMailConnectionId: string;
     readonly keyword: string;
     readonly requestId: string;
     readonly now: Date;
@@ -28,12 +27,14 @@ export class PrismaNotificationTestRepository implements NotificationTestReposit
           async (transaction) => {
             await lockTeam(transaction, input.teamId);
             await requireOwner(transaction, input.teamId, input.actorUserId);
-            await requireEligibleConnection(transaction, {
-              teamId: input.teamId,
-              sourceMailConnectionId: input.sourceMailConnectionId,
-              keyword: input.keyword,
-              now: input.now
-            });
+            const sourceMailConnectionId = await requireEligibleConnection(
+              transaction,
+              {
+                teamId: input.teamId,
+                keyword: input.keyword,
+                now: input.now
+              }
+            );
 
             const openTest = await transaction.notificationTest.findFirst({
               where: {
@@ -47,8 +48,7 @@ export class PrismaNotificationTestRepository implements NotificationTestReposit
             } else if (openTest) {
               if (
                 openTest.actorUserId === input.actorUserId &&
-                openTest.sourceMailConnectionId ===
-                  input.sourceMailConnectionId &&
+                openTest.sourceMailConnectionId === sourceMailConnectionId &&
                 comparableKeyword(openTest.keyword) ===
                   comparableKeyword(input.keyword)
               ) {
@@ -65,7 +65,7 @@ export class PrismaNotificationTestRepository implements NotificationTestReposit
               data: {
                 teamId: input.teamId,
                 actorUserId: input.actorUserId,
-                sourceMailConnectionId: input.sourceMailConnectionId,
+                sourceMailConnectionId,
                 keyword: input.keyword,
                 requestId: input.requestId,
                 expiresAt: input.expiresAt
@@ -80,7 +80,7 @@ export class PrismaNotificationTestRepository implements NotificationTestReposit
                 targetId: created.id,
                 requestId: input.requestId,
                 metadata: {
-                  sourceMailConnectionId: input.sourceMailConnectionId,
+                  sourceMailConnectionId,
                   keyword: input.keyword
                 }
               }
@@ -355,11 +355,11 @@ async function requireEligibleConnection(
   transaction: Prisma.TransactionClient,
   input: {
     readonly teamId: string;
-    readonly sourceMailConnectionId: string;
+    readonly sourceMailConnectionId?: string;
     readonly keyword: string;
     readonly now: Date;
   }
-): Promise<void> {
+): Promise<string> {
   const [subscription, connection] = await Promise.all([
     transaction.subscription.findFirst({
       where: {
@@ -371,11 +371,15 @@ async function requireEligibleConnection(
     }),
     transaction.mailConnection.findFirst({
       where: {
-        id: input.sourceMailConnectionId,
+        ...(input.sourceMailConnectionId
+          ? { id: input.sourceMailConnectionId }
+          : {}),
         teamId: input.teamId,
+        provider: "GOOGLE",
         status: "ACTIVE",
-        mailAuthorization: { status: "ACTIVE" }
+        mailAuthorization: { provider: "GOOGLE", status: "ACTIVE" }
       },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: { id: true, keywords: true }
     })
   ]);
@@ -401,10 +405,11 @@ async function requireEligibleConnection(
   ) {
     throw new AppError(
       "NOTIFICATION_TEST_KEYWORD_NOT_CONFIGURED",
-      "この監視アカウントには選択したキーワードが設定されていません。",
+      "この通知キーワードは現在監視中のGoogleアカウントに設定されていません。",
       409
     );
   }
+  return connection.id;
 }
 
 async function lockTest(

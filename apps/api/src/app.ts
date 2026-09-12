@@ -19,6 +19,9 @@ import { createPrimaryAuthRoutes } from "./modules/auth/primary-auth-routes.js";
 import type { PrimaryAuthService } from "./modules/auth/primary-auth-service.js";
 import type { MailConnectionService } from "./modules/mail/mail-connection-service.js";
 import { createMailConnectionRoutes } from "./modules/mail/mail-connection-routes.js";
+import type { GmailMonitoringService } from "./modules/mail/gmail/gmail-monitoring-service.js";
+import type { PubSubPushAuthenticator } from "./modules/mail/gmail/gmail-pubsub-authenticator.js";
+import { createGmailPubSubRoutes } from "./modules/mail/gmail/gmail-pubsub-routes.js";
 import type { InvitationService } from "./modules/invitations/invitation-service.js";
 import type { NotificationMemberService } from "./modules/notification-members/notification-member-service.js";
 import { createNotificationMemberRoutes } from "./modules/notification-members/notification-member-routes.js";
@@ -39,6 +42,8 @@ export interface BuildAppOptions {
   readonly googleAuthService?: GoogleAuthService;
   readonly primaryAuthService?: PrimaryAuthService;
   readonly mailConnectionService?: MailConnectionService;
+  readonly gmailMonitoringService?: GmailMonitoringService;
+  readonly gmailPubSubAuthenticator?: PubSubPushAuthenticator;
   readonly teamService?: TeamService;
   readonly invitationService?: InvitationService;
   readonly notificationMemberService?: NotificationMemberService;
@@ -135,6 +140,17 @@ export async function buildApp(
       return;
     }
 
+    if (isPayloadTooLargeError(error)) {
+      await reply.status(413).send({
+        error: {
+          code: "PAYLOAD_TOO_LARGE",
+          message: "The request body is too large.",
+          requestId: request.id
+        }
+      });
+      return;
+    }
+
     if (error instanceof Error && "validation" in error && error.validation) {
       await reply.status(400).send({
         error: {
@@ -157,6 +173,24 @@ export async function buildApp(
   });
 
   await app.register(createSystemRoutes(options.readinessCheck));
+
+  if (
+    Boolean(options.gmailMonitoringService) !==
+    Boolean(options.gmailPubSubAuthenticator)
+  ) {
+    throw new Error(
+      "Gmail monitoring service and Pub/Sub authenticator must be configured together"
+    );
+  }
+  if (options.gmailMonitoringService && options.gmailPubSubAuthenticator) {
+    await app.register(
+      createGmailPubSubRoutes(
+        options.gmailPubSubAuthenticator,
+        options.gmailMonitoringService,
+        options.environment.GMAIL_PUBSUB_MAX_BODY_BYTES
+      )
+    );
+  }
 
   if (options.authService) {
     if (!options.securityThrottleService) {
@@ -339,4 +373,10 @@ export async function buildApp(
   }
 
   return app;
+}
+
+function isPayloadTooLargeError(error: unknown): boolean {
+  return (
+    error instanceof Error && "statusCode" in error && error.statusCode === 413
+  );
 }

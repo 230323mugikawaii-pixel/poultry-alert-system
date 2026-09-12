@@ -82,7 +82,6 @@ export function createNotificationTestRoutes(
         schema: {
           params: TeamParams,
           body: Type.Object({
-            mailConnectionId: Uuid,
             keyword: Type.String({ minLength: 1, maxLength: 100 })
           }),
           response: { 200: StartResponse, 201: StartResponse }
@@ -107,7 +106,6 @@ export function createNotificationTestRoutes(
         const result = await service.start({
           teamId: request.params.teamId,
           actorUserId: userId,
-          sourceMailConnectionId: request.body.mailConnectionId,
           keyword: request.body.keyword
         });
         reply.header("Cache-Control", "no-store");
