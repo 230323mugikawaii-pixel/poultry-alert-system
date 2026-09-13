@@ -480,17 +480,33 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     await expect(
       database.mailConnection.findMany({
         where: { teamId: team.team.teamId, provider: "GOOGLE" },
-        select: { id: true, status: true, providerCursor: true },
+        select: {
+          id: true,
+          status: true,
+          providerCursor: true,
+          monitoringStartedAt: true
+        },
         orderBy: { createdAt: "asc" }
       })
     ).resolves.toEqual([
-      { id: first.id, status: "PAUSED", providerCursor: null },
-      { id: second.id, status: "ACTIVE", providerCursor: "watch-2" }
+      {
+        id: first.id,
+        status: "PAUSED",
+        providerCursor: null,
+        monitoringStartedAt: null
+      },
+      {
+        id: second.id,
+        status: "ACTIVE",
+        providerCursor: "watch-2",
+        monitoringStartedAt: clock.value
+      }
     ]);
     await expect(
       database.mailAuthorization.count({ where: { userId: owner.id } })
     ).resolves.toBe(2);
 
+    clock.value = new Date("2026-09-08T01:00:00.000Z");
     await service.setMonitoringState({
       teamId: team.team.teamId,
       ownerUserId: owner.id,
@@ -509,9 +525,23 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     await expect(
       database.mailConnection.findUniqueOrThrow({
         where: { id: first.id },
-        select: { status: true, providerCursor: true }
+        select: {
+          status: true,
+          providerCursor: true,
+          monitoringStartedAt: true
+        }
       })
-    ).resolves.toEqual({ status: "ACTIVE", providerCursor: "watch-3" });
+    ).resolves.toEqual({
+      status: "ACTIVE",
+      providerCursor: "watch-3",
+      monitoringStartedAt: clock.value
+    });
+    await expect(
+      database.mailConnection.findUniqueOrThrow({
+        where: { id: second.id },
+        select: { status: true, monitoringStartedAt: true }
+      })
+    ).resolves.toEqual({ status: "PAUSED", monitoringStartedAt: null });
     const monitoringRepository = new PrismaGmailMonitoringRepository(database);
     await expect(
       monitoringRepository.findEligibleById(first.id)
@@ -540,12 +570,12 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
     await expect(
       database.mailConnection.findMany({
         where: { teamId: team.team.teamId, provider: "GOOGLE" },
-        select: { id: true, status: true },
+        select: { id: true, status: true, monitoringStartedAt: true },
         orderBy: { createdAt: "asc" }
       })
     ).resolves.toEqual([
-      { id: first.id, status: "ACTIVE" },
-      { id: second.id, status: "PAUSED" }
+      { id: first.id, status: "ACTIVE", monitoringStartedAt: clock.value },
+      { id: second.id, status: "PAUSED", monitoringStartedAt: null }
     ]);
     expect(google.stoppedWatchTokens).toEqual(stoppedBeforeFailure);
     google.startWatchError = null;
@@ -3253,7 +3283,8 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       })
     ).resolves.toMatchObject({
       providerCursor: "90071992547409930000",
-      providerSubscriptionExpiresAt: new Date("2026-09-11T00:00:00.000Z")
+      providerSubscriptionExpiresAt: new Date("2026-09-11T00:00:00.000Z"),
+      monitoringStartedAt: clock.value
     });
 
     const leases = await Promise.all([
@@ -3346,6 +3377,7 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       providerCursor: null,
       providerSubscriptionExpiresAt: null,
       providerSubscriptionRenewedAt: null,
+      monitoringStartedAt: null,
       syncLeaseToken: null,
       syncLeaseExpiresAt: null
     });

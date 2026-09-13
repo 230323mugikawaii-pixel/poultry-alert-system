@@ -125,14 +125,21 @@ export class PrismaGmailMonitoringRepository implements GmailMonitoringRepositor
     return this.database.$transaction(async (transaction) => {
       const connection = await transaction.mailConnection.findFirst({
         where: { id: input.connectionId, ...eligibleWhere },
-        select: { id: true, teamId: true, providerCursor: true }
+        select: {
+          id: true,
+          teamId: true,
+          providerCursor: true,
+          monitoringStartedAt: true
+        }
       });
       if (!connection) return false;
       const started = connection.providerCursor === null;
       if (started) {
         await transaction.mailConnection.updateMany({
           where: { id: connection.id, providerCursor: null },
-          data: { providerCursor: input.initialCursor }
+          data: {
+            providerCursor: input.initialCursor
+          }
         });
       }
       await transaction.mailConnection.update({
@@ -140,6 +147,8 @@ export class PrismaGmailMonitoringRepository implements GmailMonitoringRepositor
         data: {
           providerSubscriptionExpiresAt: input.expiration,
           providerSubscriptionRenewedAt: input.renewedAt,
+          monitoringStartedAt:
+            connection.monitoringStartedAt ?? input.renewedAt,
           lastErrorCode: null
         }
       });
@@ -163,12 +172,14 @@ export class PrismaGmailMonitoringRepository implements GmailMonitoringRepositor
           id: string;
           teamId: string;
           providerCursor: string | null;
+          monitoringStartedAt: Date | null;
           syncLeaseToken: string | null;
         }>
       >(Prisma.sql`
         SELECT connection.id,
                connection."teamId",
                connection."providerCursor",
+               connection."monitoringStartedAt",
                connection."syncLeaseToken"
         FROM mail_connections AS connection
         JOIN mail_authorizations AS mail_authorization
@@ -196,6 +207,10 @@ export class PrismaGmailMonitoringRepository implements GmailMonitoringRepositor
         where: { id: connection.id },
         data: {
           providerCursor: cursor,
+          monitoringStartedAt:
+            connection.monitoringStartedAt ??
+            input.watch?.renewedAt ??
+            input.now,
           lastSyncAt: input.now,
           lastErrorCode: null,
           syncLeaseToken: null,
@@ -288,9 +303,11 @@ export class PrismaGmailMonitoringRepository implements GmailMonitoringRepositor
         },
         data: {
           status: "REAUTH_REQUIRED",
+          providerCursor: null,
           lastErrorCode: input.errorCode.slice(0, 100),
           providerSubscriptionExpiresAt: null,
           providerSubscriptionRenewedAt: null,
+          monitoringStartedAt: null,
           syncLeaseToken: null,
           syncLeaseExpiresAt: null
         }
@@ -332,6 +349,7 @@ function mapConnection(connection: {
   readonly mailAuthorizationId: string;
   readonly keywords: readonly string[];
   readonly providerCursor: string | null;
+  readonly monitoringStartedAt: Date | null;
   readonly lastSyncAt: Date | null;
   readonly providerSubscriptionExpiresAt: Date | null;
   readonly mailAuthorization: {
@@ -356,6 +374,7 @@ function mapConnection(connection: {
     email: authorization.email,
     keywords: [...connection.keywords],
     providerCursor: connection.providerCursor,
+    monitoringStartedAt: connection.monitoringStartedAt,
     lastSyncAt: connection.lastSyncAt,
     providerSubscriptionExpiresAt: connection.providerSubscriptionExpiresAt,
     refreshToken: {

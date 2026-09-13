@@ -7,6 +7,7 @@ export interface GmailMonitoringConnection {
   readonly email: string;
   readonly keywords: readonly string[];
   readonly providerCursor: string | null;
+  readonly monitoringStartedAt: Date | null;
   readonly lastSyncAt: Date | null;
   readonly providerSubscriptionExpiresAt: Date | null;
   readonly refreshToken: StoredEncryptedToken;

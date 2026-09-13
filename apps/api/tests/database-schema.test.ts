@@ -26,6 +26,13 @@ const mailConnectionKeywordBackfillMigration = readFileSync(
   ),
   "utf8"
 );
+const gmailMonitoringResumeBoundaryMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260913000100_gmail_monitoring_resume_boundary/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 
 describe("database foundation", () => {
   it("defines the required Phase 1 models", () => {
@@ -112,6 +119,7 @@ describe("database foundation", () => {
     expect(mailConnection).toContain("provider");
     expect(mailConnection).toContain("providerCursor");
     expect(mailConnection).toContain("providerSubscriptionExpiresAt");
+    expect(mailConnection).toContain("monitoringStartedAt");
     expect(mailConnection).toContain("syncLeaseToken");
     expect(mailConnection).toContain("@@unique([teamId, mailAuthorizationId])");
     expect(mailConnection).not.toContain("encryptedRefreshToken");
@@ -146,6 +154,21 @@ describe("database foundation", () => {
       'CARDINALITY(connection."keywords") = 0'
     );
     expect(mailConnectionKeywordBackfillMigration).not.toMatch(
+      /(?:^|\n)\s*(?:DELETE\s+FROM|TRUNCATE|DROP\s+TABLE)\b/iu
+    );
+  });
+
+  it("records a non-destructive boundary for each active Gmail monitoring interval", () => {
+    expect(gmailMonitoringResumeBoundaryMigration).toContain(
+      'ADD COLUMN "monitoringStartedAt" TIMESTAMPTZ(3)'
+    );
+    expect(gmailMonitoringResumeBoundaryMigration).toContain(
+      "'MAIL_MONITORING_RESUMED'"
+    );
+    expect(gmailMonitoringResumeBoundaryMigration).toContain(
+      `connection."status" = 'ACTIVE'`
+    );
+    expect(gmailMonitoringResumeBoundaryMigration).not.toMatch(
       /(?:^|\n)\s*(?:DELETE\s+FROM|TRUNCATE|DROP\s+TABLE)\b/iu
     );
   });
