@@ -12,6 +12,20 @@ const migration = readFileSync(
   ),
   "utf8"
 );
+const singleActiveGoogleMonitoringMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260908000100_single_active_google_monitoring/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const mailConnectionKeywordBackfillMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260909000100_backfill_mail_connection_keywords/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 
 describe("database foundation", () => {
   it("defines the required Phase 1 models", () => {
@@ -26,10 +40,114 @@ describe("database foundation", () => {
       "Invitation",
       "InvitationRedemption",
       "AuditEvent",
-      "SecurityThrottle"
+      "SecurityThrottle",
+      "MailAuthorization",
+      "MailConnection",
+      "Alert",
+      "AlertRecipient",
+      "NotificationTest",
+      "UserNotification",
+      "FeedbackSubmission"
     ]) {
       expect(schema).toContain(`model ${model} {`);
     }
+  });
+
+  it("keeps service notifications separate from monitored-mail alerts", () => {
+    expect(schema).toContain("enum UserNotificationType");
+    expect(schema).toContain("FEEDBACK_REPLY");
+    expect(schema).toContain("model FeedbackSubmission {");
+    expect(schema).toContain("model UserNotification {");
+    expect(schema).toMatch(
+      /model UserNotification \{[^}]*deletedAt\s+DateTime\?/s
+    );
+    expect(schema).toContain("@@index([userId, readAt, createdAt])");
+    expect(schema).toContain("@@index([userId, deletedAt, readAt, createdAt])");
+    expect(schema).toContain('@@map("user_notifications")');
+  });
+
+  it("defines provider-neutral alert fan-out and idempotency", () => {
+    expect(schema).toContain("enum AlertStatus");
+    expect(schema).toContain("enum AlertKind");
+    expect(schema).toMatch(/enum AlertKind \{[^}]*REAL[^}]*TEST/s);
+    expect(schema).toContain("enum AlertDeliveryChannel");
+    expect(schema).toContain("sourceEventId");
+    expect(schema).toContain(
+      "@@unique([sourceMailConnectionId, sourceEventId])"
+    );
+    expect(schema).toContain("model AlertRecipient {");
+    expect(schema).toContain("notificationMemberId");
+    expect(schema).toMatch(/model AlertRecipient \{[^}]*readAt\s+DateTime\?/s);
+    expect(schema).toMatch(
+      /model AlertRecipient \{[^}]*dismissedAt\s+DateTime\?/s
+    );
+    expect(schema).toContain(
+      "@@index([notificationMemberId, readAt, createdAt])"
+    );
+    expect(schema).toContain(
+      "@@index([userId, dismissedAt, readAt, createdAt])"
+    );
+    expect(schema).toContain(
+      '@@index([notificationMemberId, dismissedAt, readAt, createdAt], map: "alert_recipients_member_dismissed_read_created_idx")'
+    );
+    expect(schema).toContain("model NotificationTest {");
+    expect(schema).toContain("enum NotificationTestStatus");
+  });
+
+  it("separates Call Now login identity from mail monitoring authorization", () => {
+    const mailAuthorization = schema.match(
+      /model MailAuthorization \{([^}]*)\}/
+    )?.[1];
+    const mailConnection = schema.match(
+      /model MailConnection \{([^}]*)\}/
+    )?.[1];
+
+    expect(mailAuthorization).toContain("userId");
+    expect(mailAuthorization).toContain("encryptedRefreshToken");
+    expect(mailAuthorization).not.toMatch(/userId\s+String\s+@unique/);
+    expect(mailAuthorization).toContain("@@unique([id, provider])");
+    expect(mailAuthorization).toContain("@@index([userId, status, revokedAt])");
+    expect(mailConnection).toContain("teamId");
+    expect(mailConnection).toContain("mailAuthorizationId");
+    expect(mailConnection).toContain("provider");
+    expect(mailConnection).toContain("providerCursor");
+    expect(mailConnection).toContain("providerSubscriptionExpiresAt");
+    expect(mailConnection).toContain("syncLeaseToken");
+    expect(mailConnection).toContain("@@unique([teamId, mailAuthorizationId])");
+    expect(mailConnection).not.toContain("encryptedRefreshToken");
+    expect(schema).toContain("GMAIL_OAUTH");
+    expect(schema).toContain("MICROSOFT_MAIL_OAUTH");
+    expect(schema).toMatch(/enum MailProvider \{[^}]*GOOGLE[^}]*MICROSOFT/s);
+  });
+
+  it("enforces one active Google monitoring account per team", () => {
+    expect(singleActiveGoogleMonitoringMigration).toContain(
+      'CREATE UNIQUE INDEX "mail_connections_one_active_google_per_team"'
+    );
+    expect(singleActiveGoogleMonitoringMigration).toContain(
+      "WHERE \"provider\" = 'GOOGLE' AND \"status\" = 'ACTIVE'"
+    );
+    expect(singleActiveGoogleMonitoringMigration).toContain(
+      "SET \"status\" = 'PAUSED'"
+    );
+    expect(singleActiveGoogleMonitoringMigration).not.toMatch(
+      /(?:^|\n)\s*(?:DELETE\s+FROM|TRUNCATE|DROP\s+TABLE)\b/iu
+    );
+  });
+
+  it("preserves legacy keywords without overwriting account-specific sets", () => {
+    expect(mailConnectionKeywordBackfillMigration).toContain(
+      "legacy_team_keyword_sets"
+    );
+    expect(mailConnectionKeywordBackfillMigration).toContain(
+      `connection."status" <> 'REVOKED'`
+    );
+    expect(mailConnectionKeywordBackfillMigration).toContain(
+      'CARDINALITY(connection."keywords") = 0'
+    );
+    expect(mailConnectionKeywordBackfillMigration).not.toMatch(
+      /(?:^|\n)\s*(?:DELETE\s+FROM|TRUNCATE|DROP\s+TABLE)\b/iu
+    );
   });
 
   it("binds Google identities by provider subject instead of email alone", () => {

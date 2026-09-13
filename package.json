@@ -5,17 +5,25 @@
   "scripts": {
     "build": "pnpm --filter @call-now/api build",
     "db:generate": "pnpm --filter @call-now/migrations db:generate",
+    "db:check-drift": "pnpm --filter @call-now/migrations db:check-drift",
     "db:migrate:deploy": "pnpm --filter @call-now/migrations db:migrate:deploy",
     "db:validate": "pnpm --filter @call-now/migrations db:validate",
     "dev:api": "pnpm --filter @call-now/api dev",
     "format:check": "pnpm --filter @call-now/api format:check",
     "lint": "pnpm --filter @call-now/api lint",
+    "mail:gmail:renew-watches": "pnpm --filter @call-now/api mail:gmail:renew-watches",
     "test": "pnpm --filter @call-now/api test",
+    "test:frontend-alerts": "node --test tests/frontend-alerts.test.mjs",
     "test:frontend-auth": "node --test tests/frontend-auth-foundation.test.mjs",
+    "test:frontend-communications": "node --test tests/frontend-communications.test.mjs",
+    "test:frontend-contract-settings": "node --test tests/frontend-contract-settings.test.mjs",
+    "test:frontend-notification-members": "node --test tests/frontend-notification-members.test.mjs",
+    "test:frontend-onboarding": "node --test tests/frontend-owner-onboarding.test.mjs",
     "test:keywords": "node --test tests/keyword-policy.test.mjs",
+    "test:monitoring-keywords": "node --test tests/monitoring-keyword-policy.test.mjs",
     "test:postgres": "pnpm --filter @call-now/api test:postgres",
     "test:coverage": "pnpm --filter @call-now/api test:coverage",
     "typecheck": "pnpm --filter @call-now/api typecheck",
-    "verify": "pnpm test:keywords && pnpm test:frontend-auth && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "verify": "pnpm test:keywords && pnpm test:monitoring-keywords && pnpm test:frontend-auth && pnpm test:frontend-onboarding && pnpm test:frontend-alerts && pnpm test:frontend-communications && pnpm test:frontend-contract-settings && pnpm test:frontend-notification-members && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   }
 }

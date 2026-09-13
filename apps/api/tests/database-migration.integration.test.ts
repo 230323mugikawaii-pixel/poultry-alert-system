@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { afterEach, describe, expect, it } from "vitest";
 
-const migration =
+const baseMigration =
   readFileSync(
     new URL(
       "../prisma/migrations/20260824000100_phase1_foundation/migration.sql",
@@ -38,6 +38,156 @@ const migration =
     ),
     "utf8"
   );
+const gmailMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260826000100_gmail_monitoring_connection/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const mailProviderMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260826000200_mail_provider_foundation/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const primaryProviderMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260827000100_multi_provider_primary_auth/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const multipleMailConnectionsMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260828000100_multiple_mail_connections/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const notificationMemberMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260828000200_notification_members/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const alertMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260828000300_alert_fanout/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const ownerOnboardingMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260829000100_owner_monitoring_onboarding/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const providerKeywordMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260829000200_provider_monitoring_keywords/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const userCommunicationMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260829000300_user_notifications_feedback/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const notificationMemberSoftDeleteMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260830000100_notification_member_soft_delete/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const contractChangeQuoteMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260830000200_contract_change_quotes/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const notificationTestAlertMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260831000100_notification_test_alerts/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const alertRecipientReadStateMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260831000200_alert_recipient_read_state/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const notificationDismissalMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260831000300_notification_dismissal/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const prismaSchemaAlignmentMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260903000100_align_prisma_schema/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const gmailPushMonitoringMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260903000200_gmail_push_monitoring/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const singleActiveGoogleMonitoringMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260908000100_single_active_google_monitoring/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const mailConnectionKeywordBackfillMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260909000100_backfill_mail_connection_keywords/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const migrationBeforeGmailPush =
+  baseMigration +
+  gmailMigration +
+  mailProviderMigration +
+  primaryProviderMigration +
+  multipleMailConnectionsMigration +
+  notificationMemberMigration +
+  alertMigration +
+  ownerOnboardingMigration +
+  providerKeywordMigration +
+  userCommunicationMigration +
+  notificationMemberSoftDeleteMigration +
+  contractChangeQuoteMigration +
+  notificationTestAlertMigration +
+  alertRecipientReadStateMigration +
+  notificationDismissalMigration +
+  prismaSchemaAlignmentMigration;
+const migrationBeforeSingleActiveGoogle =
+  migrationBeforeGmailPush + gmailPushMonitoringMigration;
+const migrationBeforeMailConnectionKeywordBackfill =
+  migrationBeforeSingleActiveGoogle + singleActiveGoogleMonitoringMigration;
+const migration =
+  migrationBeforeMailConnectionKeywordBackfill +
+  mailConnectionKeywordBackfillMigration;
 
 const databases: PGlite[] = [];
 
@@ -48,6 +198,211 @@ afterEach(async () => {
 });
 
 describe("PostgreSQL migrations", () => {
+  it("pauses duplicate active Google connections without deleting their authorization", async () => {
+    const database = new PGlite();
+    databases.push(database);
+    await database.exec(migrationBeforeSingleActiveGoogle);
+    await database.exec(`
+      INSERT INTO users (id, email, "updatedAt") VALUES
+        ('00000000-0000-0000-0000-000000000020', 'switch-owner@example.com', now());
+      INSERT INTO teams (id, "publicCode", "updatedAt") VALUES
+        ('10000000-0000-0000-0000-000000000020', '682731', now());
+      INSERT INTO mail_authorizations (
+        id, "userId", provider, "providerSubject", email, "updatedAt"
+      ) VALUES
+        ('30000000-0000-0000-0000-000000000020',
+         '00000000-0000-0000-0000-000000000020',
+         'GOOGLE', 'switch-subject-a', 'switch-a@example.com', now()),
+        ('30000000-0000-0000-0000-000000000021',
+         '00000000-0000-0000-0000-000000000020',
+         'GOOGLE', 'switch-subject-b', 'switch-b@example.com', now());
+      INSERT INTO mail_connections (
+        id, "teamId", "mailAuthorizationId", status, "updatedAt"
+      ) VALUES
+        ('40000000-0000-0000-0000-000000000020',
+         '10000000-0000-0000-0000-000000000020',
+         '30000000-0000-0000-0000-000000000020', 'ACTIVE', now()),
+        ('40000000-0000-0000-0000-000000000021',
+         '10000000-0000-0000-0000-000000000020',
+         '30000000-0000-0000-0000-000000000021', 'ACTIVE', now());
+    `);
+
+    await database.exec(singleActiveGoogleMonitoringMigration);
+    const connections = await database.query<{
+      status: string;
+      provider: string;
+    }>(`
+      SELECT status, provider
+      FROM mail_connections
+      ORDER BY id;
+    `);
+    expect(connections.rows).toEqual([
+      { status: "PAUSED", provider: "GOOGLE" },
+      { status: "ACTIVE", provider: "GOOGLE" }
+    ]);
+    const authorizations = await database.query<{ count: number }>(`
+      SELECT COUNT(*)::integer AS count FROM mail_authorizations;
+    `);
+    expect(authorizations.rows).toEqual([{ count: 2 }]);
+    await expect(
+      database.exec(`
+        UPDATE mail_connections
+        SET status = 'ACTIVE'
+        WHERE id = '40000000-0000-0000-0000-000000000020';
+      `)
+    ).rejects.toThrow();
+  });
+
+  it("backfills only empty connected account keyword sets and preserves existing data", async () => {
+    const database = new PGlite();
+    databases.push(database);
+    await database.exec(migrationBeforeMailConnectionKeywordBackfill);
+    await database.exec(`
+      INSERT INTO users (id, email, "updatedAt") VALUES
+        ('00000000-0000-0000-0000-000000000030', 'keyword-owner@example.com', now());
+      INSERT INTO teams (id, "publicCode", "updatedAt") VALUES
+        ('10000000-0000-0000-0000-000000000030', '782731', now());
+      INSERT INTO team_keywords (
+        id, "teamId", keyword, normalized, "sortOrder"
+      ) VALUES
+        ('20000000-0000-0000-0000-000000000030',
+         '10000000-0000-0000-0000-000000000030',
+         '停電', '停電', 0),
+        ('20000000-0000-0000-0000-000000000031',
+         '10000000-0000-0000-0000-000000000030',
+         '通電', '通電', 1);
+      INSERT INTO mail_authorizations (
+        id, "userId", provider, "providerSubject", email, "updatedAt"
+      ) VALUES
+        ('30000000-0000-0000-0000-000000000030',
+         '00000000-0000-0000-0000-000000000030',
+         'GOOGLE', 'keyword-subject-active', 'active@example.com', now()),
+        ('30000000-0000-0000-0000-000000000031',
+         '00000000-0000-0000-0000-000000000030',
+         'GOOGLE', 'keyword-subject-paused-empty', 'paused-empty@example.com', now()),
+        ('30000000-0000-0000-0000-000000000032',
+         '00000000-0000-0000-0000-000000000030',
+         'GOOGLE', 'keyword-subject-paused-custom', 'paused-custom@example.com', now()),
+        ('30000000-0000-0000-0000-000000000033',
+         '00000000-0000-0000-0000-000000000030',
+         'GOOGLE', 'keyword-subject-revoked', 'revoked@example.com', now());
+      INSERT INTO mail_connections (
+        id, "teamId", "mailAuthorizationId", provider, status, keywords, "updatedAt"
+      ) VALUES
+        ('40000000-0000-0000-0000-000000000030',
+         '10000000-0000-0000-0000-000000000030',
+         '30000000-0000-0000-0000-000000000030', 'GOOGLE', 'ACTIVE', ARRAY[]::TEXT[], now()),
+        ('40000000-0000-0000-0000-000000000031',
+         '10000000-0000-0000-0000-000000000030',
+         '30000000-0000-0000-0000-000000000031', 'GOOGLE', 'PAUSED', ARRAY[]::TEXT[], now()),
+        ('40000000-0000-0000-0000-000000000032',
+         '10000000-0000-0000-0000-000000000030',
+         '30000000-0000-0000-0000-000000000032', 'GOOGLE', 'PAUSED', ARRAY['固有語'], now()),
+        ('40000000-0000-0000-0000-000000000033',
+         '10000000-0000-0000-0000-000000000030',
+         '30000000-0000-0000-0000-000000000033', 'GOOGLE', 'REVOKED', ARRAY[]::TEXT[], now());
+    `);
+
+    await database.exec(mailConnectionKeywordBackfillMigration);
+
+    const connections = await database.query<{
+      id: string;
+      keywords: string[];
+    }>(`
+      SELECT id, keywords
+      FROM mail_connections
+      ORDER BY id;
+    `);
+    expect(connections.rows).toEqual([
+      {
+        id: "40000000-0000-0000-0000-000000000030",
+        keywords: ["停電", "通電"]
+      },
+      {
+        id: "40000000-0000-0000-0000-000000000031",
+        keywords: ["停電", "通電"]
+      },
+      {
+        id: "40000000-0000-0000-0000-000000000032",
+        keywords: ["固有語"]
+      },
+      {
+        id: "40000000-0000-0000-0000-000000000033",
+        keywords: []
+      }
+    ]);
+    const teamKeywords = await database.query<{
+      keyword: string;
+      sortOrder: number;
+    }>(`
+      SELECT keyword, "sortOrder"
+      FROM team_keywords
+      ORDER BY "sortOrder";
+    `);
+    expect(teamKeywords.rows).toEqual([
+      { keyword: "停電", sortOrder: 0 },
+      { keyword: "通電", sortOrder: 1 }
+    ]);
+  });
+
+  it("adds nullable Gmail watch state without changing existing connections", async () => {
+    const database = new PGlite();
+    databases.push(database);
+    await database.exec(migrationBeforeGmailPush);
+    await database.exec(`
+      INSERT INTO users (id, email, "updatedAt") VALUES
+        ('00000000-0000-0000-0000-000000000010', 'existing@example.com', now());
+      INSERT INTO teams (id, "publicCode", "updatedAt") VALUES
+        ('10000000-0000-0000-0000-000000000010', '582731', now());
+      INSERT INTO subscriptions (
+        id, "teamId", status, "currentTermStartedAt", "currentTermEndsAt", "updatedAt"
+      ) VALUES (
+        '20000000-0000-0000-0000-000000000010',
+        '10000000-0000-0000-0000-000000000010',
+        'ACTIVE', now(), now() + interval '1 year', now()
+      );
+      INSERT INTO mail_authorizations (
+        id, "userId", provider, "providerSubject", email, "updatedAt"
+      ) VALUES (
+        '30000000-0000-0000-0000-000000000010',
+        '00000000-0000-0000-0000-000000000010',
+        'GOOGLE', 'existing-subject', 'existing@example.com', now()
+      );
+      INSERT INTO mail_connections (
+        id, "teamId", "mailAuthorizationId", status, "updatedAt"
+      ) VALUES (
+        '40000000-0000-0000-0000-000000000010',
+        '10000000-0000-0000-0000-000000000010',
+        '30000000-0000-0000-0000-000000000010',
+        'ACTIVE', now()
+      );
+    `);
+
+    await database.exec(gmailPushMonitoringMigration);
+    const result = await database.query<{
+      providerSubscriptionExpiresAt: Date | null;
+      providerSubscriptionRenewedAt: Date | null;
+      syncLeaseToken: string | null;
+      syncLeaseExpiresAt: Date | null;
+    }>(`
+      SELECT
+        "providerSubscriptionExpiresAt",
+        "providerSubscriptionRenewedAt",
+        "syncLeaseToken",
+        "syncLeaseExpiresAt"
+      FROM mail_connections
+      WHERE id = '40000000-0000-0000-0000-000000000010';
+    `);
+    expect(result.rows).toEqual([
+      {
+        providerSubscriptionExpiresAt: null,
+        providerSubscriptionRenewedAt: null,
+        syncLeaseToken: null,
+        syncLeaseExpiresAt: null
+      }
+    ]);
+  });
+
   it("apply cleanly and enforce identity, team, and owner invariants", async () => {
     const database = new PGlite();
     databases.push(database);
@@ -110,7 +465,229 @@ describe("PostgreSQL migrations", () => {
       WHERE pg_type.typname = 'IdentityProvider'
       ORDER BY enumsortorder;
     `);
-    expect(identityProviders.rows).toEqual([{ enumlabel: "GOOGLE" }]);
+    expect(identityProviders.rows).toEqual([
+      { enumlabel: "GOOGLE" },
+      { enumlabel: "MICROSOFT" },
+      { enumlabel: "APPLE" }
+    ]);
+
+    const challengeKinds = await database.query<{ enumlabel: string }>(`
+      SELECT enumlabel
+      FROM pg_enum
+      JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+      WHERE pg_type.typname = 'ChallengeKind'
+      ORDER BY enumsortorder;
+    `);
+    expect(challengeKinds.rows).toContainEqual({ enumlabel: "GMAIL_OAUTH" });
+    expect(challengeKinds.rows).toContainEqual({
+      enumlabel: "MICROSOFT_MAIL_OAUTH"
+    });
+
+    const mailTables = await database.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN ('mail_authorizations', 'mail_connections')
+      ORDER BY table_name;
+    `);
+    expect(mailTables.rows).toEqual([
+      { table_name: "mail_authorizations" },
+      { table_name: "mail_connections" }
+    ]);
+
+    const gmailMonitoringColumns = await database.query<{
+      column_name: string;
+    }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'mail_connections'
+        AND column_name IN (
+          'providerSubscriptionExpiresAt',
+          'providerSubscriptionRenewedAt',
+          'syncLeaseToken',
+          'syncLeaseExpiresAt'
+        )
+      ORDER BY column_name;
+    `);
+    expect(gmailMonitoringColumns.rows).toEqual([
+      { column_name: "providerSubscriptionExpiresAt" },
+      { column_name: "providerSubscriptionRenewedAt" },
+      { column_name: "syncLeaseExpiresAt" },
+      { column_name: "syncLeaseToken" }
+    ]);
+
+    const contractChangeTables = await database.query<{
+      table_name: string;
+    }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name = 'contract_change_quotes';
+    `);
+    expect(contractChangeTables.rows).toEqual([
+      { table_name: "contract_change_quotes" }
+    ]);
+
+    const renewalAmount = await database.query<{ renewal: number }>(`
+      INSERT INTO subscriptions (
+        id, "teamId", "currentTermAmountYen",
+        "currentTermStartedAt", "currentTermEndsAt", "updatedAt"
+      ) VALUES (
+        '30000000-0000-0000-0000-000000000001',
+        '10000000-0000-0000-0000-000000000001',
+        7100, now(), now() + interval '1 year', now()
+      ) RETURNING "renewalAmountYen" AS renewal;
+    `);
+    expect(renewalAmount.rows).toEqual([{ renewal: 6000 }]);
+
+    const serverGeneratedUuidDefaults = await database.query<{
+      table_name: string;
+      column_default: string | null;
+    }>(`
+      SELECT table_name, column_default
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name IN ('contract_change_quotes', 'notification_tests')
+        AND column_name = 'id'
+      ORDER BY table_name;
+    `);
+    expect(serverGeneratedUuidDefaults.rows).toEqual([
+      { table_name: "contract_change_quotes", column_default: null },
+      { table_name: "notification_tests", column_default: null }
+    ]);
+
+    const alertRecipientIndex = await database.query<{ indexname: string }>(`
+      SELECT indexname
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND indexname = 'alert_recipients_member_dismissed_read_created_idx';
+    `);
+    expect(alertRecipientIndex.rows).toEqual([
+      { indexname: "alert_recipients_member_dismissed_read_created_idx" }
+    ]);
+
+    const mailProviders = await database.query<{ enumlabel: string }>(`
+      SELECT enumlabel
+      FROM pg_enum
+      JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+      WHERE pg_type.typname = 'MailProvider'
+      ORDER BY enumsortorder;
+    `);
+    expect(mailProviders.rows).toEqual([
+      { enumlabel: "GOOGLE" },
+      { enumlabel: "MICROSOFT" }
+    ]);
+
+    const memberTables = await database.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN (
+          'notification_members',
+          'notification_member_sessions'
+        )
+      ORDER BY table_name;
+    `);
+    expect(memberTables.rows).toEqual([
+      { table_name: "notification_member_sessions" },
+      { table_name: "notification_members" }
+    ]);
+
+    const memberColumns = await database.query<{ column_name: string }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'notification_members';
+    `);
+    expect(memberColumns.rows).toContainEqual({ column_name: "deletedAt" });
+
+    const teamKeywordColumns = await database.query<{ column_name: string }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'team_keywords';
+    `);
+    expect(teamKeywordColumns.rows).toContainEqual({
+      column_name: "sortOrder"
+    });
+
+    const alertTables = await database.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN ('alerts', 'alert_recipients')
+      ORDER BY table_name;
+    `);
+    expect(alertTables.rows).toEqual([
+      { table_name: "alert_recipients" },
+      { table_name: "alerts" }
+    ]);
+
+    const notificationTestTables = await database.query<{
+      table_name: string;
+    }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name = 'notification_tests';
+    `);
+    expect(notificationTestTables.rows).toEqual([
+      { table_name: "notification_tests" }
+    ]);
+
+    const alertKinds = await database.query<{ enumlabel: string }>(`
+      SELECT enumlabel
+      FROM pg_enum
+      JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+      WHERE pg_type.typname = 'AlertKind'
+      ORDER BY enumsortorder;
+    `);
+    expect(alertKinds.rows).toEqual([
+      { enumlabel: "REAL" },
+      { enumlabel: "TEST" }
+    ]);
+
+    const alertKindDefault = await database.query<{
+      column_default: string | null;
+    }>(`
+      SELECT column_default
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'alerts'
+        AND column_name = 'kind';
+    `);
+    expect(alertKindDefault.rows[0]?.column_default).toContain("REAL");
+
+    const communicationTables = await database.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN ('feedback_submissions', 'user_notifications')
+      ORDER BY table_name;
+    `);
+    expect(communicationTables.rows).toEqual([
+      { table_name: "feedback_submissions" },
+      { table_name: "user_notifications" }
+    ]);
+
+    const dismissalColumns = await database.query<{
+      table_name: string;
+      column_name: string;
+    }>(`
+      SELECT table_name, column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND (
+          (table_name = 'alert_recipients' AND column_name = 'dismissedAt')
+          OR (table_name = 'user_notifications' AND column_name = 'deletedAt')
+        )
+      ORDER BY table_name, column_name;
+    `);
+    expect(dismissalColumns.rows).toEqual([
+      { table_name: "alert_recipients", column_name: "dismissedAt" },
+      { table_name: "user_notifications", column_name: "deletedAt" }
+    ]);
 
     await database.exec(`
       INSERT INTO external_identities (
@@ -132,5 +709,122 @@ describe("PostgreSQL migrations", () => {
         );
       `)
     ).rejects.toThrow();
+
+    await database.exec(`
+      INSERT INTO mail_authorizations (
+        id, "userId", provider, "providerSubject", email,
+        "grantedScopes", status, "updatedAt"
+      ) VALUES (
+        '40000000-0000-0000-0000-000000000001',
+        '00000000-0000-0000-0000-000000000001',
+        'GOOGLE', 'gmail-monitoring-subject-1', 'monitoring@example.com',
+        ARRAY['https://www.googleapis.com/auth/gmail.readonly'],
+        'ACTIVE', now()
+      );
+      INSERT INTO mail_connections (
+        id, "teamId", "mailAuthorizationId", provider, status, "updatedAt"
+      ) VALUES (
+        '50000000-0000-0000-0000-000000000001',
+        '10000000-0000-0000-0000-000000000001',
+        '40000000-0000-0000-0000-000000000001',
+        'GOOGLE', 'ACTIVE', now()
+      );
+    `);
+    const separatedIdentities = await database.query<{
+      login_subject: string;
+      monitoring_subject: string;
+    }>(`
+      SELECT
+        login_identity."providerSubject" AS login_subject,
+        mail_authorization."providerSubject" AS monitoring_subject
+      FROM external_identities AS login_identity
+      JOIN mail_authorizations AS mail_authorization
+        ON mail_authorization."userId" = login_identity."userId";
+    `);
+    expect(separatedIdentities.rows).toEqual([
+      {
+        login_subject: "google-subject-1",
+        monitoring_subject: "gmail-monitoring-subject-1"
+      }
+    ]);
+  });
+
+  it("preserves provisional Gmail data but requires fresh authorization", async () => {
+    const database = new PGlite();
+    databases.push(database);
+    await database.exec(baseMigration);
+    await database.exec(`
+      INSERT INTO users (id, email, "updatedAt") VALUES
+        ('00000000-0000-0000-0000-000000000011', 'legacy-owner@example.com', now());
+      INSERT INTO teams (id, "publicCode", "updatedAt") VALUES
+        ('10000000-0000-0000-0000-000000000011', '482739', now());
+      INSERT INTO team_memberships (
+        id, "teamId", "userId", role, status
+      ) VALUES (
+        '20000000-0000-0000-0000-000000000011',
+        '10000000-0000-0000-0000-000000000011',
+        '00000000-0000-0000-0000-000000000011',
+        'OWNER', 'ACTIVE'
+      );
+      INSERT INTO gmail_connections (
+        id, "teamId", "googleSubject", email,
+        "encryptedRefreshToken", scopes, status, "updatedAt"
+      ) VALUES (
+        '50000000-0000-0000-0000-000000000011',
+        '10000000-0000-0000-0000-000000000011',
+        'legacy-google-subject', 'legacy-monitoring@example.com',
+        'legacy-encrypted-payload',
+        ARRAY['https://www.googleapis.com/auth/gmail.readonly'],
+        'ACTIVE', now()
+      );
+    `);
+
+    await database.exec(gmailMigration);
+
+    const migrated = await database.query<{
+      authorization_status: string;
+      connection_status: string;
+      email: string;
+      encryption_provider: string;
+    }>(`
+      SELECT
+        gmail_authorization.status AS authorization_status,
+        gmail_connection.status AS connection_status,
+        gmail_authorization.email,
+        gmail_authorization."encryptionProvider" AS encryption_provider
+      FROM gmail_connections AS gmail_connection
+      JOIN gmail_authorizations AS gmail_authorization
+        ON gmail_authorization.id = gmail_connection."gmailAuthorizationId";
+    `);
+    expect(migrated.rows).toEqual([
+      {
+        authorization_status: "REAUTH_REQUIRED",
+        connection_status: "REAUTH_REQUIRED",
+        email: "legacy-monitoring@example.com",
+        encryption_provider: "LEGACY_UNKNOWN"
+      }
+    ]);
+
+    await database.exec(mailProviderMigration);
+    const generalized = await database.query<{
+      provider: string;
+      authorization_status: string;
+      connection_status: string;
+    }>(`
+      SELECT
+        mail_authorization.provider,
+        mail_authorization.status AS authorization_status,
+        mail_connection.status AS connection_status
+      FROM mail_connections AS mail_connection
+      JOIN mail_authorizations AS mail_authorization
+        ON mail_authorization.id = mail_connection."mailAuthorizationId";
+    `);
+    expect(generalized.rows).toEqual([
+      {
+        provider: "GOOGLE",
+        authorization_status: "REAUTH_REQUIRED",
+        connection_status: "REAUTH_REQUIRED"
+      }
+    ]);
   });
 });

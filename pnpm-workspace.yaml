@@ -7,6 +7,7 @@ autoInstallPeers: false
 overrides:
   deepmerge-ts: 8.0.0
   lodash: 4.18.1
+  mysql2: 3.23.1
 
 peerDependencyRules:
   # Prisma Studio is not shipped or invoked by the migration image. Its UI-only

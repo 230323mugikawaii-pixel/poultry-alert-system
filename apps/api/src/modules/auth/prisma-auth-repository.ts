@@ -8,7 +8,12 @@ import type {
   AuthUserRecord,
   CreateGoogleOAuthChallengeInput,
   CreateMagicLinkChallengeInput,
+  CreatePrimaryOAuthChallengeInput,
   CreateSessionInput,
+  PrimaryIdentityProvider,
+  PrimaryIdentityRecord,
+  PrimaryOAuthChallengeRecord,
+  ResolvePrimaryIdentityInput,
   ResolveGoogleUserInput
 } from "./auth-repository.js";
 
@@ -190,6 +195,318 @@ export class PrismaAuthRepository implements AuthRepository {
         new AppError(
           "GOOGLE_LOGIN_CONFLICT",
           "Googleログインが競合しました。もう一度お試しください。",
+          409
+        )
+    );
+  }
+
+  public async createPrimaryOAuthChallenge(
+    input: CreatePrimaryOAuthChallengeInput
+  ): Promise<void> {
+    await this.database.authChallenge.create({
+      data: {
+        userId: input.userId,
+        kind: primaryChallengeKind(input.provider),
+        secretHash: input.secretHash,
+        payload: {
+          provider: input.provider,
+          intent: input.intent,
+          codeVerifier: input.codeVerifier,
+          nonce: input.nonce
+        },
+        expiresAt: input.expiresAt,
+        maxAttempts: 1
+      }
+    });
+  }
+
+  public consumePrimaryOAuthChallenge(
+    secretHash: string,
+    provider: PrimaryIdentityProvider,
+    authenticatedUserId: string | null,
+    now: Date
+  ): Promise<PrimaryOAuthChallengeRecord | null> {
+    return retrySerializableTransaction(
+      () =>
+        this.database.$transaction(
+          async (transaction) => {
+            const challenge = await transaction.authChallenge.findUnique({
+              where: { secretHash }
+            });
+            if (
+              !challenge ||
+              challenge.kind !== primaryChallengeKind(provider) ||
+              challenge.consumedAt ||
+              challenge.expiresAt <= now ||
+              challenge.attemptCount >= challenge.maxAttempts
+            ) {
+              return null;
+            }
+            const parsed = readPrimaryChallenge(challenge.payload);
+            if (!parsed || parsed.provider !== provider) {
+              return null;
+            }
+            if (
+              (parsed.intent === "LINK" &&
+                (!challenge.userId ||
+                  challenge.userId !== authenticatedUserId)) ||
+              (parsed.intent === "LOGIN" && challenge.userId !== null)
+            ) {
+              return null;
+            }
+            const consumed = await transaction.authChallenge.updateMany({
+              where: {
+                id: challenge.id,
+                consumedAt: null,
+                expiresAt: { gt: now },
+                attemptCount: { lt: challenge.maxAttempts }
+              },
+              data: { consumedAt: now, attemptCount: { increment: 1 } }
+            });
+            return consumed.count === 1
+              ? {
+                  ...parsed,
+                  userId: challenge.userId
+                }
+              : null;
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
+      () =>
+        new AppError(
+          "PRIMARY_LOGIN_CONFLICT",
+          "ログイン処理が競合しました。もう一度お試しください。",
+          409
+        )
+    );
+  }
+
+  public async resolvePrimaryIdentityUser(
+    input: ResolvePrimaryIdentityInput
+  ): Promise<AuthUserRecord> {
+    return retrySerializableTransaction(
+      () =>
+        this.database.$transaction(
+          async (transaction) => {
+            const identity = await transaction.externalIdentity.findUnique({
+              where: {
+                provider_providerSubject: {
+                  provider: input.provider,
+                  providerSubject: input.providerSubject
+                }
+              },
+              include: { user: true }
+            });
+            if (identity) {
+              if (identity.revokedAt) {
+                throw new AppError(
+                  "LOGIN_IDENTITY_REVOKED",
+                  "このログイン方法は解除されています。別の方法でログインしてください。",
+                  403
+                );
+              }
+              await transaction.externalIdentity.update({
+                where: { id: identity.id },
+                data: {
+                  ...(input.email ? { email: input.email } : {}),
+                  emailVerified: input.email
+                    ? input.emailVerified
+                    : identity.emailVerified,
+                  lastUsedAt: input.now
+                }
+              });
+              const user = input.displayName
+                ? await transaction.user.update({
+                    where: { id: identity.userId },
+                    data: { displayName: input.displayName }
+                  })
+                : identity.user;
+              return mapUser(user);
+            }
+
+            const email = requireVerifiedEmail(input);
+            const emailUser = await transaction.user.findUnique({
+              where: { email }
+            });
+            if (emailUser) {
+              throw new AppError(
+                "LOGIN_IDENTITY_LINK_REQUIRED",
+                "同じメールアドレスの利用者が存在します。既存の方法でログインしてから、このログイン方法を追加してください。",
+                409
+              );
+            }
+            const user = await transaction.user.create({
+              data: {
+                email,
+                displayName: input.displayName,
+                emailVerifiedAt: input.now,
+                externalIdentities: {
+                  create: {
+                    provider: input.provider,
+                    providerSubject: input.providerSubject,
+                    email,
+                    emailVerified: true,
+                    lastUsedAt: input.now
+                  }
+                }
+              }
+            });
+            return mapUser(user);
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
+      () =>
+        new AppError(
+          "PRIMARY_LOGIN_CONFLICT",
+          "ログイン処理が競合しました。もう一度お試しください。",
+          409
+        )
+    );
+  }
+
+  public async linkPrimaryIdentity(
+    userId: string,
+    input: ResolvePrimaryIdentityInput
+  ): Promise<PrimaryIdentityRecord> {
+    return retrySerializableTransaction(
+      () =>
+        this.database.$transaction(
+          async (transaction) => {
+            const email = requireVerifiedEmail(input);
+            const subjectIdentity =
+              await transaction.externalIdentity.findUnique({
+                where: {
+                  provider_providerSubject: {
+                    provider: input.provider,
+                    providerSubject: input.providerSubject
+                  }
+                }
+              });
+            if (subjectIdentity && subjectIdentity.userId !== userId) {
+              throw new AppError(
+                "LOGIN_IDENTITY_ALREADY_IN_USE",
+                "このログイン方法は別のCall Nowアカウントに接続されています。",
+                409
+              );
+            }
+            const providerIdentity =
+              await transaction.externalIdentity.findUnique({
+                where: { userId_provider: { userId, provider: input.provider } }
+              });
+            if (
+              providerIdentity &&
+              !providerIdentity.revokedAt &&
+              providerIdentity.providerSubject !== input.providerSubject
+            ) {
+              throw new AppError(
+                "LOGIN_PROVIDER_ALREADY_LINKED",
+                "このログイン方法はすでに別のアカウントで追加されています。",
+                409
+              );
+            }
+            const identity = providerIdentity
+              ? await transaction.externalIdentity.update({
+                  where: { id: providerIdentity.id },
+                  data: {
+                    providerSubject: input.providerSubject,
+                    email,
+                    emailVerified: true,
+                    lastUsedAt: input.now,
+                    revokedAt: null
+                  }
+                })
+              : await transaction.externalIdentity.create({
+                  data: {
+                    userId,
+                    provider: input.provider,
+                    providerSubject: input.providerSubject,
+                    email,
+                    emailVerified: true,
+                    lastUsedAt: input.now
+                  }
+                });
+            await transaction.auditEvent.create({
+              data: {
+                actorUserId: userId,
+                action: "LOGIN_IDENTITY_LINKED",
+                targetType: "ExternalIdentity",
+                targetId: identity.id,
+                metadata: { provider: input.provider }
+              }
+            });
+            return mapPrimaryIdentity(identity);
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
+      () =>
+        new AppError(
+          "LOGIN_IDENTITY_LINK_CONFLICT",
+          "ログイン方法の追加が競合しました。もう一度お試しください。",
+          409
+        )
+    );
+  }
+
+  public async listPrimaryIdentities(
+    userId: string
+  ): Promise<readonly PrimaryIdentityRecord[]> {
+    const identities = await this.database.externalIdentity.findMany({
+      where: { userId, revokedAt: null },
+      orderBy: { createdAt: "asc" }
+    });
+    return identities.map(mapPrimaryIdentity);
+  }
+
+  public async unlinkPrimaryIdentity(
+    userId: string,
+    provider: PrimaryIdentityProvider,
+    now: Date
+  ): Promise<void> {
+    await retrySerializableTransaction(
+      () =>
+        this.database.$transaction(
+          async (transaction) => {
+            const identities = await transaction.externalIdentity.findMany({
+              where: { userId, revokedAt: null },
+              select: { id: true, provider: true }
+            });
+            if (identities.length <= 1) {
+              throw new AppError(
+                "LAST_LOGIN_IDENTITY_REQUIRED",
+                "最後のログイン方法は解除できません。先に別のログイン方法を追加してください。",
+                409
+              );
+            }
+            const target = identities.find(
+              (identity) => identity.provider === provider
+            );
+            if (!target) {
+              throw new AppError(
+                "LOGIN_IDENTITY_NOT_FOUND",
+                "このログイン方法は追加されていません。",
+                404
+              );
+            }
+            await transaction.externalIdentity.update({
+              where: { id: target.id },
+              data: { revokedAt: now }
+            });
+            await transaction.auditEvent.create({
+              data: {
+                actorUserId: userId,
+                action: "LOGIN_IDENTITY_UNLINKED",
+                targetType: "ExternalIdentity",
+                targetId: target.id,
+                metadata: { provider }
+              }
+            });
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
+      () =>
+        new AppError(
+          "LOGIN_IDENTITY_UNLINK_CONFLICT",
+          "ログイン方法の解除が競合しました。もう一度お試しください。",
           409
         )
     );
@@ -410,6 +727,71 @@ function readNonce(value: Prisma.JsonValue | null): string | null {
   }
   const nonce = value.nonce;
   return typeof nonce === "string" ? nonce : null;
+}
+
+function readPrimaryChallenge(
+  value: Prisma.JsonValue | null
+): Omit<PrimaryOAuthChallengeRecord, "userId"> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const provider = value.provider;
+  const intent = value.intent;
+  const codeVerifier = value.codeVerifier;
+  const nonce = value.nonce;
+  if (
+    !isPrimaryIdentityProvider(provider) ||
+    (intent !== "LOGIN" && intent !== "LINK") ||
+    typeof codeVerifier !== "string" ||
+    typeof nonce !== "string"
+  ) {
+    return null;
+  }
+  return { provider, intent, codeVerifier, nonce };
+}
+
+function primaryChallengeKind(
+  provider: PrimaryIdentityProvider
+): "GOOGLE_OAUTH" | "MICROSOFT_OAUTH" | "APPLE_OAUTH" {
+  if (provider === "MICROSOFT") return "MICROSOFT_OAUTH";
+  if (provider === "APPLE") return "APPLE_OAUTH";
+  return "GOOGLE_OAUTH";
+}
+
+function isPrimaryIdentityProvider(
+  value: unknown
+): value is PrimaryIdentityProvider {
+  return value === "GOOGLE" || value === "MICROSOFT" || value === "APPLE";
+}
+
+function requireVerifiedEmail(input: ResolvePrimaryIdentityInput): string {
+  const email = input.email?.trim().toLowerCase() ?? "";
+  if (
+    !input.emailVerified ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email) ||
+    email.length > 320
+  ) {
+    throw new AppError(
+      "VERIFIED_EMAIL_REQUIRED",
+      "確認済みメールアドレスを取得できませんでした。",
+      401
+    );
+  }
+  return email;
+}
+
+function mapPrimaryIdentity(identity: {
+  readonly provider: PrimaryIdentityProvider;
+  readonly email: string;
+  readonly createdAt: Date;
+  readonly lastUsedAt: Date | null;
+}): PrimaryIdentityRecord {
+  return {
+    provider: identity.provider,
+    email: identity.email,
+    linkedAt: identity.createdAt,
+    lastUsedAt: identity.lastUsedAt
+  };
 }
 
 function mapUser(user: {

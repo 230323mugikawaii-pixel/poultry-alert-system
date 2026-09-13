@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import type { AppEnvironment } from "../src/config/env.js";
@@ -26,6 +27,39 @@ const environment: AppEnvironment = {
   GOOGLE_OAUTH_REDIRECT_URI:
     "https://api.test.call-now.example/api/v1/auth/google/callback",
   GOOGLE_OAUTH_STATE_TTL_MINUTES: 10,
+  MICROSOFT_LOGIN_OAUTH_CLIENT_ID: "",
+  MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET: "",
+  MICROSOFT_LOGIN_OAUTH_REDIRECT_URI: "",
+  MICROSOFT_LOGIN_OAUTH_TENANT: "common",
+  MICROSOFT_LOGIN_OAUTH_STATE_TTL_MINUTES: 10,
+  APPLE_OAUTH_CLIENT_ID: "",
+  APPLE_OAUTH_TEAM_ID: "",
+  APPLE_OAUTH_KEY_ID: "",
+  APPLE_OAUTH_PRIVATE_KEY: "",
+  APPLE_OAUTH_REDIRECT_URI: "",
+  APPLE_OAUTH_STATE_TTL_MINUTES: 10,
+  GMAIL_OAUTH_CLIENT_ID: "test-gmail-client-id",
+  GMAIL_OAUTH_CLIENT_SECRET: "test-gmail-client-secret",
+  GMAIL_OAUTH_REDIRECT_URI:
+    "https://api.test.call-now.example/api/v1/auth/gmail/callback",
+  GMAIL_OAUTH_STATE_TTL_MINUTES: 10,
+  GMAIL_PUSH_MONITORING_ENABLED: false,
+  GMAIL_PUBSUB_TOPIC_NAME: "",
+  GMAIL_PUBSUB_PUSH_AUDIENCE: "",
+  GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL: "",
+  GMAIL_WATCH_RENEW_BEFORE_HOURS: 48,
+  GMAIL_HISTORY_RECOVERY_LOOKBACK_HOURS: 72,
+  GMAIL_PUBSUB_MAX_BODY_BYTES: 262144,
+  MICROSOFT_OAUTH_CLIENT_ID: "test-microsoft-client-id",
+  MICROSOFT_OAUTH_CLIENT_SECRET: "test-microsoft-client-secret",
+  MICROSOFT_OAUTH_REDIRECT_URI:
+    "http://127.0.0.1:8080/api/v1/auth/mail/microsoft/callback",
+  MICROSOFT_OAUTH_TENANT: "common",
+  MICROSOFT_OAUTH_STATE_TTL_MINUTES: 10,
+  MAIL_TOKEN_ENCRYPTION_PROVIDER: "local",
+  MAIL_TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  MAIL_TOKEN_ENCRYPTION_KEY_VERSION: "test-local-v1",
+  MAIL_KMS_KEY_NAME: "",
   MAGIC_LINK_TTL_MINUTES: 15,
   SESSION_IDLE_DAYS: 30,
   SESSION_ABSOLUTE_DAYS: 90,
@@ -43,11 +77,207 @@ const environment: AppEnvironment = {
 
 const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
 
+interface TeamBootstrapResponse {
+  readonly team: {
+    readonly id: string;
+    readonly role: "OWNER" | "MEMBER";
+    readonly keywords: readonly string[];
+    readonly seats: {
+      readonly seatLimit: number;
+      readonly activeMemberCount: number;
+    };
+    readonly subscription: {
+      readonly status: "ACTIVE" | "PAST_DUE" | "CANCELED";
+      readonly currentTermAmountYen: number;
+    };
+  };
+}
+
+interface ContractQuoteResponse {
+  readonly quote: {
+    readonly id: string;
+    readonly previousAnnualAmountYen: number;
+    readonly nextAnnualAmountYen: number;
+    readonly additionalChargeYen: number;
+    readonly requiresCheckout: boolean;
+  };
+}
+
 afterEach(async () => {
   await Promise.all(apps.splice(0).map(async (app) => app.close()));
 });
 
 describe("team routes", () => {
+  it("bootstraps one initial team and preserves an existing member role", async () => {
+    const authRepository = new MemoryAuthRepository();
+    const emailSender = new MemoryMagicLinkEmailSender();
+    const authService = new AuthService({
+      repository: authRepository,
+      emailSender,
+      publicOrigin: environment.PUBLIC_ORIGIN,
+      tokenPepper: environment.AUTH_TOKEN_PEPPER,
+      magicLinkTtlMinutes: environment.MAGIC_LINK_TTL_MINUTES,
+      sessionIdleDays: environment.SESSION_IDLE_DAYS,
+      sessionAbsoluteDays: environment.SESSION_ABSOLUTE_DAYS,
+      maxActiveSessions: environment.MAX_ACTIVE_SESSIONS
+    });
+    const owner = await login(authService, emailSender, "owner@example.com");
+    const member = await login(authService, emailSender, "member@example.com");
+    const teamRepository = new MemoryTeamRepository();
+    const teamService = new TeamService({
+      repository: teamRepository,
+      now: () => new Date("2026-08-26T00:00:00.000Z"),
+      teamCodeGenerator: () => "482731"
+    });
+    const app = await buildApp({
+      environment,
+      authService,
+      teamService,
+      securityThrottleService: new SecurityThrottleService(
+        new MemorySecurityThrottleRepository(),
+        environment.AUTH_TOKEN_PEPPER
+      ),
+      logger: false
+    });
+    apps.push(app);
+
+    const bootstrap = () =>
+      app.inject({
+        method: "POST",
+        url: "/api/v1/teams/bootstrap",
+        headers: {
+          cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`,
+          origin: environment.PUBLIC_ORIGIN
+        },
+        payload: { keywords: ["停電", "Call Now"] }
+      });
+    const first = await bootstrap();
+    const reload = await bootstrap();
+    const relogin = await bootstrap();
+
+    expect(first.statusCode).toBe(200);
+    expect(reload.statusCode).toBe(200);
+    expect(relogin.statusCode).toBe(200);
+    const firstPayload = first.json<TeamBootstrapResponse>();
+    expect(reload.json<TeamBootstrapResponse>().team.id).toBe(
+      firstPayload.team.id
+    );
+    expect(relogin.json<TeamBootstrapResponse>().team.id).toBe(
+      firstPayload.team.id
+    );
+    expect(firstPayload.team).toMatchObject({
+      role: "OWNER",
+      seats: { seatLimit: 0, activeMemberCount: 0 },
+      subscription: { status: "ACTIVE" }
+    });
+    expect(teamRepository.teamCreationCount).toBe(1);
+
+    const contractUrl = `/api/v1/teams/${firstPayload.team.id}/contract-settings/quote`;
+    const contractPayload = {
+      seatCount: 100,
+      idempotencyKey: "contract-quote-request-0001",
+      connections: [
+        { connectionId: randomUUID(), keywords: ["停電", "警報"] },
+        {
+          connectionId: randomUUID(),
+          keywords: ["警報", "サーバー障害"]
+        }
+      ]
+    };
+    const missingOrigin = await app.inject({
+      method: "POST",
+      url: contractUrl,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`
+      },
+      payload: contractPayload
+    });
+    expect(missingOrigin.statusCode, missingOrigin.body).toBe(403);
+
+    const preflight = await app.inject({
+      method: "OPTIONS",
+      url: contractUrl,
+      headers: {
+        origin: environment.PUBLIC_ORIGIN,
+        "access-control-request-method": "POST"
+      }
+    });
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers["access-control-allow-methods"]).toContain("POST");
+
+    const quoted = await app.inject({
+      method: "POST",
+      url: contractUrl,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      },
+      payload: contractPayload
+    });
+    expect(quoted.statusCode, quoted.body).toBe(201);
+    const quote = quoted.json<ContractQuoteResponse>().quote;
+    expect(quote).toMatchObject({
+      previousAnnualAmountYen: 6000,
+      nextAnnualAmountYen: 15_900,
+      additionalChargeYen: 9900,
+      requiresCheckout: true
+    });
+    expect(teamRepository.context?.seatSummary.totalUserLimit).toBe(1);
+
+    const applied = await app.inject({
+      method: "POST",
+      url: `/api/v1/teams/${firstPayload.team.id}/contract-settings/quotes/${quote.id}/apply`,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      },
+      payload: {
+        idempotencyKey: "contract-apply-request-0001",
+        expectedPreviousAnnualAmountYen: quote.previousAnnualAmountYen,
+        expectedNextAnnualAmountYen: quote.nextAnnualAmountYen,
+        expectedAdditionalChargeYen: quote.additionalChargeYen
+      }
+    });
+    expect(applied.statusCode, applied.body).toBe(200);
+    expect(applied.json<TeamBootstrapResponse>().team).toMatchObject({
+      role: "OWNER",
+      keywords: ["停電", "警報", "サーバー障害"],
+      seats: { seatLimit: 99 },
+      subscription: { currentTermAmountYen: 15_900 }
+    });
+
+    teamRepository.addMember(member.userId);
+    const memberResponse = await app.inject({
+      method: "POST",
+      url: "/api/v1/teams/bootstrap",
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${member.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      },
+      payload: {}
+    });
+    expect(memberResponse.statusCode).toBe(200);
+    expect(memberResponse.json<TeamBootstrapResponse>().team).toMatchObject({
+      id: firstPayload.team.id,
+      role: "MEMBER"
+    });
+    expect(teamRepository.teamCreationCount).toBe(1);
+
+    const memberUpdate = await app.inject({
+      method: "POST",
+      url: contractUrl,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${member.sessionToken}`,
+        origin: environment.PUBLIC_ORIGIN
+      },
+      payload: {
+        ...contractPayload,
+        idempotencyKey: "contract-quote-request-member"
+      }
+    });
+    expect(memberUpdate.statusCode).toBe(403);
+  });
+
   it("returns member details to the owner but rejects a member with 403", async () => {
     const authRepository = new MemoryAuthRepository();
     const emailSender = new MemoryMagicLinkEmailSender();

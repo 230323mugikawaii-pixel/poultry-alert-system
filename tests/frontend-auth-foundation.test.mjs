@@ -13,14 +13,28 @@ const htmlSource = readFileSync(
 
 test("frontend authentication uses the server session API", () => {
   assert.match(appSource, /\/api\/v1\/auth\/me/);
-  assert.match(appSource, /\/api\/v1\/auth\/google\/start/);
+  assert.match(
+    appSource,
+    /\/api\/v1\/auth\/\$\{provider\.toLowerCase\(\)\}\/start/
+  );
   assert.match(appSource, /\/api\/v1\/auth\/logout/);
   assert.match(appSource, /credentials:\s*"include"/);
+  assert.match(appSource, /\/api\/v1\/teams\/bootstrap/);
+  assert.doesNotMatch(appSource, /ログインしてホームへ/);
+  assert.doesNotMatch(htmlSource, /ログインしてホームへ/);
+  assert.doesNotMatch(htmlSource, /id="landingScreen"/);
+  assert.match(htmlSource, /id="guestHomeScreen"/);
+  assert.match(htmlSource, /まだ設定されていません/);
+  assert.match(appSource, /\/api\/v1\/notification-members\/me/);
+  assert.match(appSource, /\/api\/v1\/notification-members\/login/);
 });
 
 test("frontend no longer treats browser storage or a Google access token as login", () => {
   assert.doesNotMatch(appSource, /callNowSession/);
-  assert.doesNotMatch(appSource, /sessionStorage/);
+  assert.doesNotMatch(
+    appSource,
+    /sessionStorage\.(?:getItem|setItem)\(\s*["'](?:callNowSession|googleAccessToken)/
+  );
   assert.doesNotMatch(appSource, /googleAccessToken/);
   assert.doesNotMatch(appSource, /initTokenClient/);
   assert.doesNotMatch(appSource, /gmail\.readonly/);

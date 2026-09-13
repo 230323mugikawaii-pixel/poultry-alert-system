@@ -17,6 +17,39 @@ const environment: AppEnvironment = {
   GOOGLE_OAUTH_REDIRECT_URI:
     "https://api.test.call-now.example/api/v1/auth/google/callback",
   GOOGLE_OAUTH_STATE_TTL_MINUTES: 10,
+  MICROSOFT_LOGIN_OAUTH_CLIENT_ID: "",
+  MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET: "",
+  MICROSOFT_LOGIN_OAUTH_REDIRECT_URI: "",
+  MICROSOFT_LOGIN_OAUTH_TENANT: "common",
+  MICROSOFT_LOGIN_OAUTH_STATE_TTL_MINUTES: 10,
+  APPLE_OAUTH_CLIENT_ID: "",
+  APPLE_OAUTH_TEAM_ID: "",
+  APPLE_OAUTH_KEY_ID: "",
+  APPLE_OAUTH_PRIVATE_KEY: "",
+  APPLE_OAUTH_REDIRECT_URI: "",
+  APPLE_OAUTH_STATE_TTL_MINUTES: 10,
+  GMAIL_OAUTH_CLIENT_ID: "test-gmail-client-id",
+  GMAIL_OAUTH_CLIENT_SECRET: "test-gmail-client-secret",
+  GMAIL_OAUTH_REDIRECT_URI:
+    "https://api.test.call-now.example/api/v1/auth/gmail/callback",
+  GMAIL_OAUTH_STATE_TTL_MINUTES: 10,
+  GMAIL_PUSH_MONITORING_ENABLED: false,
+  GMAIL_PUBSUB_TOPIC_NAME: "",
+  GMAIL_PUBSUB_PUSH_AUDIENCE: "",
+  GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL: "",
+  GMAIL_WATCH_RENEW_BEFORE_HOURS: 48,
+  GMAIL_HISTORY_RECOVERY_LOOKBACK_HOURS: 72,
+  GMAIL_PUBSUB_MAX_BODY_BYTES: 262144,
+  MICROSOFT_OAUTH_CLIENT_ID: "test-microsoft-client-id",
+  MICROSOFT_OAUTH_CLIENT_SECRET: "test-microsoft-client-secret",
+  MICROSOFT_OAUTH_REDIRECT_URI:
+    "http://127.0.0.1:8080/api/v1/auth/mail/microsoft/callback",
+  MICROSOFT_OAUTH_TENANT: "common",
+  MICROSOFT_OAUTH_STATE_TTL_MINUTES: 10,
+  MAIL_TOKEN_ENCRYPTION_PROVIDER: "local",
+  MAIL_TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  MAIL_TOKEN_ENCRYPTION_KEY_VERSION: "test-local-v1",
+  MAIL_KMS_KEY_NAME: "",
   MAGIC_LINK_TTL_MINUTES: 15,
   SESSION_IDLE_DAYS: 30,
   SESSION_ABSOLUTE_DAYS: 90,
@@ -66,6 +99,32 @@ describe("system routes", () => {
       }
     });
   });
+
+  it.each(["POST", "DELETE"])(
+    "allows %s from the configured frontend origin",
+    async (method) => {
+      const app = await buildApp({ environment, logger: false });
+      apps.push(app);
+
+      const response = await app.inject({
+        method: "OPTIONS",
+        url: "/api/v1/teams/00000000-0000-4000-8000-000000000000/mail-connection",
+        headers: {
+          origin: environment.PUBLIC_ORIGIN,
+          "access-control-request-method": method
+        }
+      });
+
+      expect(response.statusCode).toBe(204);
+      expect(response.headers["access-control-allow-origin"]).toBe(
+        environment.PUBLIC_ORIGIN
+      );
+      expect(response.headers["access-control-allow-credentials"]).toBe("true");
+      expect(response.headers["access-control-allow-methods"]).toBe(
+        "GET, HEAD, POST, PUT, DELETE, OPTIONS"
+      );
+    }
+  );
 
   it("reports a dependency outage through readiness without failing liveness", async () => {
     const app = await buildApp({

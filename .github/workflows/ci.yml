@@ -42,5 +42,6 @@ jobs:
       - run: pnpm db:validate
       - run: pnpm db:generate
       - run: pnpm db:migrate:deploy
+      - run: pnpm db:check-drift
       - run: pnpm test:postgres
       - run: pnpm verify

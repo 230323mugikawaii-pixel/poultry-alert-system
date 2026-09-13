@@ -1,6 +1,9 @@
 import { randomInt } from "node:crypto";
 import { AppError } from "../../lib/app-error.js";
 import type {
+  AppliedContractChangeRecord,
+  ContractChangeQuoteRecord,
+  ContractConnectionSettings,
   InvitationDraft,
   SeatLimitChangeResult,
   TeamCreationResult,
@@ -9,24 +12,33 @@ import type {
   TeamRepository
 } from "./team-repository.js";
 import {
+  assertConfiguredSeatCount,
   calculateAnnualPriceYen,
-  calculateSeatSummary
+  calculateSeatSummary,
+  DEFAULT_MAX_CONFIGURED_SEAT_COUNT
 } from "./seat-policy.js";
-import { normalizeTeamKeywords } from "./keyword-policy.js";
+import {
+  mergeTeamKeywordSets,
+  normalizeTeamKeywords
+} from "./keyword-policy.js";
 
 export interface TeamServiceOptions {
   readonly repository: TeamRepository;
   readonly now?: () => Date;
   readonly teamCodeGenerator?: () => string;
+  readonly maxConfiguredSeatCount?: number;
 }
 
 export class TeamService {
   private readonly now: () => Date;
   private readonly teamCodeGenerator: () => string;
+  private readonly maxConfiguredSeatCount: number;
 
   public constructor(private readonly options: TeamServiceOptions) {
     this.now = options.now ?? (() => new Date());
     this.teamCodeGenerator = options.teamCodeGenerator ?? generateTeamCode;
+    this.maxConfiguredSeatCount =
+      options.maxConfiguredSeatCount ?? DEFAULT_MAX_CONFIGURED_SEAT_COUNT;
   }
 
   public async createTeam(
@@ -38,6 +50,7 @@ export class TeamService {
     },
     initialInvitation: InvitationDraft | null = null
   ): Promise<TeamCreationResult> {
+    assertConfiguredSeatCount(input.seatLimit + 1, this.maxConfiguredSeatCount);
     calculateSeatSummary(input.seatLimit, 0);
     if (input.seatLimit > 0 && !initialInvitation) {
       throw new AppError(
@@ -81,6 +94,84 @@ export class TeamService {
     );
   }
 
+  public async ensureInitialTeamForUser(input: {
+    readonly userId: string;
+    readonly keywords?: readonly string[];
+  }): Promise<TeamContextRecord> {
+    const keywords = normalizeTeamKeywords(input.keywords ?? []);
+    const now = this.now();
+    const termEnd = new Date(now);
+    termEnd.setUTCFullYear(termEnd.getUTCFullYear() + 1);
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        return await this.options.repository.ensureInitialTeam({
+          ownerUserId: input.userId,
+          publicCode: this.teamCodeGenerator(),
+          name: null,
+          seatLimit: 0,
+          keywords,
+          currentTermStartedAt: now,
+          currentTermEndsAt: termEnd,
+          currentTermAmountYen: calculateAnnualPriceYen(0, keywords.length),
+          initialInvitation: null
+        });
+      } catch (error) {
+        if (!isTeamCodeConflict(error)) {
+          throw error;
+        }
+      }
+    }
+
+    throw new AppError(
+      "TEAM_CODE_GENERATION_FAILED",
+      "初期設定を完了できませんでした。もう一度お試しください。",
+      503
+    );
+  }
+
+  public async completeOwnerOnboardingPurchase(input: {
+    readonly userId: string;
+    readonly onboardingId: string;
+    readonly keywords: readonly string[];
+    readonly seatCount: number;
+  }): Promise<TeamCreationResult> {
+    assertConfiguredSeatCount(input.seatCount, this.maxConfiguredSeatCount);
+    const seatLimit = input.seatCount - 1;
+    calculateSeatSummary(seatLimit, 0);
+    const keywords = normalizeTeamKeywords(input.keywords);
+    const now = this.now();
+    const termEnd = new Date(now);
+    termEnd.setUTCFullYear(termEnd.getUTCFullYear() + 1);
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        return await this.options.repository.completeOwnerOnboardingPurchase({
+          onboardingId: input.onboardingId,
+          ownerUserId: input.userId,
+          publicCode: this.teamCodeGenerator(),
+          name: null,
+          seatLimit,
+          keywords,
+          currentTermStartedAt: now,
+          currentTermEndsAt: termEnd,
+          currentTermAmountYen: calculateAnnualPriceYen(
+            seatLimit,
+            keywords.length
+          ),
+          initialInvitation: null
+        });
+      } catch (error) {
+        if (!isTeamCodeConflict(error)) throw error;
+      }
+    }
+    throw new AppError(
+      "TEAM_CODE_GENERATION_FAILED",
+      "初期設定を完了できませんでした。もう一度お試しください。",
+      503
+    );
+  }
+
   public async getCurrentTeam(userId: string): Promise<TeamContextRecord> {
     const context = await this.options.repository.findCurrentTeam(userId);
     if (!context) {
@@ -96,11 +187,91 @@ export class TeamService {
     return this.options.repository.listActiveMembers(context.teamId);
   }
 
+  public async updateContractSettings(input: {
+    readonly userId: string;
+    readonly teamId: string;
+    readonly seatCount: number;
+    readonly connections: readonly {
+      readonly connectionId: string;
+      readonly keywords: readonly string[];
+    }[];
+    readonly requestId?: string;
+  }): Promise<TeamContextRecord> {
+    const settings = this.normalizeContractSettings(input);
+    const context = await this.requireOwnerForTeam(input.userId, input.teamId);
+    return this.options.repository.updateContractSettings({
+      teamId: context.teamId,
+      actorUserId: input.userId,
+      seatLimit: settings.seatLimit,
+      keywords: settings.keywords,
+      connectionKeywords: settings.connections,
+      currentTermAmountYen: calculateAnnualPriceYen(
+        settings.seatLimit,
+        settings.keywords.length
+      ),
+      requestId: input.requestId ?? null,
+      now: this.now()
+    });
+  }
+
+  public async createContractChangeQuote(input: {
+    readonly userId: string;
+    readonly teamId: string;
+    readonly seatCount: number;
+    readonly connections: readonly ContractConnectionSettings[];
+    readonly idempotencyKey: string;
+  }): Promise<ContractChangeQuoteRecord> {
+    assertIdempotencyKey(input.idempotencyKey);
+    const settings = this.normalizeContractSettings(input);
+    const context = await this.requireOwnerForTeam(input.userId, input.teamId);
+    const now = this.now();
+    const expiresAt = new Date(now.getTime() + 15 * 60 * 1000);
+    return this.options.repository.createContractChangeQuote({
+      teamId: context.teamId,
+      actorUserId: input.userId,
+      seatLimit: settings.seatLimit,
+      keywords: settings.keywords,
+      connectionKeywords: settings.connections,
+      idempotencyKey: input.idempotencyKey,
+      now,
+      expiresAt
+    });
+  }
+
+  public async applyContractChangeQuote(input: {
+    readonly userId: string;
+    readonly teamId: string;
+    readonly quoteId: string;
+    readonly idempotencyKey: string;
+    readonly expectedPreviousAnnualAmountYen: number;
+    readonly expectedNextAnnualAmountYen: number;
+    readonly expectedAdditionalChargeYen: number;
+    readonly requestId?: string;
+  }): Promise<AppliedContractChangeRecord> {
+    assertIdempotencyKey(input.idempotencyKey);
+    await this.requireOwnerForTeam(input.userId, input.teamId);
+    return this.options.repository.applyContractChangeQuote({
+      teamId: input.teamId,
+      quoteId: input.quoteId,
+      actorUserId: input.userId,
+      applyIdempotencyKey: input.idempotencyKey,
+      expectedPreviousAnnualAmountYen: input.expectedPreviousAnnualAmountYen,
+      expectedNextAnnualAmountYen: input.expectedNextAnnualAmountYen,
+      expectedAdditionalChargeYen: input.expectedAdditionalChargeYen,
+      requestId: input.requestId ?? null,
+      now: this.now()
+    });
+  }
+
   public async requestSeatLimitChange(
     userId: string,
     requestedSeatLimit: number,
     replacementInvitation: InvitationDraft | null = null
   ): Promise<SeatLimitChangeResult> {
+    assertConfiguredSeatCount(
+      requestedSeatLimit + 1,
+      this.maxConfiguredSeatCount
+    );
     calculateSeatSummary(requestedSeatLimit, 0);
     const context = await this.requireOwner(userId);
     return this.options.repository.requestSeatLimitChange({
@@ -123,6 +294,73 @@ export class TeamService {
     }
     return context;
   }
+
+  public async requireOwnerForTeam(
+    userId: string,
+    teamId: string
+  ): Promise<TeamContextRecord> {
+    const context = await this.options.repository.findTeamForUser(
+      userId,
+      teamId
+    );
+    if (!context) {
+      throw new AppError("TEAM_NOT_FOUND", "所属チームが見つかりません。", 404);
+    }
+    if (context.role !== "OWNER") {
+      throw new AppError(
+        "OWNER_REQUIRED",
+        "この操作はチームの代表者だけが実行できます。",
+        403
+      );
+    }
+    return context;
+  }
+
+  private normalizeContractSettings(input: {
+    readonly seatCount: number;
+    readonly connections: readonly ContractConnectionSettings[];
+  }): {
+    readonly seatLimit: number;
+    readonly keywords: readonly string[];
+    readonly connections: readonly ContractConnectionSettings[];
+  } {
+    assertConfiguredSeatCount(input.seatCount, this.maxConfiguredSeatCount);
+    const seatLimit = input.seatCount - 1;
+    const connectionIds = new Set<string>();
+    const connections = input.connections.map((connection) => {
+      if (connectionIds.has(connection.connectionId)) {
+        throw new AppError(
+          "DUPLICATE_MAIL_CONNECTION",
+          "同じ監視アカウントが重複しています。",
+          400
+        );
+      }
+      connectionIds.add(connection.connectionId);
+      const keywords = normalizeTeamKeywords(connection.keywords);
+      if (keywords.length === 0) {
+        throw new AppError(
+          "MAIL_KEYWORDS_REQUIRED",
+          "各監視アカウントに通知キーワードを1件以上設定してください。",
+          400
+        );
+      }
+      return { connectionId: connection.connectionId, keywords };
+    });
+    if (connections.length === 0) {
+      throw new AppError(
+        "MAIL_CONNECTION_REQUIRED",
+        "監視アカウントを1件以上設定してください。",
+        400
+      );
+    }
+    return {
+      seatLimit,
+      connections,
+      keywords: mergeTeamKeywordSets(
+        connections.map((connection) => connection.keywords)
+      )
+    };
+  }
 }
 
 export function generateTeamCode(): string {
@@ -131,4 +369,14 @@ export function generateTeamCode(): string {
 
 function isTeamCodeConflict(error: unknown): boolean {
   return error instanceof AppError && error.code === "TEAM_CODE_CONFLICT";
+}
+
+function assertIdempotencyKey(value: string): void {
+  if (!/^[A-Za-z0-9_-]{16,100}$/.test(value)) {
+    throw new AppError(
+      "INVALID_IDEMPOTENCY_KEY",
+      "契約変更を開始できませんでした。もう一度お試しください。",
+      400
+    );
+  }
 }

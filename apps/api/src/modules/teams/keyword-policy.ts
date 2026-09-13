@@ -36,7 +36,7 @@ export function normalizeTeamKeywords(values: readonly string[]): string[] {
       );
     }
 
-    const normalized = keyword.normalize("NFKC").toLocaleLowerCase("ja-JP");
+    const normalized = normalizeTeamKeywordForComparison(keyword);
     if (normalizedValues.has(normalized)) {
       throw new AppError(
         "DUPLICATE_KEYWORD",
@@ -54,6 +54,30 @@ export function normalizeTeamKeywords(values: readonly string[]): string[] {
 
 export function normalizeTeamKeyword(value: string): string {
   return value.trim().replace(/[ \u00a0\u3000]+/gu, " ");
+}
+
+export function normalizeTeamKeywordForComparison(value: string): string {
+  return normalizeTeamKeyword(value)
+    .normalize("NFKC")
+    .toLocaleLowerCase("ja-JP");
+}
+
+export function mergeTeamKeywordSets(
+  sets: readonly (readonly string[])[]
+): string[] {
+  const merged: string[] = [];
+  const normalizedValues = new Set<string>();
+
+  for (const set of sets) {
+    for (const keyword of normalizeTeamKeywords(set)) {
+      const normalized = normalizeTeamKeywordForComparison(keyword);
+      if (normalizedValues.has(normalized)) continue;
+      normalizedValues.add(normalized);
+      merged.push(keyword);
+    }
+  }
+
+  return merged;
 }
 
 function hasForbiddenKeywordCharacters(value: string): boolean {

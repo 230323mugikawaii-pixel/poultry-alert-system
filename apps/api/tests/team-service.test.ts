@@ -31,6 +31,87 @@ async function createFixture(seatLimit = 5) {
 }
 
 describe("TeamService", () => {
+  it.each([1, 2, 10, 11, 25, 100])(
+    "purchases a %i-person plan with the owner included in seatCount",
+    async (seatCount) => {
+      const repository = new MemoryTeamRepository();
+      const service = new TeamService({
+        repository,
+        now: () => new Date("2026-08-30T00:00:00.000Z"),
+        teamCodeGenerator: () => "482731"
+      });
+
+      const result = await service.completeOwnerOnboardingPurchase({
+        userId: ownerUserId,
+        onboardingId: randomUUID(),
+        keywords: ["停電", "通電", "警報"],
+        seatCount
+      });
+
+      expect(result.team.seatSummary).toMatchObject({
+        seatLimit: seatCount - 1,
+        totalUserLimit: seatCount,
+        availableSeats: seatCount - 1
+      });
+      expect(result.team.currentTermAmountYen).toBe(
+        6_000 + (seatCount - 1) * 100
+      );
+    }
+  );
+
+  it("bootstraps one owner workspace and reuses it across repeated initialization", async () => {
+    const repository = new MemoryTeamRepository();
+    const service = new TeamService({
+      repository,
+      now: () => new Date("2026-08-26T00:00:00.000Z"),
+      teamCodeGenerator: () => "482731"
+    });
+
+    const first = await service.ensureInitialTeamForUser({
+      userId: ownerUserId,
+      keywords: ["停電", "Call Now"]
+    });
+    const reload = await service.ensureInitialTeamForUser({
+      userId: ownerUserId
+    });
+    const relogin = await service.ensureInitialTeamForUser({
+      userId: ownerUserId
+    });
+
+    expect(reload.teamId).toBe(first.teamId);
+    expect(relogin.teamId).toBe(first.teamId);
+    expect(repository.teamCreationCount).toBe(1);
+    expect(first).toMatchObject({
+      role: "OWNER",
+      currentTermAmountYen: 6000,
+      seatSummary: {
+        seatLimit: 0,
+        activeMemberCount: 0,
+        availableSeats: 0,
+        totalUserLimit: 1,
+        currentUserCount: 1
+      }
+    });
+  });
+
+  it("preserves an existing member role instead of creating an owner workspace", async () => {
+    const repository = new MemoryTeamRepository();
+    const service = new TeamService({
+      repository,
+      teamCodeGenerator: () => "482731"
+    });
+    await service.ensureInitialTeamForUser({ userId: ownerUserId });
+    const memberUserId = randomUUID();
+    repository.addMember(memberUserId);
+
+    const existing = await service.ensureInitialTeamForUser({
+      userId: memberUserId
+    });
+
+    expect(existing.role).toBe("MEMBER");
+    expect(repository.teamCreationCount).toBe(1);
+  });
+
   it("rejects creating paid member capacity without an atomic initial invitation", async () => {
     const service = new TeamService({
       repository: new MemoryTeamRepository(),
@@ -164,5 +245,154 @@ describe("TeamService", () => {
     await expect(
       fixture.service.requestSeatLimitChange(memberId, 6)
     ).rejects.toMatchObject({ code: "OWNER_REQUIRED" });
+  });
+
+  it("updates provider keywords and prices normalized cross-provider duplicates once", async () => {
+    const fixture = await createFixture(5);
+    const updated = await fixture.service.updateContractSettings({
+      userId: ownerUserId,
+      teamId: fixture.team.teamId,
+      seatCount: 100,
+      connections: [
+        {
+          connectionId: randomUUID(),
+          keywords: ["停電", "警報"]
+        },
+        {
+          connectionId: randomUUID(),
+          keywords: ["警報", "サーバー障害"]
+        }
+      ]
+    });
+
+    expect(updated.keywords).toEqual(["停電", "警報", "サーバー障害"]);
+    expect(updated.seatSummary.totalUserLimit).toBe(100);
+    expect(updated.currentTermAmountYen).toBe(15_900);
+  });
+
+  it("quotes an increase without mutating and applies it once after confirmation", async () => {
+    const fixture = await createFixture(11);
+    expect(fixture.team.currentTermAmountYen).toBe(7_100);
+    const connectionId = randomUUID();
+    const quote = await fixture.service.createContractChangeQuote({
+      userId: ownerUserId,
+      teamId: fixture.team.teamId,
+      seatCount: 13,
+      connections: [{ connectionId, keywords: ["停電", "通電", "警報"] }],
+      idempotencyKey: "contract-quote-service-0001"
+    });
+
+    expect(quote).toMatchObject({
+      previousAnnualAmountYen: 7_100,
+      nextAnnualAmountYen: 7_200,
+      additionalChargeYen: 100,
+      seatCount: 13
+    });
+    expect(fixture.repository.context?.seatSummary.totalUserLimit).toBe(12);
+
+    const applyInput = {
+      userId: ownerUserId,
+      teamId: fixture.team.teamId,
+      quoteId: quote.id,
+      idempotencyKey: "contract-apply-service-0001",
+      expectedPreviousAnnualAmountYen: quote.previousAnnualAmountYen,
+      expectedNextAnnualAmountYen: quote.nextAnnualAmountYen,
+      expectedAdditionalChargeYen: quote.additionalChargeYen
+    };
+    const applied = await fixture.service.applyContractChangeQuote(applyInput);
+    const repeated = await fixture.service.applyContractChangeQuote(applyInput);
+
+    expect(applied.team).toMatchObject({
+      currentTermAmountYen: 7_200,
+      renewalAmountYen: 7_200,
+      seatSummary: { totalUserLimit: 13 }
+    });
+    expect(repeated.quote.id).toBe(applied.quote.id);
+    expect(fixture.repository.contractQuotes).toHaveLength(1);
+  });
+
+  it("applies a downgrade without changing the paid current-term amount", async () => {
+    const fixture = await createFixture(11);
+    const quote = await fixture.service.createContractChangeQuote({
+      userId: ownerUserId,
+      teamId: fixture.team.teamId,
+      seatCount: 10,
+      connections: [
+        {
+          connectionId: randomUUID(),
+          keywords: ["停電", "通電", "警報"]
+        }
+      ],
+      idempotencyKey: "contract-quote-service-0002"
+    });
+    expect(quote.additionalChargeYen).toBe(0);
+
+    const applied = await fixture.service.applyContractChangeQuote({
+      userId: ownerUserId,
+      teamId: fixture.team.teamId,
+      quoteId: quote.id,
+      idempotencyKey: "contract-apply-service-0002",
+      expectedPreviousAnnualAmountYen: quote.previousAnnualAmountYen,
+      expectedNextAnnualAmountYen: quote.nextAnnualAmountYen,
+      expectedAdditionalChargeYen: quote.additionalChargeYen
+    });
+    expect(applied.team.currentTermAmountYen).toBe(7_100);
+    expect(applied.team.renewalAmountYen).toBe(6_900);
+  });
+
+  it("rejects stale confirmation amounts", async () => {
+    const fixture = await createFixture(11);
+    const quote = await fixture.service.createContractChangeQuote({
+      userId: ownerUserId,
+      teamId: fixture.team.teamId,
+      seatCount: 13,
+      connections: [
+        {
+          connectionId: randomUUID(),
+          keywords: ["停電", "通電", "警報"]
+        }
+      ],
+      idempotencyKey: "contract-quote-service-0003"
+    });
+    await expect(
+      fixture.service.applyContractChangeQuote({
+        userId: ownerUserId,
+        teamId: fixture.team.teamId,
+        quoteId: quote.id,
+        idempotencyKey: "contract-apply-service-0003",
+        expectedPreviousAnnualAmountYen: quote.previousAnnualAmountYen,
+        expectedNextAnnualAmountYen: quote.nextAnnualAmountYen,
+        expectedAdditionalChargeYen: 0
+      })
+    ).rejects.toMatchObject({ code: "CONTRACT_SETTINGS_CONFLICT" });
+  });
+
+  it("requires at least one keyword for every monitoring connection", async () => {
+    const fixture = await createFixture(1);
+    await expect(
+      fixture.service.updateContractSettings({
+        userId: ownerUserId,
+        teamId: fixture.team.teamId,
+        seatCount: 1,
+        connections: [{ connectionId: randomUUID(), keywords: [] }]
+      })
+    ).rejects.toMatchObject({ code: "MAIL_KEYWORDS_REQUIRED" });
+  });
+
+  it("rejects a contract seat count below active occupancy", async () => {
+    const fixture = await createFixture(3);
+    fixture.repository.addMember();
+    fixture.repository.addMember();
+    await expect(
+      fixture.service.updateContractSettings({
+        userId: ownerUserId,
+        teamId: fixture.team.teamId,
+        seatCount: 2,
+        connections: [{ connectionId: randomUUID(), keywords: ["停電"] }]
+      })
+    ).rejects.toMatchObject({
+      code: "SEAT_LIMIT_BELOW_OCCUPANCY",
+      statusCode: 409
+    });
   });
 });

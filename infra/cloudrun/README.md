@@ -27,6 +27,7 @@ target contains Prisma CLI and is deployed only to the Cloud Run migration job.
 - `call-now-database-url`
 - `call-now-auth-token-pepper`
 - `call-now-google-oauth-client-secret`
+- `call-now-gmail-oauth-client-secret`
 - `call-now-smtp-user`
 - `call-now-smtp-password`
 
@@ -55,6 +56,13 @@ approval. Configure these environment variables:
 - `COOKIE_NAME`
 - `GOOGLE_OAUTH_CLIENT_ID`
 - `GOOGLE_OAUTH_REDIRECT_URI`
+- `GMAIL_OAUTH_CLIENT_ID`
+- `GMAIL_OAUTH_REDIRECT_URI`
+- `MICROSOFT_OAUTH_CLIENT_ID`
+- `MICROSOFT_OAUTH_REDIRECT_URI`
+- `MICROSOFT_OAUTH_TENANT` (`common` for the public service)
+- `MAIL_TOKEN_ENCRYPTION_KEY_VERSION`
+- `MAIL_KMS_KEY_NAME`
 - `SMTP_HOST`
 - `SMTP_PORT`
 - `SMTP_SECURE`
@@ -62,6 +70,8 @@ approval. Configure these environment variables:
 - `DATABASE_URL_SECRET_VERSION`
 - `AUTH_PEPPER_SECRET_VERSION`
 - `GOOGLE_OAUTH_CLIENT_SECRET_VERSION`
+- `GMAIL_OAUTH_CLIENT_SECRET_VERSION`
+- `MICROSOFT_OAUTH_CLIENT_SECRET_VERSION`
 - `SMTP_USER_SECRET_VERSION`
 - `SMTP_PASSWORD_SECRET_VERSION`
 
@@ -77,5 +87,17 @@ validate the observed hop chain before changing this value; never use an uncondi
 
 The Google OAuth client must be a Web application client. Register the exact
 `GOOGLE_OAUTH_REDIRECT_URI` for each environment. Login requests use only
-`openid`, `email`, and `profile`; Gmail authorization and token persistence are
-deliberately outside this phase.
+`openid`, `email`, and `profile`. Use a separate Web application OAuth client for
+Gmail monitoring and register the exact `GMAIL_OAUTH_REDIRECT_URI`. Enable the Gmail
+API and request only `openid`, `email`, and `gmail.readonly`; offline consent is
+required so the monitoring job can refresh access without a browser.
+
+Register a separate Microsoft Entra Web application for mail monitoring, support both
+organizational and personal Microsoft accounts, and register the exact
+`MICROSOFT_OAUTH_REDIRECT_URI`. Request delegated `openid`, `profile`, `email`,
+`offline_access`, and `Mail.Read`; do not grant `Mail.ReadWrite` or application mail
+permissions. Store its client secret only in Secret Manager.
+
+The runtime service account also needs Cloud KMS encrypt/decrypt permission on the
+specific key named by `MAIL_KMS_KEY_NAME`. Do not grant project-wide key access when
+a key-level binding is sufficient.

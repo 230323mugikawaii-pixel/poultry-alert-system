@@ -1,188 +1,308 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8"/>
 
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1.0, viewport-fit=cover"
-  >
+  />
 
-  <meta name="theme-color" content="#0862c7">
-  <meta name="call-now-api-origin" content="">
+  <meta name="theme-color" content="#0862c7"/>
+  <meta name="call-now-api-origin" content=""/>
 
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=15">
+    <link rel="stylesheet" href="css/style.css?v=32"/>
 </head>
 
 <body>
 
-  <!-- ========================================
-       トップページ
-  ========================================= -->
+  <section id="guestHomeScreen" class="guest-home-screen hidden">
+    <div class="guest-home-card">
+      <div class="guest-home-logo">🔔 Call Now</div>
+      <h1>ホーム</h1>
+      <p class="guest-home-status">⚠ まだ設定されていません</p>
+      <p>利用方法を選んでください。</p>
+      <button
+        type="button"
+        class="btn primary full-width"
+        onclick="openOwnerSetup()"
+      >
+        Call Nowを設定する
+      </button>
+      <button
+        type="button"
+        class="btn outline full-width"
+        onclick="openNotificationMemberLogin()"
+      >
+        通知グループに参加
+      </button>
+    </div>
+  </section>
 
-  <div id="landingScreen">
+  <section id="ownerMonitoringSetupScreen" class="flow-screen hidden">
+    <div class="flow-container monitoring-setup-container">
+      <button type="button" class="back-button" onclick="openGuestHome()">
+        ← ホームへ戻る
+      </button>
 
-    <header class="landing-header">
+      <nav class="setup-progress" aria-label="セットアップの進み具合">
+        <span class="active" aria-current="step">1 監視アカウント</span>
+        <span aria-hidden="true">→</span>
+        <span>2 利用設定</span>
+        <span aria-hidden="true">→</span>
+        <span>3 購入</span>
+      </nav>
 
-      <div class="landing-logo">
-        🔔 Call Now
-      </div>
+      <h1>監視アカウント設定</h1>
+      <p class="description">
+        重要なメールを監視するアカウントを設定してください。
+      </p>
 
-    </header>
-
-
-    <main>
-
-      <section class="hero">
-
-        <div class="hero-text">
-
-          <h1>
-            Call Now
-          </h1>
-
-          <h2>
-            メールを、確実な音へ。
-          </h2>
-
-          <p>
-            大切なメール通知を、見逃しにくい音へ変換します。<br>
-            停止ボタンを押すまで、繰り返し通知します。
-          </p>
-
-
-          <div class="hero-buttons">
-
+      <div class="monitoring-provider-grid">
+        <article class="monitoring-provider-card">
+          <div>
+            <p class="small-label">Google</p>
+            <h2>Gmail / Google Workspace</h2>
+            <p>Gmailで受信する重要メールを監視します。</p>
+          </div>
+          <div id="ownerGoogleSetupStatus" class="monitoring-provider-status" aria-live="polite"></div>
+          <div class="monitoring-provider-actions">
             <button
+              id="ownerGoogleSetupButton"
               type="button"
               class="btn primary"
-              onclick="startSignup()"
-            >
-              今すぐ始める
-            </button>
-
-
+              onclick="startOwnerMonitoringOAuth('GOOGLE')"
+            >Googleを設定する</button>
             <button
+              id="ownerGoogleSkipButton"
               type="button"
               class="btn outline"
-              onclick="scrollToService()"
-            >
-              サービスについて
-            </button>
-
+              onclick="skipOwnerMonitoringProvider('GOOGLE')"
+            >今回は設定しない</button>
           </div>
+        </article>
 
-        </div>
-
-
-        <div class="notification-card">
-
-          <div class="notification-icon">
-            🔔
+        <article class="monitoring-provider-card">
+          <div>
+            <p class="small-label">Microsoft</p>
+            <h2>Microsoft 365 / Outlook</h2>
+            <p>Microsoft 365 / Outlookで受信する重要メールを監視します。</p>
           </div>
+          <div id="ownerMicrosoftSetupStatus" class="monitoring-provider-status" aria-live="polite"></div>
+          <div class="monitoring-provider-actions">
+            <button
+              id="ownerMicrosoftSetupButton"
+              type="button"
+              class="btn primary"
+              onclick="startOwnerMonitoringOAuth('MICROSOFT')"
+            >Microsoftを設定する</button>
+            <button
+              id="ownerMicrosoftSkipButton"
+              type="button"
+              class="btn outline"
+              onclick="skipOwnerMonitoringProvider('MICROSOFT')"
+            >今回は設定しない</button>
+          </div>
+        </article>
+      </div>
 
-          <h2>
-            Call Now
-          </h2>
+      <p id="ownerMonitoringSetupError" class="error-message" aria-live="polite"></p>
+      <button
+        id="ownerMonitoringContinueButton"
+        type="button"
+        class="btn primary full-width"
+        onclick="continueFromOwnerMonitoringSetup()"
+      >利用設定へ進む</button>
+      <p class="input-help center-text">
+        今回設定しないアカウントも、あとからいつでも追加できます。
+      </p>
+    </div>
+  </section>
 
+  <section id="notificationMemberLoginScreen" class="flow-screen hidden">
+    <div class="flow-container member-login-container">
+      <button type="button" class="back-button" onclick="openGuestHome()">
+        ← ホームへ戻る
+      </button>
+      <p class="step-label">通知参加者</p>
+      <h1>通知グループに参加</h1>
+      <p class="description">
+        代表者から受け取ったCall Now IDとパスワードを入力してください。
+      </p>
+      <form id="notificationMemberLoginForm" onsubmit="loginNotificationMember(event)">
+        <label class="member-login-field">
+          <span>参加者ID</span>
+          <input
+            id="notificationMemberCallNowId"
+            type="text"
+            maxlength="16"
+            autocomplete="username"
+            placeholder="CN-XXXXXXXX"
+            required
+          />
+        </label>
+        <label class="member-login-field">
+          <span>パスワード</span>
+          <input
+            id="notificationMemberPassword"
+            type="password"
+            maxlength="128"
+            autocomplete="current-password"
+            required
+          />
+        </label>
+        <p id="notificationMemberLoginError" class="error-message" aria-live="polite"></p>
+        <button type="submit" class="btn primary full-width">
+          参加する
+        </button>
+      </form>
+    </div>
+  </section>
+
+  <section id="notificationMemberAppScreen" class="app-screen hidden">
+    <header class="app-header">
+      <div class="app-logo">🔔 Call Now</div>
+      <div class="app-actions">
+        <button
+          id="notificationMemberSoundToggleButton"
+          type="button"
+          class="sound-toggle-button"
+          aria-label="通知音を切り替える"
+          title="通知音を切り替える"
+          onclick="toggleAlarmSoundPreference('NOTIFICATION_MEMBER')"
+        >
+          <span aria-hidden="true">🔊</span>
+          <span class="sound-toggle-label">通知音 ON</span>
+        </button>
+        <button
+          id="notificationMemberNotificationCenterButton"
+          type="button"
+          class="notification-bell-button"
+          aria-label="緊急通知を開く"
+          onclick="openNotificationMemberNotificationCenter()"
+        >
+          <span aria-hidden="true">🔔</span>
+          <span
+            id="notificationMemberUnreadBadge"
+            class="notification-unread-badge hidden"
+            aria-label="未読の緊急通知"
+          ></span>
+        </button>
+        <button type="button" class="logout-button" onclick="logoutNotificationMember()">
+          ログアウト
+        </button>
+      </div>
+    </header>
+    <main class="member-app-main">
+      <section id="notificationMemberHomePage" class="member-page">
+        <h1>通知ホーム</h1>
+        <article class="card member-status-card">
+          <h2 id="notificationMemberWelcome">通知メンバー</h2>
+          <p id="notificationMemberTeamName"></p>
           <p>
-            通知中...
+            緊急通知はヘッダーのベルから確認できます。メール本文やアカウント設定は表示されません。
           </p>
-
-        </div>
-
+        </article>
       </section>
-
-
-      <!-- サービス紹介 -->
-
       <section
-        id="serviceSection"
-        class="features"
+        id="notificationMemberNotificationCenterPage"
+        class="member-page hidden"
       >
-
-        <article class="feature">
-
-          <span>
-            🔔
+        <button
+          type="button"
+          class="back-button"
+          onclick="showNotificationMemberHome()"
+        >
+          ← 通知ホームへ戻る
+        </button>
+        <div class="notification-center-heading">
+          <h1>お知らせ</h1>
+          <button
+            id="notificationMemberSelectionButton"
+            type="button"
+            class="btn outline notification-selection-button"
+            onclick="startNotificationSelection('NOTIFICATION_MEMBER')"
+          >
+            選択
+          </button>
+        </div>
+        <div class="notification-center-health">
+          <span
+            id="notificationMemberAlertStreamStatus"
+            class="alert-stream-status"
+          >
+            接続中
           </span>
-
-          <h3>
-            音でお知らせ
-          </h3>
-
-          <p>
-            重要な通知を大きな音でお知らせします。
-          </p>
-
-        </article>
-
-
-        <article class="feature">
-
-          <span>
-            🔁
-          </span>
-
-          <h3>
-            自動で繰り返し
-          </h3>
-
-          <p>
-            停止するまで繰り返し通知します。
-          </p>
-
-        </article>
-
-
-        <article class="feature">
-
-          <span>
-            ⏱️
-          </span>
-
-          <h3>
-            確認して終了
-          </h3>
-
-          <p>
-            停止ボタンを押すと通知を終了します。
-          </p>
-
-        </article>
-
-
-        <article class="feature">
-
-          <span>
-            ✉️
-          </span>
-
-          <h3>
-            メールで確認
-          </h3>
-
-          <p>
-            詳しい内容は受信したメールで確認できます。
-          </p>
-
-        </article>
-
+          <div
+            class="alert-audio-readiness"
+            data-audience="NOTIFICATION_MEMBER"
+          >
+            <div>
+              <strong>通知音</strong>
+              <p id="notificationMemberAudioStatus">
+                ブラウザで通知音の状態を確認しています。
+              </p>
+            </div>
+            <button
+              id="notificationMemberEnableAudioButton"
+              type="button"
+              class="btn outline"
+              onclick="enableAlarmAudio('NOTIFICATION_MEMBER')"
+            >
+              通知音を有効にする
+            </button>
+          </div>
+        </div>
+        <div
+          id="notificationMemberSelectionToolbar"
+          class="notification-selection-toolbar hidden"
+          role="toolbar"
+          aria-label="お知らせの選択操作"
+        >
+          <button type="button" class="btn outline" onclick="selectAllNotifications('NOTIFICATION_MEMBER')">
+            すべて選択
+          </button>
+          <span id="notificationMemberSelectionCount" aria-live="polite">0件選択中</span>
+          <button type="button" class="btn outline" onclick="clearNotificationSelection('NOTIFICATION_MEMBER')">
+            選択を解除
+          </button>
+          <button
+            id="notificationMemberDeleteSelectionButton"
+            type="button"
+            class="btn danger"
+            onclick="deleteSelectedNotifications('NOTIFICATION_MEMBER')"
+            disabled
+          >
+            選択した通知を削除
+          </button>
+          <button type="button" class="btn outline" onclick="cancelNotificationSelection('NOTIFICATION_MEMBER')">
+            キャンセル
+          </button>
+        </div>
+        <p
+          id="notificationMemberNotificationCenterStatus"
+          class="feedback-status"
+          role="status"
+          aria-live="polite"
+        ></p>
+        <h2 class="notification-section-title">緊急通知</h2>
+        <p
+          id="notificationMemberNotificationCenterError"
+          class="form-error"
+          role="alert"
+          aria-live="polite"
+        ></p>
+        <div
+          id="notificationMemberEmergencyNotificationList"
+          class="emergency-notification-list"
+          aria-live="polite"
+        ></div>
       </section>
-
     </main>
-
-
-    <footer>
-      © 2026 Call Now. All rights reserved.
-    </footer>
-
-  </div>
-
-
+  </section>
 
   <!-- ========================================
        キーワード設定画面
@@ -204,12 +324,15 @@
       </button>
 
 
-      <p
-        id="setupStepLabel"
-        class="step-label"
-      >
-        STEP 1 / 2
-      </p>
+      <nav id="setupProgress" class="setup-progress" aria-label="セットアップの進み具合">
+        <span>1 監視アカウント</span>
+        <span aria-hidden="true">→</span>
+        <span class="active" aria-current="step">2 利用設定</span>
+        <span aria-hidden="true">→</span>
+        <span>3 購入</span>
+      </nav>
+
+      <p id="setupStepLabel" class="step-label">利用設定</p>
 
 
       <h1 id="setupTitle">
@@ -224,6 +347,26 @@
         登録した言葉がメールに含まれていた場合に通知します。
         基本料金には3個までのキーワードが含まれます。
       </p>
+
+      <div id="ownerKeywordProviderSection" class="owner-keyword-provider-section">
+        <nav
+          id="ownerKeywordProviderTabs"
+          class="owner-keyword-provider-tabs hidden"
+          aria-label="監視アカウントを選択"
+        ></nav>
+        <div class="owner-keyword-provider-heading">
+          <div>
+            <p id="ownerKeywordProviderLabel" class="small-label"></p>
+            <h2 id="ownerKeywordProviderTitle"></h2>
+            <p id="ownerKeywordProviderEmail" class="input-help"></p>
+          </div>
+          <span
+            id="ownerKeywordDecisionStatus"
+            class="owner-keyword-decision-status"
+            aria-live="polite"
+          ></span>
+        </div>
+      </div>
 
 
       <!-- 基本プラン -->
@@ -253,11 +396,33 @@
 
 
         <p>
-          3キーワードまで基本料金に含まれます。<br>
-          4個目以降は、1個につき年額100円追加されます。<br>
-          監視用Googleアカウント1件が基本料金に含まれます。
+          3キーワードまで基本料金に含まれます。<br/>
+          4個目以降は、1個につき年額100円追加されます。<br/>
+          監視アカウントの追加料金はありません。
         </p>
 
+      </div>
+
+      <div id="ownerSeatSection" class="seat-setup-card">
+        <div>
+          <h2>利用人数</h2>
+          <p class="input-help">
+            管理者1人を含む合計利用人数です。2人目から1人につき年額100円です。
+          </p>
+        </div>
+        <label class="seat-count-field">
+          <span>合計利用人数</span>
+          <input
+            id="ownerSeatCount"
+            type="number"
+            min="1"
+            step="1"
+            inputmode="numeric"
+            value="1"
+            onchange="updateOwnerSeatCount()"
+            oninput="updateOwnerSeatCount()"
+          />
+        </label>
       </div>
 
 
@@ -297,16 +462,17 @@
       </div>
 
 
-      <!-- 監視用Googleアカウント -->
+      <!-- 監視用メールアカウント -->
 
       <div class="single-google-account-section">
 
         <strong>
-          監視用Googleアカウント
+          監視用メールアカウント
         </strong>
 
         <p class="input-help">
-          Googleアカウントを1件連携します。追加料金はありません。
+          購入前に設定したGmailまたはMicrosoft 365を監視対象として確認します。
+          監視アカウントの追加料金はありません。
         </p>
 
       </div>
@@ -328,6 +494,11 @@
 
         </div>
 
+        <div id="ownerSeatPriceRow" class="price-row">
+          <span>追加利用者</span>
+          <strong id="ownerSeatPrice">0円</strong>
+        </div>
+
 
         <div class="price-row">
 
@@ -342,7 +513,7 @@
         </div>
 
 
-        <hr>
+        <hr/>
 
 
         <div class="price-row total-row">
@@ -441,11 +612,14 @@
     role="alertdialog"
     aria-modal="true"
     aria-labelledby="alarmTitle"
-    aria-describedby="alarmMessage"
+    aria-describedby="alarmMessage alarmSoundStatus alarmActionHelp"
   >
     <div class="alarm-modal-card">
       <div class="alarm-modal-icon" aria-hidden="true">🔔</div>
-      <p class="alarm-modal-eyebrow">メールを検知しました</p>
+      <span id="alarmKindBadge" class="alert-kind-badge test hidden">
+        テスト通知
+      </span>
+      <p id="alarmEyebrow" class="alarm-modal-eyebrow">メールを検知しました</p>
       <h2 id="alarmTitle">
         <span id="alarmKeyword"></span>の通知
       </h2>
@@ -465,13 +639,18 @@
       >
         通知音を鳴らす
       </button>
-      <button
-        id="stopAlarmButton"
-        type="button"
-        class="btn alarm-stop-button"
-      >
-        通知音を停止
-      </button>
+      <p id="alarmActionHelp" class="alarm-action-help">
+        音を止めたり画面を閉じたりしても、ほかの利用者の通知には影響しません。
+      </p>
+      <div class="alarm-modal-actions">
+        <button
+          id="stopAlarmButton"
+          type="button"
+          class="btn outline alarm-stop-button"
+        >
+          この端末の通知音を停止
+        </button>
+      </div>
     </div>
   </div>
 
@@ -497,12 +676,15 @@
       </button>
 
 
-      <p
-        id="paymentStepLabel"
-        class="step-label"
-      >
-        STEP 2 / 2
-      </p>
+      <nav id="paymentProgress" class="setup-progress" aria-label="セットアップの進み具合">
+        <span>1 監視アカウント</span>
+        <span aria-hidden="true">→</span>
+        <span>2 利用設定</span>
+        <span aria-hidden="true">→</span>
+        <span class="active" aria-current="step">3 購入</span>
+      </nav>
+
+      <p id="paymentStepLabel" class="step-label">購入内容の確認</p>
 
 
       <h1 id="paymentTitle">
@@ -529,6 +711,11 @@
 
         </div>
 
+        <div id="paymentSeatDetail" class="payment-detail">
+          <span>合計利用人数</span>
+          <strong id="paymentSeatCount">1人</strong>
+        </div>
+
 
         <div
           id="paymentKeywords"
@@ -536,13 +723,13 @@
         ></div>
 
 
-        <div class="payment-detail">
+        <div id="paymentMailAccountDetail" class="payment-detail">
 
           <span>
-            監視用Googleアカウント
+            メール監視アカウント
           </span>
 
-          <strong>
+          <strong id="paymentMailAccountCount">
             1件（基本料金に含む）
           </strong>
 
@@ -599,12 +786,77 @@
       >
         決済を完了して次へ
       </button>
+      <p
+        id="paymentError"
+        class="form-error"
+        role="alert"
+        aria-live="polite"
+      ></p>
 
     </div>
 
   </section>
 
-
+  <section
+    id="contractChangeCheckoutScreen"
+    class="flow-screen hidden"
+  >
+    <div class="flow-container">
+      <button
+        type="button"
+        class="back-button"
+        onclick="backFromContractChangeCheckout()"
+      >
+        ← 戻って修正する
+      </button>
+      <p class="step-label">契約内容の変更</p>
+      <h1>契約変更の決済内容を確認</h1>
+      <div class="payment-card contract-change-payment-card">
+        <div class="payment-detail">
+          <span>現在の年額</span>
+          <strong id="contractCheckoutCurrentAnnual">―</strong>
+        </div>
+        <div class="payment-detail">
+          <span>変更後の年額</span>
+          <strong id="contractCheckoutNextAnnual">―</strong>
+        </div>
+        <div class="payment-detail total-payment">
+          <span>今回の追加料金</span>
+          <strong id="contractCheckoutAdditionalCharge">―</strong>
+        </div>
+        <div class="payment-detail">
+          <span>変更後の利用人数</span>
+          <strong id="contractCheckoutSeatCount">―</strong>
+        </div>
+        <div class="payment-detail">
+          <span>変更後のキーワード数</span>
+          <strong id="contractCheckoutKeywordCount">―</strong>
+        </div>
+        <div class="payment-detail">
+          <span>監視アカウント</span>
+          <strong id="contractCheckoutMailConnectionCount">―</strong>
+        </div>
+      </div>
+      <div class="notice-box">
+        <strong>現在は試作版です</strong>
+        <p>現在は試作版のため、実際の決済は行われません。</p>
+      </div>
+      <p
+        id="contractCheckoutError"
+        class="form-error"
+        role="alert"
+        aria-live="polite"
+      ></p>
+      <button
+        id="applyContractChangeButton"
+        type="button"
+        class="btn primary full-width"
+        onclick="applyPendingContractChange()"
+      >
+        追加料金を確定して変更を適用
+      </button>
+    </div>
+  </section>
 
   <!-- ========================================
        契約更新完了画面
@@ -696,7 +948,7 @@
 
 
   <!-- ========================================
-       Googleアカウント選択画面
+       登録・ログイン / アカウント設定画面
   ========================================= -->
 
   <section
@@ -709,10 +961,10 @@
       <button
         id="googleBackButton"
         type="button"
-        class="back-button"
+        class="back-button hidden"
         onclick="backFromGoogle()"
       >
-        ← キーワード設定へ戻る
+        ← ホームへ戻る
       </button>
 
 
@@ -722,7 +974,7 @@
 
 
       <h1 id="googleScreenTitle">
-        Googleアカウントを設定
+        Call Nowに登録・ログイン
       </h1>
 
 
@@ -730,7 +982,7 @@
         id="googleScreenDescription"
         class="description"
       >
-        通知の確認と本人確認に使うGoogleアカウントを設定します。
+        利用するアカウントを選んでください。
       </p>
 
 
@@ -739,63 +991,100 @@
         class="google-account-card linked-accounts-card"
       >
         <div class="linked-accounts-heading">
-          <strong>現在設定されている監視用Googleアカウント</strong>
+          <strong>ログイン方法</strong>
         </div>
 
         <div id="linkedGoogleAccounts"></div>
       </div>
 
 
-      <!-- Google認証 -->
-
-      <div id="googleAuthCard" class="google-card">
-
-        <div class="google-logo">
-          G
+      <div
+        id="mailMonitoringAccountCard"
+        class="google-account-card linked-accounts-card hidden"
+      >
+        <div class="linked-accounts-heading">
+          <strong>メール監視アカウント</strong>
         </div>
 
+        <p class="google-account-role-description">
+          ログインとは別に、重要メールを監視するGmailやMicrosoftアカウントを追加できます。
+        </p>
 
-        <div class="google-card-content">
+        <div id="mailMonitoringAccountStatus"></div>
 
-          <h2 id="googleCardTitle">
-            Googleアカウントを設定
-          </h2>
-
-
-          <p id="googleAuthDescription">
-            Googleの認証画面で本人確認してください。
-            Call NowがGoogleのパスワードを保存することはありません。
-          </p>
-
-
-          <p
-            id="googleError"
-            class="error-message"
-            aria-live="polite"
-          ></p>
-
-
+        <div
+          id="mailProviderChoices"
+          class="mail-provider-choices hidden"
+        >
           <button
-            id="googleAuthButton"
+            id="googleMailProviderButton"
             type="button"
-            class="google-button"
-            onclick="startGoogleLogin()"
+            class="btn outline mail-provider-button"
+            aria-describedby="mailMonitoringAccountStatus"
+            onclick="startMailConnection('GOOGLE')"
           >
-            Googleアカウントを設定
+            Gmail / Google Workspace
           </button>
 
+          <button
+            id="microsoftMailProviderButton"
+            type="button"
+            class="btn outline mail-provider-button"
+            aria-describedby="mailMonitoringAccountStatus"
+            onclick="startMailConnection('MICROSOFT')"
+          >
+            Microsoft 365 / Outlook
+          </button>
         </div>
 
       </div>
 
-      <button
-        id="finishGoogleLinkButton"
-        type="button"
-        class="btn primary full-width"
-        onclick="finishGoogleAccountLinking()"
-      >
-        設定を完了してホームへ
-      </button>
+
+      <div id="googleAuthCard" class="google-card login-provider-card">
+        <div class="google-card-content">
+          <h2 id="googleCardTitle">登録・ログイン方法を選択</h2>
+
+          <p id="googleAuthDescription">
+            ログイン用アカウントの権限だけを使用します。メール監視の権限は、ログイン後に別途設定します。
+          </p>
+
+          <p id="googleError" class="error-message" aria-live="polite"></p>
+
+          <div class="login-provider-choices">
+            <button
+              id="googleLoginProviderButton"
+              type="button"
+              class="login-provider-button google-login-button"
+              onclick="startPrimaryLogin('GOOGLE')"
+            >
+              <span aria-hidden="true">G</span>
+              <strong>Googleで続ける</strong>
+            </button>
+
+            <button
+              id="microsoftLoginProviderButton"
+              type="button"
+              class="login-provider-button microsoft-login-button"
+              onclick="startPrimaryLogin('MICROSOFT')"
+            >
+              <span aria-hidden="true">M</span>
+              <strong>Microsoftで続ける</strong>
+            </button>
+
+            <button
+              id="appleLoginProviderButton"
+              type="button"
+              class="login-provider-button apple-login-button"
+              onclick="startPrimaryLogin('APPLE')"
+            >
+              <span aria-hidden="true">●</span>
+              <strong>Appleで続ける</strong>
+            </button>
+          </div>
+
+          <p id="loginProviderNotice" class="input-help"></p>
+        </div>
+      </div>
 
     </div>
 
@@ -820,20 +1109,31 @@
 
 
       <div class="app-actions">
-
         <button
+          id="ownerSoundToggleButton"
           type="button"
-          class="logout-button"
-          onclick="logout()"
+          class="sound-toggle-button"
+          aria-label="通知音を切り替える"
+          title="通知音を切り替える"
+          onclick="toggleAlarmSoundPreference('OWNER')"
         >
-          ログアウト
+          <span aria-hidden="true">🔊</span>
+          <span class="sound-toggle-label">通知音 ON</span>
         </button>
-
-
-        <div class="app-status">
-          監視中
-        </div>
-
+        <button
+          id="notificationCenterButton"
+          type="button"
+          class="notification-bell-button"
+          aria-label="通知を開く"
+          onclick="openNotificationCenter()"
+        >
+          <span aria-hidden="true">🔔</span>
+          <span
+            id="notificationUnreadBadge"
+            class="notification-unread-badge hidden"
+            aria-label="未読通知"
+          ></span>
+        </button>
       </div>
 
     </header>
@@ -855,35 +1155,15 @@
 
 
         <div class="dashboard-grid">
-
           <article class="card">
 
             <h2>
-              サービス状況
-            </h2>
-
-
-            <div class="status-display">
-              ✅ 正常
-            </div>
-
-
-            <p id="serviceStatusDescription">
-              すべてのシステムは正常に稼働しています。
-            </p>
-
-          </article>
-
-
-          <article class="card">
-
-            <h2>
-              接続中のGoogleアカウント
+              監視アカウント
             </h2>
 
 
             <div id="connectedGoogleAccounts">
-              監視用Googleアカウントが設定されていません
+              アカウントの状態を確認しています
             </div>
 
 
@@ -893,24 +1173,8 @@
               class="btn outline full-width account-manage-button"
               onclick="openGoogleAccountManager()"
             >
-              Googleアカウントを設定
+              監視アカウント設定を開く
             </button>
-
-          </article>
-
-
-          <article class="card">
-
-            <h2>
-              お知らせ
-            </h2>
-
-
-            <ul
-              id="announcementList"
-              class="announcement-list"
-              aria-label="お知らせ一覧"
-            ></ul>
 
           </article>
 
@@ -936,6 +1200,20 @@
           登録している端末へテスト通知を送ります。
         </p>
 
+        <p
+          id="notificationTestError"
+          class="form-error"
+          role="alert"
+          aria-live="polite"
+        ></p>
+
+        <p
+          id="notificationTestStatus"
+          class="form-success"
+          role="status"
+          aria-live="polite"
+        ></p>
+
 
         <div
           id="testKeywordCards"
@@ -953,7 +1231,7 @@
     </p>
 
     <p>
-      <strong>⚠️ ご注意</strong><br>
+      <strong>⚠️ ご注意</strong><br/>
       Gmailにテストメールが届いたあとも、
       Call Now側の検知が完了するまでは、
       メールを削除したり、アーカイブへ移動したりしないでください。
@@ -968,7 +1246,7 @@
 
 
 
-      <!-- 契約情報 -->
+      <!-- 詳細 -->
 
       <section
         id="contractPage"
@@ -976,8 +1254,7 @@
       >
 
         <h1>
-          契約情報
-        </h1>
+          詳細</h1>
 
 
         <article class="card contract-table">
@@ -1024,19 +1301,6 @@
           <div class="contract-row">
 
             <span>
-              キーワード数
-            </span>
-
-            <strong id="contractKeywordCount">
-              3個
-            </strong>
-
-          </div>
-
-
-          <div class="contract-row">
-
-            <span>
               更新料金
             </span>
 
@@ -1058,11 +1322,214 @@
 
         </article>
 
+        <article id="notificationMemberManagementCard" class="card member-management-card hidden">
+          <div class="member-management-heading">
+            <div>
+              <h2>参加者</h2>
+              <p>重要メールの通知を受け取る参加者を管理します。</p>
+            </div>
+            <button
+              id="openNotificationMemberCreateButton"
+              type="button"
+              class="btn primary"
+              onclick="openNotificationMemberCreateForm()"
+            >
+              参加者を追加
+            </button>
+          </div>
+          <div id="notificationMemberSeatSummary" class="member-seat-summary"></div>
+          <p
+            id="notificationMemberCapacityMessage"
+            class="error-message member-capacity-message"
+            aria-live="polite"
+          ></p>
+          <p
+            id="notificationMemberActionError"
+            class="form-error"
+            role="alert"
+            aria-live="polite"
+          ></p>
+          <div
+            id="notificationMemberCreatePanel"
+            class="member-create-panel hidden"
+          >
+            <div class="member-create-panel-heading">
+              <div>
+                <h3>参加者を追加</h3>
+                <p>参加者へ渡すIDと初期パスワードを発行します。</p>
+              </div>
+              <button
+                type="button"
+                class="text-button"
+                onclick="closeNotificationMemberCreateForm()"
+              >
+                閉じる
+              </button>
+            </div>
+            <label class="member-create-field" for="notificationMemberNameInput">
+              <span>表示名（任意）</span>
+              <input
+                id="notificationMemberNameInput"
+                type="text"
+                maxlength="120"
+                autocomplete="off"
+                placeholder="例：山田"
+              />
+            </label>
+            <div class="member-create-actions">
+              <button
+                id="createNotificationMemberButton"
+                type="button"
+                class="btn primary"
+                onclick="createNotificationMember()"
+              >
+                IDとパスワードを発行
+              </button>
+              <button
+                type="button"
+                class="btn outline"
+                onclick="closeNotificationMemberCreateForm()"
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+
+          <section
+            id="notificationMemberLoginInfoPanel"
+            class="member-login-info-panel hidden"
+            aria-live="polite"
+            aria-labelledby="notificationMemberLoginInfoTitle"
+          >
+            <div class="member-create-panel-heading">
+              <div>
+                <p class="member-credential-eyebrow">ログイン情報</p>
+                <h3 id="notificationMemberLoginInfoTitle">参加者ログイン情報</h3>
+              </div>
+              <button
+                type="button"
+                class="text-button"
+                onclick="closeNotificationMemberLoginInfo()"
+              >
+                閉じる
+              </button>
+            </div>
+            <div class="member-login-info-grid">
+              <div class="member-login-info-value">
+                <span>表示名</span>
+                <strong id="notificationMemberLoginInfoName"></strong>
+              </div>
+              <div class="member-login-info-value">
+                <span>参加者ID</span>
+                <code id="notificationMemberLoginInfoId"></code>
+                <button
+                  type="button"
+                  class="btn outline"
+                  onclick="copyNotificationMemberLoginId()"
+                >
+                  IDをコピー
+                </button>
+              </div>
+            </div>
+            <div class="member-login-info-password">
+              <strong>パスワード</strong>
+              <p>
+                安全のため、発行済みパスワードは再表示できません。<br>
+                分からなくなった場合は、新しいパスワードを発行してください。
+              </p>
+              <button
+                type="button"
+                class="btn primary"
+                onclick="resetNotificationMemberPassword()"
+              >
+                新しいパスワードを発行して表示
+              </button>
+            </div>
+            <p
+              id="notificationMemberLoginInfoError"
+              class="form-error member-login-info-error"
+              role="alert"
+              aria-live="polite"
+            ></p>
+            <p
+              id="notificationMemberLoginInfoCopyStatus"
+              class="member-copy-status"
+              aria-live="polite"
+            ></p>
+          </section>
+
+          <section
+            id="notificationMemberCredentialPanel"
+            class="member-credential-panel hidden"
+            aria-live="polite"
+            aria-labelledby="notificationMemberCredentialTitle"
+          >
+            <div class="member-create-panel-heading">
+              <div>
+                <p class="member-credential-eyebrow">発行完了</p>
+                <h3 id="notificationMemberCredentialTitle">参加者情報を発行しました</h3>
+              </div>
+              <button
+                type="button"
+                class="text-button"
+                onclick="closeNotificationMemberCredential()"
+              >
+                閉じる
+              </button>
+            </div>
+            <div class="member-credential-grid">
+              <div class="member-credential-value">
+                <span>参加者ID</span>
+                <code id="notificationMemberCredentialId"></code>
+                <button
+                  type="button"
+                  class="btn outline"
+                  onclick="copyNotificationMemberCredential('id')"
+                >
+                  IDをコピー
+                </button>
+              </div>
+              <div class="member-credential-value">
+                <span id="notificationMemberCredentialPasswordLabel">初期パスワード</span>
+                <code id="notificationMemberCredentialPassword"></code>
+                <button
+                  type="button"
+                  class="btn outline"
+                  onclick="copyNotificationMemberCredential('password')"
+                >
+                  パスワードをコピー
+                </button>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="btn primary full-width"
+              onclick="copyNotificationMemberCredential('all')"
+            >
+              IDとパスワードをまとめてコピー
+            </button>
+            <p
+              id="notificationMemberCredentialWarning"
+              class="member-credential-warning"
+            >
+              初期パスワードはこの画面を閉じると再表示できません。必要な場合は参加者へ共有するか、安全な場所に保存してください。
+            </p>
+            <p
+              id="notificationMemberCredentialCopyStatus"
+              class="member-copy-status"
+              aria-live="polite"
+            ></p>
+          </section>
+
+          <h3 class="member-list-title">参加者一覧</h3>
+          <div id="notificationMemberList" class="notification-member-list"></div>
+        </article>
+
       </section>
 
 
 
-      <!-- キーワード設定 -->
+      <!-- 契約内容 -->
 
       <section
         id="keywordPage"
@@ -1070,27 +1537,113 @@
       >
 
         <h1>
-          キーワード設定
-        </h1>
+          契約内容</h1>
 
 
         <p>
-          現在、通知対象として登録されているキーワードです。
+          監視アカウントごとの通知キーワードと利用人数を確認・変更できます。
         </p>
 
 
-        <article class="card">
+        <article class="card contract-settings-card">
 
-          <div id="savedKeywordList"></div>
+          <div class="contract-settings-heading">
+              <div>
+                <h2>監視アカウント</h2>
+                <p>
+                  アカウントごとに通知するキーワードを設定します。
+                </p></div>
 
 
           <button
             type="button"
-            class="btn outline full-width"
-            onclick="openKeywordEdit()"
+            class="btn outline "
+                onclick="
+                  openGoogleAccountManager()
+                "
+              >
+                監視アカウントを管理
+              </button>
+            </div>
+
+            <div
+              id="contractSettingsProviders"
+              class="contract-provider-list"
+            ></div>
+
+            <div
+              class="contract-seat-editor"
+            >
+              <label
+                for="contractSeatCount"
+              >
+                <span>
+                  合計利用人数
+                </span>
+                <input
+                  id="contractSeatCount"
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputmode="numeric"
+                  oninput="
+                    clearContractInputError(this);
+                    updateContractSettingsPreview()
+                  "
+                  aria-describedby="contractSeatHelp contractSeatError"
+                />
+              </label>
+              <p
+                id="contractSeatHelp"
+                class="input-help"
+              ></p>
+              <p
+                id="contractSeatError"
+                class="field-error"
+                aria-live="polite"
+              ></p>
+            </div>
+
+            <div
+              class="contract-price-preview"
+            >
+              <div>
+                <span>現在の年額</span>
+                <strong
+                  id="contractCurrentAnnualPrice"
+                >
+                  ―
+                </strong>
+              </div>
+              <div>
+                <span>
+                  変更後の年額
+                </span>
+                <strong
+                  id="contractNextAnnualPrice"
+                >
+                  ―
+                </strong>
+              </div>
+            </div>
+
+            <p
+              id="contractSettingsError"
+              class="form-error"
+              role="alert"
+              aria-live="polite"
+            ></p>
+            <button
+              id="saveContractSettingsButton"
+              type="button"
+              class="btn primary full-width"
+            onclick="saveContractSettings()"
           >
-            キーワードを編集
-          </button>
+            契約内容を保存
+            </button>
+            <p class="input-help">
+              現在は試作版のため、この操作で実際の決済は行われません。
+            </p>
 
         </article>
 
@@ -1098,7 +1651,7 @@
 
 
 
-      <!-- ヘルプ・フィードバック -->
+      <!-- ご意見・フィードバック -->
 
       <section
         id="helpFeedbackPage"
@@ -1106,173 +1659,120 @@
       >
 
         <h1>
-          ヘルプ・フィードバック
+          ご意見・フィードバック
         </h1>
 
 
         <p class="help-intro">
-          困ったときの確認方法と、不具合を報告する前に必要な情報をご案内します。
+          Call Nowへのご意見・ご要望・不具合などをお送りください。
         </p>
 
 
         <div class="help-grid">
 
-          <article class="card help-card">
-
-            <h2>
-              よくある質問
-            </h2>
-
-            <details class="help-item">
-              <summary>
-                通知テストにはどのくらい時間がかかりますか？
-              </summary>
-
-              <p>
-                Gmailへの到着とCall Now側の検知を含め、最大3分ほどかかる場合があります。
-                結果が表示されるまでは、テストメールを削除・移動しないでください。
-              </p>
-            </details>
-
-            <details class="help-item">
-              <summary>
-                キーワードはどこで変更できますか？
-              </summary>
-
-              <p>
-                下部の「キーワード」から現在の登録内容を確認し、
-                「キーワードを編集」を選んで変更できます。
-              </p>
-            </details>
-
-            <details class="help-item">
-              <summary>
-                契約期間や料金はどこで確認できますか？
-              </summary>
-
-              <p>
-                下部の「契約」に、契約期間、登録数、更新料金が表示されます。
-              </p>
-            </details>
-
-          </article>
-
-
-          <article class="card help-card">
-
-            <h2>
-              通知が鳴らない場合
-            </h2>
-
-            <ol class="help-check-list">
-              <li>端末の音量と消音モードを確認します。</li>
-              <li>ブラウザでCall Nowを開いたままにします。</li>
-              <li>登録キーワードと受信メールの件名・本文を確認します。</li>
-              <li>通知テストを実行し、最大3分待ちます。</li>
-            </ol>
-
-            <button
-              type="button"
-              class="btn outline full-width"
-              onclick="showAppPage('testPage')"
-            >
-              通知テストを開く
+          <form class="card feedback-form" onsubmit="submitFeedback(event)">
+            <label for="feedbackContent">ご意見・フィードバック</label>
+            <textarea
+              id="feedbackContent"
+              maxlength="2000"
+              rows="8"
+              placeholder="内容を入力"
+              oninput="clearFeedbackError(this)"
+            ></textarea>
+            <p id="feedbackStatus" class="feedback-status" role="status" aria-live="polite"></p>
+            <button id="feedbackSubmitButton" type="submit" class="btn primary full-width">
+              送信する
             </button>
-
-          </article>
-
-
-          <article class="card help-card">
-
-            <h2>
-              Gmail連携・ログインで困った場合
-            </h2>
-
-            <ul class="help-check-list">
-              <li>利用するGoogleアカウントが正しいか確認します。</li>
-              <li>Googleの連携画面を途中で閉じず、最後まで完了します。</li>
-              <li>再ログイン後も改善しない場合は、連携状態を確認します。</li>
-            </ul>
-
-            <button
-              type="button"
-              class="btn outline full-width"
-              onclick="openGoogleAccountManager()"
-            >
-              Googleアカウント設定を開く
-            </button>
-
-          </article>
-
-
-          <article class="card help-card support-card">
-
-            <h2>
-              解決しない場合
-            </h2>
-
-            <p>
-              個別の不具合、アカウント、契約の問題は個別サポートで確認します。
-              ご連絡の際は、次の情報をご用意ください。
-            </p>
-
-            <ul class="help-check-list">
-              <li>不具合が起きた日時</li>
-              <li>操作していた画面と手順</li>
-              <li>表示されたメッセージ</li>
-              <li>端末とブラウザの種類</li>
-            </ul>
-
-            <p id="supportStatus" class="help-note" aria-live="polite">
-              個別サポート窓口は準備中です。
-            </p>
-
-            <a
-              id="supportLink"
-              class="btn outline full-width hidden"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              個別サポートを開く
-            </a>
-
-          </article>
-
-
-          <article class="card help-card feedback-card">
-
-            <h2>
-              ご意見・評価
-            </h2>
-
-            <p id="storeReviewStatus" aria-live="polite">
-              正式公開後は、App StoreまたはGoogle Playのレビューで受け付ける予定です。
-              現在はストアページ未公開のため、レビューリンクは掲載していません。
-            </p>
-
-            <div id="storeReviewLinks" class="store-review-links hidden">
-              <a
-                id="appStoreReviewLink"
-                class="btn outline"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                App Storeで評価
-              </a>
-              <a
-                id="googlePlayReviewLink"
-                class="btn outline"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Google Playで評価
-              </a>
-            </div>
-
-          </article>
+          </form>
 
         </div>
 
+      </section>
+
+      <section id="notificationCenterPage" class="app-page">
+        <button type="button" class="back-button" onclick="showAppPage('homePage')">
+          ← ホームへ戻る
+        </button>
+        <div class="notification-center-heading">
+          <h1>お知らせ</h1>
+          <button
+            id="ownerNotificationSelectionButton"
+            type="button"
+            class="btn outline notification-selection-button"
+            onclick="startNotificationSelection('OWNER')"
+          >
+            選択
+          </button>
+        </div>
+        <div class="notification-center-health">
+          <span id="ownerAlertStreamStatus" class="alert-stream-status">接続中</span>
+          <div class="alert-audio-readiness" data-audience="OWNER">
+            <div>
+              <strong>通知音</strong>
+              <p id="ownerAudioStatus">
+                ブラウザで通知音の状態を確認しています。
+              </p>
+            </div>
+            <button
+              id="ownerEnableAudioButton"
+              type="button"
+              class="btn outline"
+              onclick="enableAlarmAudio('OWNER')"
+            >
+              通知音を有効にする
+            </button>
+          </div>
+        </div>
+        <div
+          id="ownerNotificationSelectionToolbar"
+          class="notification-selection-toolbar hidden"
+          role="toolbar"
+          aria-label="お知らせの選択操作"
+        >
+          <button type="button" class="btn outline" onclick="selectAllNotifications('OWNER')">
+            すべて選択
+          </button>
+          <span id="ownerNotificationSelectionCount" aria-live="polite">0件選択中</span>
+          <button type="button" class="btn outline" onclick="clearNotificationSelection('OWNER')">
+            選択を解除
+          </button>
+          <button
+            id="ownerDeleteSelectionButton"
+            type="button"
+            class="btn danger"
+            onclick="deleteSelectedNotifications('OWNER')"
+            disabled
+          >
+            選択した通知を削除
+          </button>
+          <button type="button" class="btn outline" onclick="cancelNotificationSelection('OWNER')">
+            キャンセル
+          </button>
+        </div>
+        <p
+          id="notificationCenterStatus"
+          class="feedback-status"
+          role="status"
+          aria-live="polite"
+        ></p>
+        <p
+          id="notificationCenterError"
+          class="form-error"
+          role="alert"
+          aria-live="polite"
+        ></p>
+        <h2 class="notification-section-title">緊急通知</h2>
+        <div
+          id="ownerEmergencyNotificationList"
+          class="emergency-notification-list"
+          aria-live="polite"
+        ></div>
+        <h2 class="notification-section-title">運営からのお知らせ</h2>
+        <div
+          id="userNotificationList"
+          class="user-notification-list"
+          aria-live="polite"
+        ></div>
       </section>
 
     </main>
@@ -1309,7 +1809,7 @@
         onclick="showAppPage('contractPage', this)"
       >
         <span>📄</span>
-        <small>契約</small>
+        <small>詳細</small>
       </button>
 
 
@@ -1319,7 +1819,7 @@
         onclick="showAppPage('keywordPage', this)"
       >
         <span>🔑</span>
-        <small>キーワード</small>
+        <small>契約内容</small>
       </button>
 
 
@@ -1328,8 +1828,8 @@
         class="tab-button"
         onclick="showAppPage('helpFeedbackPage', this)"
       >
-        <span>❓</span>
-        <small>ヘルプ</small>
+        <span>💬</span>
+        <small>ご意見</small>
       </button>
 
     </nav>
@@ -1341,7 +1841,9 @@
   <!-- 動作用JavaScript -->
 
     <script src="js/keyword-policy.js?v=2"></script>
-    <script src="js/app.js?v=19"></script>
+    <script src="js/monitoring-keyword-policy.js?v=1"></script>
+    <script src="js/owner-onboarding-routing.js?v=2"></script>
+    <script src="js/app.js?v=34"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";

@@ -7,15 +7,32 @@ import type { TypeBoxTypeProvider } from "@fastify/type-provider-typebox";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { AppEnvironment } from "./config/env.js";
 import { AppError } from "./lib/app-error.js";
+import type { AlertService } from "./modules/alerts/alert-service.js";
+import { createAlertRoutes } from "./modules/alerts/alert-routes.js";
+import { createNotificationTestRoutes } from "./modules/alerts/notification-test-routes.js";
+import type { NotificationTestService } from "./modules/alerts/notification-test-service.js";
 import type { AuthService } from "./modules/auth/auth-service.js";
 import { createAuthRoutes } from "./modules/auth/auth-routes.js";
 import type { GoogleAuthService } from "./modules/auth/google-auth-service.js";
 import { createGoogleAuthRoutes } from "./modules/auth/google-auth-routes.js";
+import { createPrimaryAuthRoutes } from "./modules/auth/primary-auth-routes.js";
+import type { PrimaryAuthService } from "./modules/auth/primary-auth-service.js";
+import type { MailConnectionService } from "./modules/mail/mail-connection-service.js";
+import { createMailConnectionRoutes } from "./modules/mail/mail-connection-routes.js";
+import type { GmailMonitoringService } from "./modules/mail/gmail/gmail-monitoring-service.js";
+import type { PubSubPushAuthenticator } from "./modules/mail/gmail/gmail-pubsub-authenticator.js";
+import { createGmailPubSubRoutes } from "./modules/mail/gmail/gmail-pubsub-routes.js";
 import type { InvitationService } from "./modules/invitations/invitation-service.js";
+import type { NotificationMemberService } from "./modules/notification-members/notification-member-service.js";
+import { createNotificationMemberRoutes } from "./modules/notification-members/notification-member-routes.js";
+import type { OwnerOnboardingService } from "./modules/onboarding/owner-onboarding-service.js";
+import { createOwnerOnboardingRoutes } from "./modules/onboarding/owner-onboarding-routes.js";
 import type { SecurityThrottleService } from "./modules/security/security-throttle-service.js";
 import { createInvitationRoutes } from "./modules/invitations/invitation-routes.js";
 import type { TeamService } from "./modules/teams/team-service.js";
 import { createTeamRoutes } from "./modules/teams/team-routes.js";
+import type { UserCommunicationService } from "./modules/user-communications/user-communication-service.js";
+import { createUserCommunicationRoutes } from "./modules/user-communications/user-communication-routes.js";
 import { createSystemRoutes } from "./routes/system.js";
 
 export interface BuildAppOptions {
@@ -23,8 +40,17 @@ export interface BuildAppOptions {
   readonly logger?: boolean;
   readonly authService?: AuthService;
   readonly googleAuthService?: GoogleAuthService;
+  readonly primaryAuthService?: PrimaryAuthService;
+  readonly mailConnectionService?: MailConnectionService;
+  readonly gmailMonitoringService?: GmailMonitoringService;
+  readonly gmailPubSubAuthenticator?: PubSubPushAuthenticator;
   readonly teamService?: TeamService;
   readonly invitationService?: InvitationService;
+  readonly notificationMemberService?: NotificationMemberService;
+  readonly ownerOnboardingService?: OwnerOnboardingService;
+  readonly alertService?: AlertService;
+  readonly notificationTestService?: NotificationTestService;
+  readonly userCommunicationService?: UserCommunicationService;
   readonly securityThrottleService?: SecurityThrottleService;
   readonly readinessCheck?: () => Promise<void>;
 }
@@ -50,7 +76,13 @@ export async function buildApp(
                 "body.password",
                 "body.magicLink",
                 "body.joinToken",
-                "body.invitationPassword"
+                "body.invitationPassword",
+                "body.refreshToken",
+                "body.authorizationCode",
+                "body.code",
+                "body.state",
+                "body.user",
+                "body.content"
               ],
               censor: "[REDACTED]"
             }
@@ -68,7 +100,8 @@ export async function buildApp(
   await app.register(cookie);
   await app.register(cors, {
     origin: options.environment.PUBLIC_ORIGIN,
-    credentials: true
+    credentials: true,
+    methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"]
   });
   await app.register(helmet, {
     contentSecurityPolicy: false
@@ -107,6 +140,17 @@ export async function buildApp(
       return;
     }
 
+    if (isPayloadTooLargeError(error)) {
+      await reply.status(413).send({
+        error: {
+          code: "PAYLOAD_TOO_LARGE",
+          message: "The request body is too large.",
+          requestId: request.id
+        }
+      });
+      return;
+    }
+
     if (error instanceof Error && "validation" in error && error.validation) {
       await reply.status(400).send({
         error: {
@@ -130,6 +174,24 @@ export async function buildApp(
 
   await app.register(createSystemRoutes(options.readinessCheck));
 
+  if (
+    Boolean(options.gmailMonitoringService) !==
+    Boolean(options.gmailPubSubAuthenticator)
+  ) {
+    throw new Error(
+      "Gmail monitoring service and Pub/Sub authenticator must be configured together"
+    );
+  }
+  if (options.gmailMonitoringService && options.gmailPubSubAuthenticator) {
+    await app.register(
+      createGmailPubSubRoutes(
+        options.gmailPubSubAuthenticator,
+        options.gmailMonitoringService,
+        options.environment.GMAIL_PUBSUB_MAX_BODY_BYTES
+      )
+    );
+  }
+
   if (options.authService) {
     if (!options.securityThrottleService) {
       throw new Error("securityThrottleService is required for authentication");
@@ -143,7 +205,21 @@ export async function buildApp(
     );
   }
 
-  if (options.googleAuthService && options.authService) {
+  if (options.primaryAuthService && options.authService) {
+    if (!options.securityThrottleService) {
+      throw new Error(
+        "securityThrottleService is required for primary authentication"
+      );
+    }
+    await app.register(
+      createPrimaryAuthRoutes(
+        options.primaryAuthService,
+        options.authService,
+        options.securityThrottleService,
+        options.environment
+      )
+    );
+  } else if (options.googleAuthService && options.authService) {
     if (!options.securityThrottleService) {
       throw new Error(
         "securityThrottleService is required for Google authentication"
@@ -159,8 +235,32 @@ export async function buildApp(
     );
   }
 
-  if (options.googleAuthService && !options.authService) {
+  if (
+    (options.googleAuthService || options.primaryAuthService) &&
+    !options.authService
+  ) {
     throw new Error("authService is required for Google authentication");
+  }
+
+  if (
+    options.authService &&
+    options.teamService &&
+    options.notificationTestService
+  ) {
+    if (!options.securityThrottleService) {
+      throw new Error(
+        "securityThrottleService is required for notification tests"
+      );
+    }
+    await app.register(
+      createNotificationTestRoutes(
+        options.authService,
+        options.teamService,
+        options.notificationTestService,
+        options.securityThrottleService,
+        options.environment
+      )
+    );
   }
 
   if (options.authService && options.teamService) {
@@ -170,6 +270,42 @@ export async function buildApp(
         options.teamService,
         options.environment,
         options.invitationService
+      )
+    );
+  }
+
+  if (options.authService && options.ownerOnboardingService) {
+    if (!options.securityThrottleService) {
+      throw new Error(
+        "securityThrottleService is required for owner onboarding"
+      );
+    }
+    await app.register(
+      createOwnerOnboardingRoutes(
+        options.authService,
+        options.ownerOnboardingService,
+        options.securityThrottleService,
+        options.environment
+      )
+    );
+  }
+
+  if (
+    options.authService &&
+    options.teamService &&
+    options.mailConnectionService
+  ) {
+    if (!options.securityThrottleService) {
+      throw new Error("securityThrottleService is required for mail OAuth");
+    }
+    await app.register(
+      createMailConnectionRoutes(
+        options.authService,
+        options.teamService,
+        options.mailConnectionService,
+        options.securityThrottleService,
+        options.environment,
+        options.ownerOnboardingService
       )
     );
   }
@@ -188,5 +324,59 @@ export async function buildApp(
     );
   }
 
+  if (
+    options.authService &&
+    options.teamService &&
+    options.notificationMemberService
+  ) {
+    await app.register(
+      createNotificationMemberRoutes(
+        options.authService,
+        options.teamService,
+        options.notificationMemberService,
+        options.environment
+      )
+    );
+  }
+
+  if (
+    options.authService &&
+    options.teamService &&
+    options.notificationMemberService &&
+    options.alertService
+  ) {
+    await app.register(
+      createAlertRoutes(
+        options.authService,
+        options.teamService,
+        options.notificationMemberService,
+        options.alertService,
+        options.environment
+      )
+    );
+  }
+
+  if (options.authService && options.userCommunicationService) {
+    if (!options.securityThrottleService) {
+      throw new Error(
+        "securityThrottleService is required for user communications"
+      );
+    }
+    await app.register(
+      createUserCommunicationRoutes(
+        options.authService,
+        options.userCommunicationService,
+        options.securityThrottleService,
+        options.environment
+      )
+    );
+  }
+
   return app;
+}
+
+function isPayloadTooLargeError(error: unknown): boolean {
+  return (
+    error instanceof Error && "statusCode" in error && error.statusCode === 413
+  );
 }

@@ -19,11 +19,22 @@ enum CredentialType {
 
 enum IdentityProvider {
   GOOGLE
+  MICROSOFT
+  APPLE
+}
+
+enum MailProvider {
+  GOOGLE
+  MICROSOFT
 }
 
 enum ChallengeKind {
   MAGIC_LINK
   GOOGLE_OAUTH
+  MICROSOFT_OAUTH
+  APPLE_OAUTH
+  GMAIL_OAUTH
+  MICROSOFT_MAIL_OAUTH
   PASSKEY_REGISTRATION
   PASSKEY_AUTHENTICATION
   JOIN_GRANT
@@ -61,6 +72,13 @@ enum SubscriptionChangeStatus {
   FAILED
 }
 
+enum ContractChangeQuoteStatus {
+  PENDING
+  APPLIED
+  EXPIRED
+  CANCELED
+}
+
 enum InvitationKind {
   PASSWORD_CAPACITY
 }
@@ -89,10 +107,85 @@ enum NotificationTargetStatus {
   DISABLED
 }
 
-enum GmailConnectionStatus {
+enum NotificationMemberStatus {
   ACTIVE
+  DISABLED
+}
+
+enum UserNotificationType {
+  OPERATOR_ANNOUNCEMENT
+  SYSTEM
+  FEEDBACK_REPLY
+}
+
+enum FeedbackStatus {
+  SUBMITTED
+  REPLIED
+  CLOSED
+}
+
+enum AlertStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum AlertKind {
+  REAL
+  TEST
+}
+
+enum NotificationTestStatus {
+  PENDING
+  DETECTED
+  ALERT_CREATED
+  EXPIRED
+  FAILED
+}
+
+enum AlertRecipientKind {
+  OWNER
+  NOTIFICATION_MEMBER
+}
+
+enum AlertDeliveryChannel {
+  IN_APP
+}
+
+enum AlertRecipientStatus {
+  PENDING
+  ACKNOWLEDGED
+  CLOSED
+}
+
+enum MailConnectionStatus {
+  ACTIVE
+  PAUSED
+  REAUTH_REQUIRED
   REVOKED
   ERROR
+}
+
+enum MailAuthorizationStatus {
+  ACTIVE
+  REAUTH_REQUIRED
+  REVOKED
+  ERROR
+}
+
+enum OwnerOnboardingStatus {
+  PENDING
+  PURCHASED
+  COMPLETED
+  EXPIRED
+  ABANDONED
+}
+
+enum OnboardingMailChoiceStatus {
+  AUTHORIZED
+  ACTIVATED
+  DEFERRED
+  SKIPPED
 }
 
 enum OwnerTransferStatus {
@@ -120,10 +213,18 @@ model User {
   memberships             TeamMembership[]
   removedMemberships      TeamMembership[]       @relation("MembershipRemover")
   requestedChanges        SubscriptionChange[]
+  contractChangeQuotes    ContractChangeQuote[]
   createdInvitations      Invitation[]
   redemptions             InvitationRedemption[]
   initiatedOwnerTransfers OwnerTransfer[]
   auditEvents             AuditEvent[]
+  mailAuthorizations      MailAuthorization[]
+  alertRecipients         AlertRecipient[]
+  acknowledgedAlerts      Alert[]                @relation("AlertAcknowledgedByUser")
+  notificationTests       NotificationTest[]
+  ownerOnboarding         OwnerOnboarding?
+  notifications           UserNotification[]
+  feedbackSubmissions     FeedbackSubmission[]
 
   @@map("users")
 }
@@ -233,11 +334,57 @@ model Team {
   subscription    Subscription?
   keywords        TeamKeyword[]
   invitations     Invitation[]
-  gmailConnection GmailConnection?
+  mailConnections MailConnection[]
+  notificationMembers NotificationMember[]
+  alerts          Alert[]
+  notificationTests NotificationTest[]
   ownerTransfers  OwnerTransfer[]
   auditEvents     AuditEvent[]
+  ownerOnboarding OwnerOnboarding?
+  feedbackSubmissions FeedbackSubmission[]
+  contractChangeQuotes ContractChangeQuote[]
 
   @@map("teams")
+}
+
+model NotificationMember {
+  id                String                      @id @default(uuid()) @db.Uuid
+  teamId            String                      @db.Uuid
+  callNowId         String                      @unique @db.VarChar(16)
+  displayName       String?                     @db.VarChar(120)
+  passwordHash      String                      @db.VarChar(255)
+  status            NotificationMemberStatus    @default(ACTIVE)
+  passwordUpdatedAt DateTime                    @default(now()) @db.Timestamptz(3)
+  createdAt         DateTime                    @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime                    @updatedAt @db.Timestamptz(3)
+  disabledAt        DateTime?                   @db.Timestamptz(3)
+  deletedAt         DateTime?                   @db.Timestamptz(3)
+  team              Team                        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  sessions          NotificationMemberSession[]
+  alertRecipients    AlertRecipient[]
+  acknowledgedAlerts Alert[]                     @relation("AlertAcknowledgedByNotificationMember")
+
+  @@index([teamId, status])
+  @@index([teamId, deletedAt])
+  @@map("notification_members")
+}
+
+model NotificationMemberSession {
+  id                   String             @id @default(uuid()) @db.Uuid
+  notificationMemberId String             @db.Uuid
+  tokenHash            String             @unique @db.Char(64)
+  ipHash               String?            @db.Char(64)
+  userAgentHash        String?            @db.Char(64)
+  createdAt            DateTime           @default(now()) @db.Timestamptz(3)
+  lastSeenAt           DateTime           @default(now()) @db.Timestamptz(3)
+  idleExpiresAt        DateTime           @db.Timestamptz(3)
+  expiresAt            DateTime           @db.Timestamptz(3)
+  revokedAt            DateTime?          @db.Timestamptz(3)
+  notificationMember   NotificationMember @relation(fields: [notificationMemberId], references: [id], onDelete: Cascade)
+
+  @@index([notificationMemberId, revokedAt])
+  @@index([expiresAt])
+  @@map("notification_member_sessions")
 }
 
 model TeamMembership {
@@ -269,6 +416,7 @@ model Subscription {
   seatLimit            Int                  @default(0)
   pendingSeatLimit     Int?
   currentTermAmountYen Int                  @default(6000)
+  renewalAmountYen     Int                  @default(6000)
   currentTermStartedAt DateTime             @db.Timestamptz(3)
   currentTermEndsAt    DateTime             @db.Timestamptz(3)
   pricingVersion       String               @default("2026-08") @db.VarChar(32)
@@ -276,8 +424,38 @@ model Subscription {
   updatedAt            DateTime             @updatedAt @db.Timestamptz(3)
   team                 Team                 @relation(fields: [teamId], references: [id], onDelete: Cascade)
   changes              SubscriptionChange[]
+  contractChangeQuotes ContractChangeQuote[]
 
   @@map("subscriptions")
+}
+
+model ContractChangeQuote {
+  id                           String                    @id @default(uuid()) @db.Uuid
+  teamId                       String                    @db.Uuid
+  subscriptionId               String                    @db.Uuid
+  requestedByUserId            String                    @db.Uuid
+  status                       ContractChangeQuoteStatus @default(PENDING)
+  idempotencyKey               String                    @unique @db.VarChar(100)
+  applyIdempotencyKey          String?                   @unique @db.VarChar(100)
+  baselineFingerprint          String                    @db.Char(64)
+  requestedSeatLimit           Int
+  requestedKeywords            String[]
+  requestedConnectionSettings  Json
+  previousAnnualAmountYen      Int
+  nextAnnualAmountYen          Int
+  additionalChargeYen          Int
+  mailConnectionCount          Int
+  expiresAt                    DateTime                  @db.Timestamptz(3)
+  appliedAt                    DateTime?                 @db.Timestamptz(3)
+  createdAt                    DateTime                  @default(now()) @db.Timestamptz(3)
+  updatedAt                    DateTime                  @updatedAt @db.Timestamptz(3)
+  team                         Team                      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  subscription                 Subscription              @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  requestedByUser              User                      @relation(fields: [requestedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([teamId, status, expiresAt])
+  @@index([subscriptionId, status])
+  @@map("contract_change_quotes")
 }
 
 model SubscriptionChange {
@@ -305,10 +483,12 @@ model TeamKeyword {
   teamId     String   @db.Uuid
   keyword    String   @db.VarChar(100)
   normalized String   @db.VarChar(100)
+  sortOrder  Int      @default(0)
   createdAt  DateTime @default(now()) @db.Timestamptz(3)
   team       Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@unique([teamId, normalized])
+  @@index([teamId, sortOrder])
   @@map("team_keywords")
 }
 
@@ -395,20 +575,217 @@ model NotificationTarget {
   @@map("notification_targets")
 }
 
-model GmailConnection {
-  id                    String                @id @default(uuid()) @db.Uuid
-  teamId                String                @unique @db.Uuid
-  googleSubject         String                @db.VarChar(255)
-  email                 String                @db.VarChar(320)
-  encryptedRefreshToken String                @db.Text
-  scopes                String[]              @default([])
-  status                GmailConnectionStatus @default(ACTIVE)
-  createdAt             DateTime              @default(now()) @db.Timestamptz(3)
-  updatedAt             DateTime              @updatedAt @db.Timestamptz(3)
-  revokedAt             DateTime?             @db.Timestamptz(3)
-  team                  Team                  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+model MailAuthorization {
+  id                    String                   @id @default(uuid()) @db.Uuid
+  userId                String                   @db.Uuid
+  provider              MailProvider             @default(GOOGLE)
+  providerSubject       String                   @db.VarChar(255)
+  email                 String                   @db.VarChar(320)
+  encryptedRefreshToken String?                  @db.Text
+  encryptionProvider    String?                  @db.VarChar(40)
+  encryptionKeyVersion  String?                  @db.VarChar(255)
+  grantedScopes         String[]                 @default([])
+  status                MailAuthorizationStatus  @default(ACTIVE)
+  lastVerifiedAt        DateTime?                @db.Timestamptz(3)
+  revokedAt             DateTime?                @db.Timestamptz(3)
+  createdAt             DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime                 @updatedAt @db.Timestamptz(3)
+  user                  User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  connections           MailConnection[]
+  onboardingChoices     OnboardingMailChoice[]
 
-  @@map("gmail_connections")
+  @@unique([provider, providerSubject])
+  @@unique([id, provider])
+  @@index([userId, status, revokedAt])
+  @@index([status, revokedAt])
+  @@map("mail_authorizations")
+}
+
+model OwnerOnboarding {
+  id          String                @id @default(uuid()) @db.Uuid
+  userId      String                @unique @db.Uuid
+  teamId      String?               @unique @db.Uuid
+  status      OwnerOnboardingStatus @default(PENDING)
+  seatCount   Int?
+  keywords    String[]              @default([])
+  expiresAt   DateTime              @db.Timestamptz(3)
+  purchasedAt DateTime?             @db.Timestamptz(3)
+  completedAt DateTime?             @db.Timestamptz(3)
+  abandonedAt DateTime?             @db.Timestamptz(3)
+  createdAt   DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime              @updatedAt @db.Timestamptz(3)
+  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team        Team?                 @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  choices     OnboardingMailChoice[]
+
+  @@index([status, expiresAt])
+  @@map("owner_onboardings")
+}
+
+model OnboardingMailChoice {
+  id                  String                       @id @default(uuid()) @db.Uuid
+  onboardingId        String                       @db.Uuid
+  provider            MailProvider
+  mailAuthorizationId String?                      @db.Uuid
+  status              OnboardingMailChoiceStatus
+  keywords            String[]                     @default([])
+  keywordsConfirmedAt DateTime?                    @db.Timestamptz(3)
+  createdAt           DateTime                     @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime                     @updatedAt @db.Timestamptz(3)
+  onboarding          OwnerOnboarding              @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
+  mailAuthorization   MailAuthorization?           @relation(fields: [mailAuthorizationId], references: [id], onDelete: SetNull)
+
+  @@unique([onboardingId, provider])
+  @@index([mailAuthorizationId])
+  @@map("onboarding_mail_choices")
+}
+
+model MailConnection {
+  id                   String                @id @default(uuid()) @db.Uuid
+  teamId               String                @db.Uuid
+  mailAuthorizationId  String                @db.Uuid
+  provider             MailProvider
+  status               MailConnectionStatus  @default(ACTIVE)
+  keywords             String[]              @default([])
+  providerCursor       String?               @db.VarChar(2048)
+  providerSubscriptionExpiresAt DateTime?     @db.Timestamptz(3)
+  providerSubscriptionRenewedAt DateTime?     @db.Timestamptz(3)
+  syncLeaseToken       String?               @db.VarChar(64)
+  syncLeaseExpiresAt   DateTime?              @db.Timestamptz(3)
+  lastSyncAt           DateTime?             @db.Timestamptz(3)
+  lastErrorCode        String?               @db.VarChar(100)
+  createdAt            DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime              @updatedAt @db.Timestamptz(3)
+  revokedAt            DateTime?             @db.Timestamptz(3)
+  team                 Team                  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  mailAuthorization    MailAuthorization     @relation(fields: [mailAuthorizationId, provider], references: [id, provider], onDelete: Restrict)
+  alerts               Alert[]
+  notificationTests    NotificationTest[]
+
+  @@unique([teamId, mailAuthorizationId])
+  @@index([teamId, status])
+  @@index([teamId, provider, status])
+  @@index([mailAuthorizationId, status])
+  @@index([status, providerSubscriptionExpiresAt])
+  @@index([syncLeaseExpiresAt])
+  @@map("mail_connections")
+}
+
+model Alert {
+  id                                 String              @id @default(uuid()) @db.Uuid
+  teamId                             String              @db.Uuid
+  sourceMailConnectionId             String              @db.Uuid
+  sourceEventId                      String              @db.VarChar(191)
+  kind                               AlertKind           @default(REAL)
+  status                             AlertStatus         @default(ACTIVE)
+  detectedAt                         DateTime            @db.Timestamptz(3)
+  matchedKeyword                     String              @db.VarChar(100)
+  acknowledgedAt                     DateTime?           @db.Timestamptz(3)
+  acknowledgedByUserId               String?             @db.Uuid
+  acknowledgedByNotificationMemberId String?             @db.Uuid
+  resolvedAt                         DateTime?           @db.Timestamptz(3)
+  createdAt                          DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt                          DateTime            @updatedAt @db.Timestamptz(3)
+  team                               Team                @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  sourceMailConnection               MailConnection      @relation(fields: [sourceMailConnectionId], references: [id], onDelete: Restrict)
+  acknowledgedByUser                 User?               @relation("AlertAcknowledgedByUser", fields: [acknowledgedByUserId], references: [id], onDelete: SetNull)
+  acknowledgedByNotificationMember   NotificationMember? @relation("AlertAcknowledgedByNotificationMember", fields: [acknowledgedByNotificationMemberId], references: [id], onDelete: SetNull)
+  recipients                         AlertRecipient[]
+  notificationTest                   NotificationTest?
+
+  @@unique([sourceMailConnectionId, sourceEventId])
+  @@index([teamId, status, detectedAt])
+  @@map("alerts")
+}
+
+model NotificationTest {
+  id                     String                 @id @default(uuid()) @db.Uuid
+  teamId                 String                 @db.Uuid
+  actorUserId            String                 @db.Uuid
+  sourceMailConnectionId String                 @db.Uuid
+  keyword                String                 @db.VarChar(100)
+  requestId              String                 @unique @db.VarChar(100)
+  status                 NotificationTestStatus @default(PENDING)
+  expiresAt              DateTime               @db.Timestamptz(3)
+  detectedAt             DateTime?              @db.Timestamptz(3)
+  alertId                String?                @unique @db.Uuid
+  completedAt            DateTime?              @db.Timestamptz(3)
+  createdAt              DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt              DateTime               @updatedAt @db.Timestamptz(3)
+  team                   Team                   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  actorUser              User                   @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+  sourceMailConnection   MailConnection         @relation(fields: [sourceMailConnectionId], references: [id], onDelete: Restrict)
+  alert                  Alert?                 @relation(fields: [alertId], references: [id], onDelete: SetNull)
+
+  @@index([teamId, status, createdAt])
+  @@index([expiresAt, status])
+  @@map("notification_tests")
+}
+
+model AlertRecipient {
+  id                   String               @id @default(uuid()) @db.Uuid
+  alertId              String               @db.Uuid
+  kind                 AlertRecipientKind
+  userId               String?              @db.Uuid
+  notificationMemberId String?              @db.Uuid
+  channel              AlertDeliveryChannel @default(IN_APP)
+  status               AlertRecipientStatus @default(PENDING)
+  acknowledgedAt       DateTime?            @db.Timestamptz(3)
+  readAt               DateTime?            @db.Timestamptz(3)
+  dismissedAt          DateTime?            @db.Timestamptz(3)
+  createdAt            DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime             @updatedAt @db.Timestamptz(3)
+  alert                Alert                @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  user                 User?                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notificationMember   NotificationMember?  @relation(fields: [notificationMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([alertId, userId, channel])
+  @@unique([alertId, notificationMemberId, channel])
+  @@index([userId, status, createdAt])
+  @@index([notificationMemberId, status, createdAt])
+  @@index([userId, readAt, createdAt])
+  @@index([notificationMemberId, readAt, createdAt])
+  @@index([userId, dismissedAt, readAt, createdAt])
+  @@index([notificationMemberId, dismissedAt, readAt, createdAt], map: "alert_recipients_member_dismissed_read_created_idx")
+  @@map("alert_recipients")
+}
+
+model UserNotification {
+  id         String               @id @default(uuid()) @db.Uuid
+  userId     String               @db.Uuid
+  feedbackId String?              @unique @db.Uuid
+  type       UserNotificationType
+  title      String               @db.VarChar(160)
+  message    String               @db.Text
+  createdAt  DateTime             @default(now()) @db.Timestamptz(3)
+  readAt     DateTime?            @db.Timestamptz(3)
+  deletedAt  DateTime?            @db.Timestamptz(3)
+  user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  feedback   FeedbackSubmission?  @relation("FeedbackReplyNotification", fields: [feedbackId], references: [id], onDelete: SetNull)
+
+  @@index([userId, readAt, createdAt])
+  @@index([userId, deletedAt, readAt, createdAt])
+  @@index([userId, createdAt])
+  @@map("user_notifications")
+}
+
+model FeedbackSubmission {
+  id                String            @id @default(uuid()) @db.Uuid
+  userId            String            @db.Uuid
+  teamId            String?           @db.Uuid
+  message           String            @db.Text
+  status            FeedbackStatus    @default(SUBMITTED)
+  createdAt         DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime          @updatedAt @db.Timestamptz(3)
+  repliedAt         DateTime?         @db.Timestamptz(3)
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team              Team?             @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  replyNotification UserNotification? @relation("FeedbackReplyNotification")
+
+  @@index([userId, createdAt])
+  @@index([teamId, createdAt])
+  @@index([status, createdAt])
+  @@map("feedback_submissions")
 }
 
 model OwnerTransfer {
