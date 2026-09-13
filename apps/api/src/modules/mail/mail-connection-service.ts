@@ -281,7 +281,10 @@ export class MailConnectionService {
         watch = {
           providerCursor: started.providerCursor,
           expiration: started.expiration,
-          renewedAt: now
+          // Treat the successful users.watch response as the beginning of the
+          // new monitoring interval. Messages that predate this boundary must
+          // not be recovered after a pause/resume cycle.
+          renewedAt: this.now()
         };
       } catch (error) {
         await this.handleMonitoringStartFailure(target.connection, error);

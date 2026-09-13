@@ -304,6 +304,12 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
                 },
                 data: {
                   status: restoredStatus,
+                  providerCursor: null,
+                  providerSubscriptionExpiresAt: null,
+                  providerSubscriptionRenewedAt: null,
+                  monitoringStartedAt: null,
+                  syncLeaseToken: null,
+                  syncLeaseExpiresAt: null,
                   lastErrorCode: null,
                   revokedAt: null
                 }
@@ -344,6 +350,7 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
                 providerCursor: null,
                 providerSubscriptionExpiresAt: null,
                 providerSubscriptionRenewedAt: null,
+                monitoringStartedAt: null,
                 syncLeaseToken: null,
                 syncLeaseExpiresAt: null,
                 lastSyncAt: null,
@@ -429,6 +436,7 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
                 providerCursor: null,
                 providerSubscriptionExpiresAt: null,
                 providerSubscriptionRenewedAt: null,
+                monitoringStartedAt: null,
                 syncLeaseToken: null,
                 syncLeaseExpiresAt: null,
                 lastErrorCode: null,
@@ -633,6 +641,7 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
                   providerCursor: null,
                   providerSubscriptionExpiresAt: null,
                   providerSubscriptionRenewedAt: null,
+                  monitoringStartedAt: null,
                   syncLeaseToken: null,
                   syncLeaseExpiresAt: null,
                   lastErrorCode: null
@@ -655,7 +664,9 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
                             providerCursor: input.watch.providerCursor,
                             providerSubscriptionExpiresAt:
                               input.watch.expiration,
-                            providerSubscriptionRenewedAt: input.watch.renewedAt
+                            providerSubscriptionRenewedAt:
+                              input.watch.renewedAt,
+                            monitoringStartedAt: input.watch.renewedAt
                           }
                         : {})
                     }
@@ -663,6 +674,7 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
                       providerCursor: null,
                       providerSubscriptionExpiresAt: null,
                       providerSubscriptionRenewedAt: null,
+                      monitoringStartedAt: null,
                       syncLeaseToken: null,
                       syncLeaseExpiresAt: null,
                       lastErrorCode: null
@@ -762,6 +774,12 @@ export class PrismaMailConnectionRepository implements MailConnectionRepository 
         },
         data: {
           status: input.status,
+          providerCursor: null,
+          providerSubscriptionExpiresAt: null,
+          providerSubscriptionRenewedAt: null,
+          monitoringStartedAt: null,
+          syncLeaseToken: null,
+          syncLeaseExpiresAt: null,
           lastErrorCode: input.errorCode
         }
       });
