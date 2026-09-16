@@ -373,6 +373,13 @@ export class MailConnectionService {
       ) {
         return;
       }
+      if (providerToken.provider === "GOOGLE" && activeProvider === "GOOGLE") {
+        // Google revocation invalidates the user's project-wide OAuth grant,
+        // including a replacement refresh token issued by the same project.
+        // The encrypted database value has already been replaced, so retain
+        // the provider grant until the user explicitly disconnects it.
+        return;
+      }
       await this.requireProvider(providerToken.provider).revokeAuthorization(
         plaintext
       );

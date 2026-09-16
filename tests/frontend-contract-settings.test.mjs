@@ -27,7 +27,10 @@ test("contract settings use server team and provider keyword data", () => {
   assert.match(appSource, /currentTeam\.keywords/);
   assert.match(appSource, /connection\.keywords/);
   assert.match(appSource, /\/contract-settings\/quote/);
-  assert.match(appSource, /\/contract-settings\/quotes\/\$\{encodeURIComponent\(quote\.id\)\}\/apply/);
+  assert.match(
+    appSource,
+    /\/contract-settings\/quotes\/\$\{encodeURIComponent\(quote\.id\)\}\/apply/,
+  );
   assert.match(appSource, /method: "POST"/);
   assert.match(appSource, /現在の年額/);
   assert.match(htmlSource, /id="contractCurrentAnnualPrice"/);
@@ -46,7 +49,10 @@ test("price increases use a server quote and a dedicated difference checkout", (
   assert.match(appSource, /expectedNextAnnualAmountYen/);
   assert.match(appSource, /expectedAdditionalChargeYen/);
   assert.match(appSource, /変更を適用中…/);
-  assert.match(appSource, /契約情報が更新されました。内容と料金をもう一度確認してください。/);
+  assert.match(
+    appSource,
+    /契約情報が更新されました。内容と料金をもう一度確認してください。/,
+  );
 });
 
 test("same-price and downgrade changes bypass checkout with clear explanations", () => {
@@ -63,14 +69,20 @@ test("contract validation is inline, focusable, and clears on correction", () =>
   assert.match(appSource, /scrollIntoView/);
   assert.match(appSource, /focus\?\./);
   assert.match(appSource, /監視アカウントを1件以上設定してください。/);
-  assert.match(appSource, /各監視アカウントに通知キーワードを1件以上設定してください。/);
+  assert.match(
+    appSource,
+    /各監視アカウントに通知キーワードを1件以上設定してください。/,
+  );
   assert.match(appSource, /合計利用人数は1以上の整数で入力してください。/);
 });
 
 test("test cards are dynamic and explain the true zero-keyword state", () => {
   assert.match(appSource, /getActiveGoogleKeywords/);
   assert.match(appSource, /activeKeywords\.forEach\(\(keyword\) =>/);
-  assert.match(appSource, /監視中のGoogleアカウントに通知キーワードが設定されていません。/);
+  assert.match(
+    appSource,
+    /監視中のGoogleアカウントに通知キーワードが設定されていません。/,
+  );
   assert.match(appSource, /監視中のGoogleアカウントがありません。/);
   assert.match(appSource, /契約内容を設定する/);
   assert.match(appSource, /監視アカウント設定を開く/);
@@ -78,6 +90,24 @@ test("test cards are dynamic and explain the true zero-keyword state", () => {
     htmlSource.match(/id="testKeywordCards"[\s\S]*?<\/div>/)?.[0] ?? "",
     /停電|通電|警報/,
   );
+});
+
+test("mail monitoring state is refreshed from the server and never trusted while unknown", () => {
+  assert.match(htmlSource, /mail-connection-refresh\.js\?v=1/);
+  assert.match(appSource, /cache:\s*"no-store"/);
+  assert.match(appSource, /signal/);
+  assert.match(appSource, /"visibilitychange"/);
+  assert.match(appSource, /"focus"/);
+  assert.match(appSource, /"online"/);
+  assert.match(appSource, /"pageshow"/);
+  assert.match(appSource, /new BroadcastChannel/);
+  assert.match(appSource, /MAIL_CONNECTION_REFRESH_INTERVAL_MS/);
+  assert.match(appSource, /監視アカウントの状態を確認中です。/);
+  assert.match(
+    appSource,
+    /接続状態を確認できません。通信が復旧すると自動で再確認します。/,
+  );
+  assert.match(appSource, /!mailConnectionsAreConfirmed\(\)/);
 });
 
 test("contract pricing deduplicates cross-provider keywords and counts total seats", () => {

@@ -163,8 +163,14 @@ const keywordPolicy =
   window.CallNowKeywordPolicy;
 const monitoringKeywordPolicy =
   window.CallNowMonitoringKeywordPolicy;
+const mailConnectionRefreshPolicy =
+  window.CallNowMailConnectionRefresh;
 
-if (!keywordPolicy || !monitoringKeywordPolicy) {
+if (
+  !keywordPolicy ||
+  !monitoringKeywordPolicy ||
+  !mailConnectionRefreshPolicy
+) {
   throw new Error(
     "キーワード検証機能を読み込めませんでした。"
   );
@@ -197,9 +203,11 @@ const NOTIFIED_ALERT_IDS_KEY =
 const ALERT_FALLBACK_DELAY_MS = 4000;
 const ALERT_FALLBACK_INTERVAL_MS = 4000;
 const ALERT_LONG_DISCONNECT_MS = 12000;
+const MAIL_CONNECTION_REFRESH_INTERVAL_MS = 15000;
+const MAIL_CONNECTION_REFRESH_DEBOUNCE_MS = 150;
 
 const APP_BUILD_VERSION =
-  "2026-08-31.5";
+  "2026-09-15.1";
 
 let alarmAudioContext = null;
 let alarmSoundEnabled =
@@ -229,6 +237,15 @@ let loginProviderAvailability = {
 };
 let currentTeam = null;
 let mailConnections = [];
+let mailConnectionLoadState = {
+  status: "idle",
+  reason: "initial",
+  confirmedAt: null
+};
+let mailConnectionRefreshTimer = null;
+let mailConnectionRefreshDebounceTimer = null;
+let mailConnectionBroadcastChannel = null;
+let mailConnectionMutationInProgress = false;
 let mailProviderAvailability = {
   GOOGLE: "UNKNOWN",
   MICROSOFT: "UNKNOWN"
@@ -301,6 +318,22 @@ let paymentMode = "signup";
 */
 let priceBeforeEditing = BASE_PRICE;
 
+const mailConnectionRefreshCoordinator =
+  mailConnectionRefreshPolicy.createCoordinator({
+    load: ({ signal }) =>
+      fetchMailConnections(signal),
+    onStateChange: (state, connections) => {
+      mailConnectionLoadState = state;
+      if (
+        state.status === "ready" &&
+        Array.isArray(connections)
+      ) {
+        mailConnections = connections;
+      }
+      renderMailConnectionRefreshSurfaces();
+    }
+  });
+
 
 function openAuthenticatedStartupDestination() {
   const destination =
@@ -326,6 +359,7 @@ function openAuthenticatedStartupDestination() {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
+  initializeMailConnectionSynchronization();
   void initializeApplication();
 });
 
@@ -372,8 +406,9 @@ async function initializeApplication() {
     if (hasActiveSubscription()) {
       mailProviderAvailability =
         await fetchMailProviderAvailability();
-      mailConnections =
-        await fetchMailConnections();
+      await refreshMailConnections({
+        reason: "application-start"
+      });
       hydrateContractKeywordsFromServer();
       if (currentTeam?.role === "OWNER") {
         await refreshNotificationMemberManagement();
@@ -1072,72 +1107,205 @@ function hydrateContractKeywordsFromServer() {
     currentTeam.seats?.seatCount ?? 1;
 }
 
-async function fetchMailConnections() {
+async function fetchMailConnections(signal) {
   if (currentTeam?.role !== "OWNER") {
     return [];
   }
 
-  try {
-    const response = await fetch(
-      apiUrl(
-        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/mail-connections`
-      ),
-      {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json"
-        },
-        cache: "no-store"
+  const response = await fetch(
+    apiUrl(
+      `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/mail-connections`
+    ),
+    {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        Accept: "application/json"
+      },
+      cache: "no-store",
+      signal
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `mail_connection_${response.status}`
+    );
+  }
+
+  const connections =
+    (await response.json())?.connections;
+  return Array.isArray(connections)
+    ? connections.filter(
+        (connection) =>
+          typeof connection?.id === "string" &&
+          typeof connection.email === "string" &&
+          (connection.provider === "GOOGLE" ||
+            connection.provider === "MICROSOFT")
+      )
+        .map((connection) => ({
+          ...connection,
+          keywords: Array.isArray(
+            connection.keywords
+          )
+            ? connection.keywords
+                .filter(
+                  (keyword) =>
+                    typeof keyword ===
+                    "string"
+                )
+                .map((keyword) =>
+                  keyword.trim()
+                )
+                .filter(Boolean)
+            : []
+        }))
+    : [];
+}
+
+
+function canRefreshMailConnections() {
+  return Boolean(
+    authenticatedUser &&
+      currentTeam?.role === "OWNER" &&
+      hasActiveSubscription()
+  );
+}
+
+
+function mailConnectionsAreConfirmed() {
+  return mailConnectionLoadState.status === "ready";
+}
+
+
+async function refreshMailConnections({
+  reason = "manual",
+  showLoading = true,
+  force = false
+} = {}) {
+  if (!canRefreshMailConnections()) {
+    mailConnections = [];
+    mailConnectionRefreshCoordinator.reset();
+    return {
+      applied: true,
+      ok: true,
+      value: []
+    };
+  }
+
+  if (
+    mailConnectionMutationInProgress &&
+    !force
+  ) {
+    return {
+      applied: false,
+      ok: false,
+      deferred: true
+    };
+  }
+
+  const result =
+    await mailConnectionRefreshCoordinator.refresh({
+      reason,
+      showLoading
+    });
+
+  return result;
+}
+
+
+function scheduleMailConnectionRefresh(
+  reason,
+  showLoading = true
+) {
+  if (
+    !canRefreshMailConnections() ||
+    mailConnectionMutationInProgress
+  ) {
+    return;
+  }
+
+  if (mailConnectionRefreshDebounceTimer) {
+    window.clearTimeout(
+      mailConnectionRefreshDebounceTimer
+    );
+  }
+
+  mailConnectionRefreshDebounceTimer =
+    window.setTimeout(() => {
+      mailConnectionRefreshDebounceTimer = null;
+      void refreshMailConnections({
+        reason,
+        showLoading
+      });
+    }, MAIL_CONNECTION_REFRESH_DEBOUNCE_MS);
+}
+
+
+function initializeMailConnectionSynchronization() {
+  document.addEventListener(
+    "visibilitychange",
+    () => {
+      if (document.visibilityState === "visible") {
+        scheduleMailConnectionRefresh("tab-visible");
+      }
+    }
+  );
+
+  window.addEventListener("focus", () => {
+    scheduleMailConnectionRefresh("window-focus");
+  });
+  window.addEventListener("online", () => {
+    scheduleMailConnectionRefresh("network-online");
+  });
+  window.addEventListener("pageshow", () => {
+    scheduleMailConnectionRefresh("page-show");
+  });
+
+  if (typeof BroadcastChannel === "function") {
+    mailConnectionBroadcastChannel =
+      new BroadcastChannel(
+        "call-now-mail-connections"
+      );
+    mailConnectionBroadcastChannel.addEventListener(
+      "message",
+      (event) => {
+        if (
+          event.data?.type ===
+          "mail-connections-changed"
+        ) {
+          scheduleMailConnectionRefresh(
+            "another-tab-change"
+          );
+        }
       }
     );
-
-    if (response.status === 401) {
-      return [];
-    }
-
-    if (!response.ok) {
-      throw new Error(
-        `mail_connection_${response.status}`
-      );
-    }
-
-    const connections =
-      (await response.json())?.connections;
-    return Array.isArray(connections)
-      ? connections.filter(
-          (connection) =>
-            typeof connection?.id === "string" &&
-            typeof connection.email === "string" &&
-            (connection.provider === "GOOGLE" ||
-              connection.provider === "MICROSOFT")
-          )
-          .map((connection) => ({
-            ...connection,
-            keywords: Array.isArray(
-              connection.keywords
-            )
-              ? connection.keywords
-                  .filter(
-                    (keyword) =>
-                      typeof keyword ===
-                      "string"
-                  )
-                  .map((keyword) =>
-                    keyword.trim()
-                  )
-                  .filter(Boolean)
-              : []
-          })
-        )
-      : [];
-  } catch (error) {
-    console.warn(
-      "メール監視アカウントの状態を確認できませんでした。",
-      error
-    );
-    return [];
   }
+
+  mailConnectionRefreshTimer =
+    window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        scheduleMailConnectionRefresh(
+          "visible-poll",
+          false
+        );
+      }
+    }, MAIL_CONNECTION_REFRESH_INTERVAL_MS);
+}
+
+
+function announceMailConnectionsChanged() {
+  mailConnectionBroadcastChannel?.postMessage({
+    type: "mail-connections-changed"
+  });
+}
+
+
+function renderMailConnectionRefreshSurfaces() {
+  renderMailMonitoringAccount();
+  renderConnectedGoogleAccounts();
+  renderTestKeywordCards();
+  updateVisibleContractConnectionStates();
 }
 
 
@@ -3078,7 +3246,9 @@ ${formatYen(totalPrice)}
     await refreshNotificationMemberManagement();
     mailProviderAvailability =
       await fetchMailProviderAvailability();
-    mailConnections = await fetchMailConnections();
+    await refreshMailConnections({
+      reason: "purchase-complete"
+    });
     hydrateContractKeywordsFromServer();
     ownerAlerts = (await fetchOwnerAlerts()) ?? [];
     openApp();
@@ -3111,6 +3281,11 @@ function openGoogleScreen(
   }
 
   googleScreenMode = mode;
+  if (mode === "manage") {
+    void refreshMailConnections({
+      reason: "monitoring-settings-open"
+    });
+  }
   const isAuthenticationMode =
     mode !== "manage";
 
@@ -3367,6 +3542,72 @@ function loginProviderMark(provider) {
 }
 
 
+function getMailConnectionStatusPresentation(
+  connection
+) {
+  if (!mailConnectionsAreConfirmed()) {
+    return mailConnectionLoadState.status === "error"
+      ? {
+          className: "unavailable",
+          text: "● 接続状態を確認できません"
+        }
+      : {
+          className: "checking",
+          text: "● 状態を確認中"
+        };
+  }
+
+  const requiresReauthorization =
+    connection.connectionStatus ===
+      "REAUTH_REQUIRED" ||
+    connection.authorizationStatus ===
+      "REAUTH_REQUIRED" ||
+    connection.connectionStatus === "ERROR" ||
+    connection.authorizationStatus === "ERROR";
+  if (requiresReauthorization) {
+    return {
+      className: "requires-reauthorization",
+      text: "● 再認証が必要です"
+    };
+  }
+  if (
+    connection.connectionStatus === "ACTIVE" &&
+    connection.authorizationStatus === "ACTIVE"
+  ) {
+    return {
+      className: "active",
+      text: "● 監視中"
+    };
+  }
+  if (connection.connectionStatus === "PAUSED") {
+    return {
+      className: "paused",
+      text: "● 監視停止中"
+    };
+  }
+  return {
+    className: "unavailable",
+    text: "● 接続状態を確認できません"
+  };
+}
+
+
+function mailConnectionRefreshNoticeHtml() {
+  if (mailConnectionLoadState.status === "ready") {
+    return "";
+  }
+  const isError =
+    mailConnectionLoadState.status === "error";
+  return `
+    <p class="mail-connection-refresh-notice ${isError ? "error" : ""}" role="status" aria-live="polite">
+      ${isError
+        ? "接続状態を確認できません。通信が復旧すると自動で再確認します。"
+        : "監視アカウントの状態を確認中です。"}
+    </p>
+  `;
+}
+
+
 function renderMailMonitoringAccount() {
   const status =
     document.getElementById(
@@ -3430,12 +3671,28 @@ function renderMailMonitoringAccount() {
     return;
   }
 
+  const stateConfirmed =
+    mailConnectionsAreConfirmed();
   googleProviderButton.disabled =
+    !stateConfirmed ||
     mailProviderAvailability.GOOGLE !==
       "AVAILABLE";
   microsoftProviderButton.disabled =
+    !stateConfirmed ||
     mailProviderAvailability.MICROSOFT !==
       "AVAILABLE";
+
+  if (!stateConfirmed) {
+    status.innerHTML = `
+      ${mailConnectionRefreshNoticeHtml()}
+      ${mailConnections.length > 0
+        ? `<div class="mail-connection-list">
+            ${mailConnections.map(renderMailConnectionItem).join("")}
+          </div>`
+        : ""}
+    `;
+    return;
+  }
 
   if (mailConnections.length === 0) {
     const deferredChoices =
@@ -3475,24 +3732,21 @@ function renderMailMonitoringAccount() {
 
 
 function renderMailConnectionItem(connection) {
+  const statusPresentation =
+    getMailConnectionStatusPresentation(connection);
+  const stateConfirmed =
+    mailConnectionsAreConfirmed();
   const requiresReauthorization =
-    connection.connectionStatus ===
-      "REAUTH_REQUIRED" ||
-    connection.authorizationStatus ===
-      "REAUTH_REQUIRED" ||
-    connection.connectionStatus === "ERROR" ||
-    connection.authorizationStatus === "ERROR";
+    stateConfirmed &&
+    statusPresentation.className ===
+      "requires-reauthorization";
   const reauthorizeDisabled =
+    !stateConfirmed ||
     mailProviderAvailability[
       connection.provider
     ] !== "AVAILABLE";
   const isPaused =
     connection.connectionStatus === "PAUSED";
-  const monitoringStateClass = requiresReauthorization
-    ? "requires-reauthorization"
-    : isPaused
-      ? "paused"
-      : "active";
   return `
     <article class="mail-connection-item">
       <div>
@@ -3502,12 +3756,8 @@ function renderMailConnectionItem(connection) {
         <p class="connected-account-email">
           ${escapeHtml(connection.email)}
         </p>
-        <p class="mail-monitoring-state ${monitoringStateClass}">
-          ${requiresReauthorization
-            ? "● 再認証が必要です"
-            : isPaused
-              ? "● 監視停止中"
-              : "● 監視中"}
+        <p class="mail-monitoring-state ${statusPresentation.className}">
+          ${statusPresentation.text}
         </p>
       </div>
       <div class="mail-account-actions">
@@ -3523,12 +3773,20 @@ function renderMailConnectionItem(connection) {
           <button
             type="button"
             class="btn outline"
+            ${stateConfirmed ? "" : "disabled"}
             onclick="setMailMonitoringState('${connection.id}', '${isPaused ? "resume" : "pause"}')"
-          >${isPaused ? "このアカウントで監視を開始" : "監視を停止"}</button>
+          >${stateConfirmed
+            ? isPaused
+              ? "このアカウントで監視を開始"
+              : "監視を停止"
+            : mailConnectionLoadState.status === "error"
+              ? "状態を確認できません"
+              : "状態を確認中"}</button>
         ` : ""}
         <button
           type="button"
           class="account-remove-button"
+          ${stateConfirmed ? "" : "disabled"}
           onclick="disconnectMailConnection('${connection.id}')"
         >接続を解除</button>
       </div>
@@ -3596,21 +3854,46 @@ async function updateOwnerMonitoringChoice(choiceId, action) {
 
 
 async function activateDeferredOwnerMonitoring(choiceId) {
-  await updateOwnerMonitoringChoice(choiceId, "activate");
-  mailConnections = await fetchMailConnections();
-  renderMailMonitoringAccount();
-  renderConnectedGoogleAccounts();
-  renderTestKeywordCards();
+  if (mailConnectionMutationInProgress) {
+    return;
+  }
+  mailConnectionMutationInProgress = true;
+  mailConnectionRefreshCoordinator.invalidate(
+    "deferred-monitoring-change"
+  );
+  try {
+    const result = await updateOwnerMonitoringChoice(
+      choiceId,
+      "activate"
+    );
+    await refreshMailConnections({
+      reason: result
+        ? "deferred-monitoring-changed"
+        : "deferred-monitoring-failed",
+      force: true
+    });
+    if (result) {
+      announceMailConnectionsChanged();
+    }
+  } finally {
+    mailConnectionMutationInProgress = false;
+  }
 }
 
 
 async function setMailMonitoringState(connectionId, action) {
   if (
     currentTeam?.role !== "OWNER" ||
-    !["pause", "resume"].includes(action)
+    !["pause", "resume"].includes(action) ||
+    !mailConnectionsAreConfirmed() ||
+    mailConnectionMutationInProgress
   ) {
     return;
   }
+  mailConnectionMutationInProgress = true;
+  mailConnectionRefreshCoordinator.invalidate(
+    `monitoring-${action}`
+  );
   try {
     const response = await fetch(
       apiUrl(
@@ -3629,17 +3912,34 @@ async function setMailMonitoringState(connectionId, action) {
           "監視状態を変更できませんでした。"
       );
     }
-    mailConnections = await fetchMailConnections();
-    renderMailMonitoringAccount();
-    renderConnectedGoogleAccounts();
-    renderTestKeywordCards();
+    const refreshResult =
+      await refreshMailConnections({
+        reason: `monitoring-${action}-complete`,
+        force: true
+      });
+    if (!refreshResult.ok) {
+      throw new Error(
+        "監視状態は変更されましたが、最新状態を確認できませんでした。通信状態を確認してください。"
+      );
+    }
+    announceMailConnectionsChanged();
   } catch (error) {
+    if (
+      mailConnectionLoadState.status !== "ready"
+    ) {
+      await refreshMailConnections({
+        reason: `monitoring-${action}-failed`,
+        force: true
+      });
+    }
     await showAppAlert(
       error instanceof Error
         ? error.message
         : "監視状態を変更できませんでした。",
       { title: "監視設定のエラー" }
     );
+  } finally {
+    mailConnectionMutationInProgress = false;
   }
 }
 
@@ -3716,6 +4016,13 @@ async function beginMailOAuth(
     return;
   }
 
+  if (!mailConnectionsAreConfirmed()) {
+    await showAppAlert(
+      "監視アカウントの最新状態を確認してから、もう一度お試しください。"
+    );
+    return;
+  }
+
   if (
     mailProviderAvailability[provider] !==
     "AVAILABLE"
@@ -3744,6 +4051,8 @@ async function disconnectMailConnection(
   connectionId
 ) {
   if (currentTeam?.role !== "OWNER" ||
+      !mailConnectionsAreConfirmed() ||
+      mailConnectionMutationInProgress ||
       !mailConnections.some(
         (connection) =>
           connection.id === connectionId
@@ -3764,6 +4073,10 @@ async function disconnectMailConnection(
     return;
   }
 
+  mailConnectionMutationInProgress = true;
+  mailConnectionRefreshCoordinator.invalidate(
+    "mail-connection-disconnect"
+  );
   try {
     const response = await fetch(
       apiUrl(
@@ -3784,15 +4097,29 @@ async function disconnectMailConnection(
       );
     }
 
-    mailConnections =
-      await fetchMailConnections();
-    renderMailMonitoringAccount();
-    renderConnectedGoogleAccounts();
-    renderTestKeywordCards();
+    const refreshResult =
+      await refreshMailConnections({
+        reason: "mail-connection-disconnected",
+        force: true
+      });
+    if (!refreshResult.ok) {
+      throw new Error(
+        "接続は解除されましたが、最新状態を確認できませんでした。"
+      );
+    }
+    announceMailConnectionsChanged();
     await showAppAlert(
       "メール監視アカウントの接続を解除しました。"
     );
   } catch (error) {
+    if (
+      mailConnectionLoadState.status !== "ready"
+    ) {
+      await refreshMailConnections({
+        reason: "mail-connection-disconnect-failed",
+        force: true
+      });
+    }
     console.error(
       "メール監視アカウントを解除できませんでした。",
       error
@@ -3800,6 +4127,8 @@ async function disconnectMailConnection(
     await showAppAlert(
       "メール監視アカウントを解除できませんでした。通信状態を確認して、もう一度お試しください。"
     );
+  } finally {
+    mailConnectionMutationInProgress = false;
   }
 }
 
@@ -3931,10 +4260,31 @@ function renderContractSettings() {
 
   container.replaceChildren();
   pendingContractChange = null;
+  const stateConfirmed =
+    mailConnectionsAreConfirmed();
   const canManage =
     currentTeam?.role === "OWNER" &&
-    hasActiveSubscription();
-  if (mailConnections.length === 0) {
+    hasActiveSubscription() &&
+    stateConfirmed;
+  if (!stateConfirmed) {
+    const notice =
+      document.createElement("p");
+    notice.id =
+      "contractMailConnectionStateNotice";
+    notice.className =
+      `mail-connection-refresh-notice ${mailConnectionLoadState.status === "error" ? "error" : ""}`;
+    notice.setAttribute("role", "status");
+    notice.setAttribute("aria-live", "polite");
+    notice.textContent =
+      mailConnectionLoadState.status === "error"
+        ? "接続状態を確認できません。通信が復旧すると自動で再確認します。"
+        : "監視アカウントの状態を確認中です。";
+    container.appendChild(notice);
+  }
+  if (
+    stateConfirmed &&
+    mailConnections.length === 0
+  ) {
     const empty =
       document.createElement("p");
     empty.className =
@@ -3972,24 +4322,16 @@ function renderContractSettings() {
       email.textContent =
         connection.email;
       title.append(providerName, email);
+      const statusPresentation =
+        getMailConnectionStatusPresentation(
+          connection
+        );
       const status =
         document.createElement("span");
       status.className =
-        `contract-provider-status ${
-          connection.connectionStatus === "ACTIVE"
-            ? "active"
-            : connection.connectionStatus === "PAUSED"
-              ? "paused"
-              : "requires-reauthorization"
-        }`;
+        `contract-provider-status ${statusPresentation.className}`;
       status.textContent =
-        connection.connectionStatus ===
-        "ACTIVE"
-          ? "● 監視中"
-          : connection.connectionStatus ===
-              "PAUSED"
-            ? "● 監視停止中"
-            : "● 再設定が必要";
+        statusPresentation.text;
       heading.append(title, status);
 
       const label =
@@ -4070,12 +4412,129 @@ function renderContractSettings() {
   if (!canManage) {
     setText(
       "contractSettingsError",
-      currentTeam?.role === "OWNER"
-        ? "現在の契約状態では変更できません。"
-        : "契約内容の変更は管理者のみ行えます。"
+      !stateConfirmed
+        ? "監視アカウントの最新状態を確認してから変更できます。"
+        : currentTeam?.role === "OWNER"
+          ? "現在の契約状態では変更できません。"
+          : "契約内容の変更は管理者のみ行えます。"
     );
   }
   updateContractSettingsPreview();
+}
+
+
+function updateVisibleContractConnectionStates() {
+  const page =
+    document.getElementById("keywordPage");
+  const container =
+    document.getElementById(
+      "contractSettingsProviders"
+    );
+  if (
+    !page?.classList.contains("active") ||
+    !container
+  ) {
+    return;
+  }
+
+  const cards = [
+    ...container.querySelectorAll(
+      "[data-contract-connection-id]"
+    )
+  ];
+  const renderedIds = cards.map(
+    (card) =>
+      card.dataset.contractConnectionId
+  );
+  const currentIds = mailConnections.map(
+    (connection) => connection.id
+  );
+  if (
+    mailConnectionsAreConfirmed() &&
+    JSON.stringify(renderedIds) !==
+      JSON.stringify(currentIds)
+  ) {
+    renderContractSettings();
+    return;
+  }
+
+  const notice =
+    document.getElementById(
+      "contractMailConnectionStateNotice"
+    );
+  if (mailConnectionsAreConfirmed()) {
+    notice?.remove();
+  } else {
+    const stateNotice =
+      notice ?? document.createElement("p");
+    stateNotice.id =
+      "contractMailConnectionStateNotice";
+    stateNotice.className =
+      `mail-connection-refresh-notice ${mailConnectionLoadState.status === "error" ? "error" : ""}`;
+    stateNotice.setAttribute("role", "status");
+    stateNotice.setAttribute(
+      "aria-live",
+      "polite"
+    );
+    stateNotice.textContent =
+      mailConnectionLoadState.status === "error"
+        ? "接続状態を確認できません。通信が復旧すると自動で再確認します。"
+        : "監視アカウントの状態を確認中です。";
+    if (!notice) {
+      container.prepend(stateNotice);
+    }
+  }
+
+  const canManage =
+    currentTeam?.role === "OWNER" &&
+    hasActiveSubscription() &&
+    mailConnectionsAreConfirmed();
+  cards.forEach((card) => {
+    const connection =
+      mailConnections.find(
+        (candidate) =>
+          candidate.id ===
+          card.dataset.contractConnectionId
+      );
+    const status = card.querySelector(
+      ".contract-provider-status"
+    );
+    if (connection && status) {
+      const presentation =
+        getMailConnectionStatusPresentation(
+          connection
+        );
+      status.className =
+        `contract-provider-status ${presentation.className}`;
+      status.textContent = presentation.text;
+    }
+    card
+      .querySelectorAll("input, button")
+      .forEach((control) => {
+        control.disabled = !canManage;
+      });
+  });
+
+  const saveButton =
+    document.getElementById(
+      "saveContractSettingsButton"
+    );
+  if (saveButton) {
+    saveButton.disabled = !canManage;
+  }
+  if (!mailConnectionsAreConfirmed()) {
+    setText(
+      "contractSettingsError",
+      "監視アカウントの最新状態を確認してから変更できます。"
+    );
+  } else if (
+    document.getElementById(
+      "contractSettingsError"
+    )?.textContent ===
+    "監視アカウントの最新状態を確認してから変更できます。"
+  ) {
+    setText("contractSettingsError", "");
+  }
 }
 
 function createContractKeywordRow(
@@ -4562,7 +5021,9 @@ async function applyPendingContractChange() {
     const appliedQuote = pending.quote;
     currentTeam = updatedTeam;
     pendingContractChange = null;
-    mailConnections = await fetchMailConnections();
+    await refreshMailConnections({
+      reason: "contract-settings-applied"
+    });
     hydrateContractKeywordsFromServer();
     synchronizeContractFromCurrentTeam();
     renderTestKeywordCards();
@@ -6260,40 +6721,51 @@ function renderConnectedGoogleAccounts() {
     document.createElement("div");
   monitoringAccount.className =
     "google-account-role";
+  const stateConfirmed =
+    mailConnectionsAreConfirmed();
   const activeMailConnections =
-    mailConnections.filter(
-      (connection) =>
-        connection.connectionStatus === "ACTIVE" &&
-        connection.authorizationStatus === "ACTIVE"
-    );
+    stateConfirmed
+      ? mailConnections.filter(
+          (connection) =>
+            connection.connectionStatus === "ACTIVE" &&
+            connection.authorizationStatus === "ACTIVE"
+        )
+      : [];
   const requiresMailReauthorization =
+    stateConfirmed &&
     mailConnections.some(
-      (connection) =>
-        ["REAUTH_REQUIRED", "ERROR"].includes(
-          connection.connectionStatus
-        ) ||
-        connection.authorizationStatus !== "ACTIVE"
-    );
+        (connection) =>
+          ["REAUTH_REQUIRED", "ERROR"].includes(
+            connection.connectionStatus
+          ) ||
+          connection.authorizationStatus !== "ACTIVE"
+      );
   const pausedMailConnections =
-    mailConnections.filter(
-      (connection) =>
-        connection.connectionStatus === "PAUSED"
-    );
+    stateConfirmed
+      ? mailConnections.filter(
+          (connection) =>
+            connection.connectionStatus === "PAUSED"
+        )
+      : [];
   const deferredMailChoices =
     ownerOnboarding?.choices?.filter(
       (choice) =>
         choice.status === "DEFERRED" && choice.email
     ) ?? [];
   const monitoringStatus =
-    mailConnections.length > 0
-      ? requiresMailReauthorization
-        ? `${mailConnections.length}件中、再認証が必要な接続があります`
-        : pausedMailConnections.length > 0
-          ? `${activeMailConnections.length}件監視中・${pausedMailConnections.length}件停止中`
-          : `${mailConnections.length}件接続中`
-      : deferredMailChoices.length > 0
-        ? `${deferredMailChoices.length}件設定保留`
-        : "接続されていません";
+    !stateConfirmed
+      ? mailConnectionLoadState.status === "error"
+        ? "接続状態を確認できません"
+        : "状態を確認中"
+      : mailConnections.length > 0
+        ? requiresMailReauthorization
+          ? `${mailConnections.length}件中、再認証が必要な接続があります`
+          : pausedMailConnections.length > 0
+            ? `${activeMailConnections.length}件監視中・${pausedMailConnections.length}件停止中`
+            : `${mailConnections.length}件接続中`
+        : deferredMailChoices.length > 0
+          ? `${deferredMailChoices.length}件設定保留`
+          : "接続されていません";
   const monitoringDetail =
     mailConnections.length > 0
       ? mailConnections
@@ -6365,6 +6837,16 @@ function showAppPage(
     currentTeam?.role === "OWNER"
   ) {
     void refreshNotificationMemberManagement();
+  }
+
+  if (
+    ["homePage", "testPage", "keywordPage"].includes(
+      pageId
+    )
+  ) {
+    void refreshMailConnections({
+      reason: `app-page-${pageId}`
+    });
   }
 
   if (pageId === "keywordPage") {
@@ -6506,6 +6988,7 @@ async function performLogout() {
   loginIdentities = [];
   currentTeam = null;
   mailConnections = [];
+  mailConnectionRefreshCoordinator.reset();
   mailProviderAvailability = {
     GOOGLE: "UNKNOWN",
     MICROSOFT: "UNKNOWN"
@@ -7700,6 +8183,25 @@ function renderTestKeywordCards() {
   }
 
   container.innerHTML = "";
+
+  if (!mailConnectionsAreConfirmed()) {
+    const stateCard =
+      document.createElement("article");
+    stateCard.className =
+      "card test-empty-card";
+    const message =
+      document.createElement("p");
+    message.setAttribute("role", "status");
+    message.setAttribute("aria-live", "polite");
+    message.textContent =
+      mailConnectionLoadState.status === "error"
+        ? "接続状態を確認できないため、通知テストを開始できません。通信が復旧すると自動で再確認します。"
+        : "監視アカウントの状態を確認中です。";
+    stateCard.appendChild(message);
+    container.appendChild(stateCard);
+    updateContractStatusUI();
+    return;
+  }
 
   const activeGoogleConnection =
     monitoringKeywordPolicy.findActiveGoogleConnection(
