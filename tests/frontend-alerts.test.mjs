@@ -257,6 +257,70 @@ test("notification tests create server TEST alerts instead of opening a local-on
   assert.match(htmlSource, /テスト通知/);
 });
 
+test("notification test progress survives card redraws and prevents duplicate delivery", () => {
+  assert.match(
+    htmlSource,
+    /js\/notification-test-execution\.js\?v=1/,
+  );
+  assert.match(
+    appSource,
+    /notificationTestExecutionController\.getView\(\)/,
+  );
+  assert.match(
+    appSource,
+    /button\.disabled\s*=\s*!activeSubscription \|\| contractExpired \|\| view\.blocked/,
+  );
+  assert.match(appSource, /notificationTestButtonText\(executionView\)/);
+  assert.match(
+    appSource,
+    /if \(requestDelivery && serverTest\.created\)/,
+  );
+  assert.match(
+    appSource,
+    /受付済みのテストを確認しています。新しいテストメールは送信していません。/,
+  );
+  assert.doesNotMatch(appSource, /dataset\.originalText/);
+  assert.match(
+    appSource,
+    /\/notification-tests\/current/,
+  );
+  assert.match(
+    appSource,
+    /new BroadcastChannel\(\s*"call-now-notification-tests"/,
+  );
+
+  const contractStatusFunction = appSource.match(
+    /function updateContractStatusUI\(\) \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(contractStatusFunction, "contract status renderer should be present");
+  assert.match(
+    contractStatusFunction,
+    /renderNotificationTestExecutionState\(\)/,
+  );
+  assert.doesNotMatch(contractStatusFunction, /querySelectorAll\(\s*"\.test-button"/);
+});
+
+test("notification tests distinguish rate limits and audio outcomes", () => {
+  assert.match(appSource, /NOTIFICATION_TEST_RATE_LIMITED/);
+  assert.match(appSource, /retryAfterSeconds/);
+  assert.match(appSource, /formatNotificationTestRetryAt/);
+  assert.match(
+    appSource,
+    /通知テストは\$\{subject\}から\$\{windowMinutes\}分間に\$\{limit\}回まで/,
+  );
+  assert.match(appSource, /PLAYBACK_REQUESTED/);
+  assert.match(appSource, /PLAYBACK_BLOCKED/);
+  assert.match(appSource, /SOUND_DISABLED/);
+  assert.match(
+    appSource,
+    /実際に音が聞こえることは、この端末で確認してください。/,
+  );
+  assert.match(
+    appSource,
+    /ブラウザが通知音をブロックしました。通知画面の「通知音を鳴らす」を押してください。/,
+  );
+});
+
 test("owner and participant screens provide persistent sound controls", () => {
   assert.match(htmlSource, /id="ownerEnableAudioButton"/);
   assert.match(htmlSource, /id="notificationMemberEnableAudioButton"/);

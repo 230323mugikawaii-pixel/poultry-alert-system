@@ -72,6 +72,7 @@ describe("notification test routes", () => {
         created: true
       }),
       getForOwner: async () => record,
+      getOpenForOwner: async () => record,
       markFailed: async () => ({ ...record, status: "FAILED" as const }),
       markExpired: async () => ({ ...record, status: "EXPIRED" as const })
     } as unknown as NotificationTestService;
@@ -92,6 +93,23 @@ describe("notification test routes", () => {
     const payload = {
       keyword: record.keyword
     };
+
+    const current = await app.inject({
+      method: "GET",
+      url: `${url}/current`,
+      headers: {
+        cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`
+      }
+    });
+    expect(current.statusCode, current.body).toBe(200);
+    expect(current.json()).toMatchObject({
+      test: {
+        id: record.id,
+        requestId: record.requestId,
+        status: "PENDING"
+      }
+    });
+    expect(current.headers["cache-control"]).toBe("no-store");
 
     const noOrigin = await app.inject({
       method: "POST",
@@ -142,8 +160,17 @@ describe("notification test routes", () => {
     const limited = await start();
     expect(limited.statusCode).toBe(429);
     expect(limited.json()).toMatchObject({
-      error: { code: "NOTIFICATION_TEST_RATE_LIMITED" }
+      error: {
+        code: "NOTIFICATION_TEST_RATE_LIMITED",
+        details: {
+          limit: 3,
+          windowMinutes: 10,
+          retryAt: "2026-08-31T01:10:00.000Z",
+          retryAfterSeconds: 600
+        }
+      }
     });
+    expect(limited.headers["retry-after"]).toBe("600");
 
     const confirmed = await app.inject({
       method: "POST",

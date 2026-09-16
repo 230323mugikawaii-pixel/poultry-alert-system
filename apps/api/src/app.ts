@@ -129,6 +129,17 @@ export async function buildApp(
 
   app.setErrorHandler(async (error, request, reply) => {
     if (error instanceof AppError) {
+      const retryAfterSeconds = error.details?.retryAfterSeconds;
+      if (
+        error.statusCode === 429 &&
+        typeof retryAfterSeconds === "number" &&
+        Number.isFinite(retryAfterSeconds)
+      ) {
+        reply.header(
+          "Retry-After",
+          String(Math.max(1, Math.ceil(retryAfterSeconds)))
+        );
+      }
       await reply.status(error.statusCode).send({
         error: {
           code: error.code,

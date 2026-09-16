@@ -289,6 +289,24 @@ export class PrismaNotificationTestRepository implements NotificationTestReposit
     return mapTest(test);
   }
 
+  public async getOpenForOwner(input: {
+    readonly teamId: string;
+    readonly actorUserId: string;
+    readonly now: Date;
+  }): Promise<NotificationTestRecord | null> {
+    await requireOwner(this.database, input.teamId, input.actorUserId);
+    const test = await this.database.notificationTest.findFirst({
+      where: {
+        teamId: input.teamId,
+        actorUserId: input.actorUserId,
+        status: { in: ["PENDING", "DETECTED"] },
+        expiresAt: { gt: input.now }
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }]
+    });
+    return test ? mapTest(test) : null;
+  }
+
   public expireOpen(now: Date): Promise<number> {
     return this.database.$transaction(async (transaction) => {
       const tests = await transaction.notificationTest.findMany({

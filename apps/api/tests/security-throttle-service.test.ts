@@ -13,16 +13,24 @@ const rule = {
 
 describe("SecurityThrottleService", () => {
   it("allows the configured attempts and returns stable 429 afterwards", async () => {
+    const now = new Date("2026-09-16T00:00:00.000Z");
     const service = new SecurityThrottleService(
       new MemorySecurityThrottleRepository(),
-      pepper
+      pepper,
+      () => now
     );
 
     await expect(service.consume([rule])).resolves.toBeUndefined();
     await expect(service.consume([rule])).resolves.toBeUndefined();
     await expect(service.consume([rule])).rejects.toMatchObject({
       code: "SECURITY_RATE_LIMITED",
-      statusCode: 429
+      statusCode: 429,
+      details: {
+        limit: 2,
+        windowMinutes: 15,
+        retryAt: "2026-09-16T00:15:00.000Z",
+        retryAfterSeconds: 900
+      }
     });
   });
 
