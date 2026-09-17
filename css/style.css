@@ -2221,6 +2221,18 @@ body.app-dialog-open {
   font-weight: 900;
 }
 
+.alarm-sound-status[data-state="starting"] {
+  color: #8a5a00;
+}
+
+.alarm-sound-status[data-state="playing"] {
+  color: #176a3a;
+}
+
+.alarm-sound-status[data-state="off"] {
+  color: var(--subtext);
+}
+
 .alarm-restart-button {
   width: 100%;
   margin-top: 18px;

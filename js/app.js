@@ -167,15 +167,18 @@ const mailConnectionRefreshPolicy =
   window.CallNowMailConnectionRefresh;
 const notificationTestExecutionPolicy =
   window.CallNowNotificationTestExecution;
+const alarmAudioPolicy =
+  window.CallNowAlarmAudio;
 
 if (
   !keywordPolicy ||
   !monitoringKeywordPolicy ||
   !mailConnectionRefreshPolicy ||
-  !notificationTestExecutionPolicy
+  !notificationTestExecutionPolicy ||
+  !alarmAudioPolicy
 ) {
   throw new Error(
-    "キーワード検証機能を読み込めませんでした。"
+    "アプリ機能を読み込めませんでした。"
   );
 }
 
@@ -212,12 +215,17 @@ const NOTIFICATION_TEST_SYNC_DEBOUNCE_MS = 150;
 const NOTIFICATION_TEST_PRESENTATION_TIMEOUT_MS = 10000;
 
 const APP_BUILD_VERSION =
-  "2026-09-16.2";
+  "2026-09-17.1";
 
 let alarmAudioContext = null;
 let alarmSoundEnabled =
   loadAlarmSoundPreference();
 let alarmSoundError = "";
+let alarmAudioVerificationState = "UNVERIFIED";
+let alarmAudioLastFailure = null;
+let alarmAudioResumeInProgress = false;
+let alarmPlaybackState = "IDLE";
+let alarmPlaybackGeneration = 0;
 let alarmRepeatTimer = null;
 let alarmActiveNodes = [];
 let alarmIsActive = false;
@@ -7502,10 +7510,26 @@ function initializeAlarmNotification() {
     if (event.key !== ALERT_SOUND_SETTING_KEY) return;
     alarmSoundEnabled = loadAlarmSoundPreference();
     alarmSoundError = "";
+    alarmAudioLastFailure = null;
+    alarmAudioVerificationState = alarmSoundEnabled
+      ? "UNVERIFIED"
+      : "DISABLED";
     if (!alarmSoundEnabled) {
       closeAlarmNotification();
     }
     updateAllAlarmSoundControls();
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    updateAllAlarmSoundControls();
+    if (
+      currentAlarmAlertContext &&
+      alarmSoundEnabled &&
+      alarmPlaybackState === "BLOCKED"
+    ) {
+      showAlarmAudioFallback(alarmAudioLastFailure);
+    }
   });
 
   updateAllAlarmSoundControls();
@@ -7551,6 +7575,24 @@ function getAlarmAudioContext() {
     alarmAudioContext.addEventListener?.(
       "statechange",
       () => {
+        if (
+          alarmAudioContext?.state !== "running" &&
+          alarmAudioVerificationState === "READY"
+        ) {
+          alarmAudioVerificationState = "UNVERIFIED";
+        }
+        if (
+          alarmAudioContext?.state !== "running" &&
+          alarmIsActive &&
+          !alarmAudioResumeInProgress
+        ) {
+          const error = alarmAudioPolicy.createPlaybackError(
+            "AudioContextInterruptedError",
+            "AudioContext stopped while an alert was active"
+          );
+          failActiveAlarmPlayback(error, "context-state-change");
+          return;
+        }
         updateAllAlarmSoundControls();
       }
     );
@@ -7560,82 +7602,83 @@ function getAlarmAudioContext() {
 }
 
 
-async function unlockAlarmAudio() {
-  const context =
-    getAlarmAudioContext();
+function classifyAlarmAudioFailure(error) {
+  return alarmAudioPolicy.classifyPlaybackError(
+    error,
+    alarmAudioContext?.state || "unavailable"
+  );
+}
 
-  if (!context) {
-    return false;
-  }
 
+function recordAlarmAudioFailure(error, phase) {
+  const failure = classifyAlarmAudioFailure(error);
+  alarmAudioVerificationState = "FAILED";
+  alarmAudioLastFailure = failure;
+  alarmSoundError = failure.controlMessage;
+  console.warn("Alarm audio playback failed", {
+    code: failure.code,
+    contextState: failure.contextState,
+    phase
+  });
+  updateAllAlarmSoundControls();
+  return failure;
+}
+
+
+async function unlockAlarmAudio({
+  source = "explicit-enable"
+} = {}) {
   try {
-    if (
-      context.state ===
-      "suspended"
-    ) {
-      await context.resume();
+    const context = getAlarmAudioContext();
+    if (!context) {
+      throw new DOMException(
+        "Web Audio API is unavailable",
+        "NotSupportedError"
+      );
     }
-
-    /*
-      Safariで、テストボタンを押した操作を
-      通知音の再生許可として記憶させる。
-    */
-    const oscillator =
-      context.createOscillator();
-
-    const gain =
-      context.createGain();
-
-    gain.gain.setValueAtTime(
-      0.0001,
-      context.currentTime
-    );
-
-    oscillator.connect(gain);
-    gain.connect(
-      context.destination
-    );
-
-    oscillator.start();
-    oscillator.stop(
-      context.currentTime + 0.01
-    );
-
-    const ready = context.state === "running";
+    alarmAudioVerificationState = "VERIFYING";
+    alarmSoundError = "";
+    alarmAudioLastFailure = null;
     updateAllAlarmSoundControls();
-    return ready;
+    await alarmAudioPolicy.verifyUserGesturePlayback(context);
+    alarmAudioVerificationState = "READY";
+    console.info("Alarm audio confirmation completed", {
+      contextState: context.state,
+      source
+    });
+    updateAllAlarmSoundControls();
+    return true;
   } catch (error) {
-    console.warn(
-      "通知音の再生準備に失敗しました。",
-      error
-    );
-
-    updateAllAlarmSoundControls();
-
+    recordAlarmAudioFailure(error, source);
     return false;
   }
 }
 
 
 async function enableAlarmAudio(audience) {
-  const wasEnabled = alarmSoundEnabled;
-  const ready = await unlockAlarmAudio();
+  const ready = await unlockAlarmAudio({
+    source: `enable-${String(audience || "UNKNOWN").toLowerCase()}`
+  });
   if (ready) {
     saveAlarmSoundPreference(true);
     alarmSoundError = "";
+    alarmAudioLastFailure = null;
   } else {
-    if (!wasEnabled) saveAlarmSoundPreference(false);
-    alarmSoundError =
-      "通知音を有効にできませんでした。ブラウザの音声設定を確認してください。";
+    saveAlarmSoundPreference(false);
   }
   updateAllAlarmSoundControls();
   return ready;
 }
 
 async function toggleAlarmSoundPreference(audience) {
-  if (alarmSoundEnabled) {
+  if (
+    alarmSoundEnabled &&
+    alarmAudioReadiness() === "READY"
+  ) {
     saveAlarmSoundPreference(false);
     alarmSoundError = "";
+    alarmAudioLastFailure = null;
+    alarmAudioVerificationState = "DISABLED";
     closeAlarmNotification();
     updateAllAlarmSoundControls();
     return;
@@ -7652,6 +7695,9 @@ async function enableAlarmSoundForCurrentAlert() {
   const ready = await enableAlarmAudio(audience);
   if (ready && currentAlarmAlertContext) {
     await startAlarmSound();
+  } else if (currentAlarmAlertContext) {
+    alarmPlaybackState = "BLOCKED";
+    showAlarmAudioFallback(alarmAudioLastFailure);
   }
 }
 
@@ -7664,7 +7710,8 @@ function alarmAudioReadiness() {
   if (!window.AudioContext && !window.webkitAudioContext) {
     return "UNAVAILABLE";
   }
-  return alarmAudioContext?.state === "running"
+  return alarmAudioContext?.state === "running" &&
+    alarmAudioVerificationState === "READY"
     ? "READY"
     : "NEEDS_USER_GESTURE";
 }
@@ -7690,9 +7737,9 @@ function updateAlarmAudioReadiness(audience) {
     alarmSoundEnabled && readiness === "NEEDS_USER_GESTURE";
   const unavailable = readiness === "UNAVAILABLE";
   const label = alarmSoundEnabled
-    ? needsGesture
-      ? "通知音 ON・有効化必要"
-      : "通知音 ON"
+    ? ready
+      ? "通知音 ON"
+      : "通知音 有効化必要"
     : "通知音 OFF";
 
   status.textContent = alarmSoundError
@@ -7702,8 +7749,10 @@ function updateAlarmAudioReadiness(audience) {
       : unavailable
         ? "このブラウザでは通知音を利用できません。緊急通知はベルから確認できます。"
         : ready
-          ? "通知音を受け取る準備ができています。"
-          : "ブラウザの制限により、最初に一度だけ通知音を有効にしてください。";
+          ? "確認音の再生処理が完了し、通知音を受け取る準備ができています。"
+          : alarmAudioVerificationState === "VERIFYING"
+            ? "確認音を再生しています。"
+            : "最初に一度だけ通知音を有効にし、確認音が聞こえることを確かめてください。";
   button.textContent = alarmSoundEnabled
     ? "通知音を有効にする"
     : "通知音をONにする";
@@ -7714,7 +7763,7 @@ function updateAlarmAudioReadiness(audience) {
 
   toggle.classList.toggle("off", !alarmSoundEnabled);
   toggle.classList.toggle("needs-gesture", needsGesture);
-  toggle.setAttribute("aria-pressed", String(alarmSoundEnabled));
+  toggle.setAttribute("aria-pressed", String(ready));
   toggle.setAttribute("aria-label", `${label}。押すと切り替えます。`);
   toggle.setAttribute("title", `${label}。押すと切り替えます。`);
   const toggleLabel = toggle.querySelector(".sound-toggle-label");
@@ -7730,78 +7779,42 @@ function scheduleAlarmTone(
   frequency,
   duration
 ) {
-  const oscillator =
-    context.createOscillator();
-
-  const gain =
-    context.createGain();
-
-  oscillator.type = "square";
-
-  oscillator.frequency
-    .setValueAtTime(
-      frequency,
-      startTime
-    );
-
-  gain.gain.setValueAtTime(
-    0.0001,
-    startTime
-  );
-
-  gain.gain
-    .exponentialRampToValueAtTime(
-      0.28,
-      startTime + 0.02
-    );
-
-  gain.gain.setValueAtTime(
-    0.28,
-    startTime + duration - 0.04
-  );
-
-  gain.gain
-    .exponentialRampToValueAtTime(
-      0.0001,
-      startTime + duration
-    );
-
-  oscillator.connect(gain);
-  gain.connect(
-    context.destination
-  );
-
-  alarmActiveNodes.push(
-    oscillator
-  );
-
-  oscillator.addEventListener(
-    "ended",
-    () => {
-      alarmActiveNodes =
-        alarmActiveNodes.filter(
-          (node ) =>
-            node !== oscillator
-        );
-
-      oscillator.disconnect();
-      gain.disconnect();
-    },
+  return alarmAudioPolicy.createTone(
+    context,
     {
-      once: true
+      duration,
+      frequency,
+      startTime,
+      timeoutMilliseconds: 1800,
+      type: "square",
+      volume: 0.28
     }
-  );
-
-  oscillator.start(startTime);
-
-  oscillator.stop(
-    startTime + duration
   );
 }
 
 
-function playAlarmPattern() {
-  if (!alarmIsActive || !alarmSoundEnabled) {
+function setAlarmModalSoundStatus(message, state) {
+  const status = document.getElementById("alarmSoundStatus");
+  if (!status) return;
+  status.textContent = message;
+  status.dataset.state = state;
+}
+
+
+function failActiveAlarmPlayback(error, phase) {
+  const failure = recordAlarmAudioFailure(error, phase);
+  stopAlarmSound();
+  alarmPlaybackState = "BLOCKED";
+  showAlarmAudioFallback(failure);
+}
+
+
+async function playAlarmPattern(generation) {
+  if (
+    !alarmIsActive ||
+    !alarmSoundEnabled ||
+    generation !== alarmPlaybackGeneration
+  ) {
     return;
   }
 
@@ -7818,24 +7831,24 @@ function playAlarmPattern() {
     !context ||
     context.state !== "running"
   ) {
-    showAlarmAudioFallback();
+    const error = alarmAudioPolicy.createPlaybackError(
+      "AudioContextSuspendedError",
+      "AudioContext is not running"
+    );
+    failActiveAlarmPlayback(error, "pattern-context-check");
     return;
   }
-
-  const status =
-    document.getElementById(
-      "alarmSoundStatus"
-    );
 
   const restartButton =
     document.getElementById(
       "restartAlarmButton"
     );
 
-  if (status) {
-    status.textContent =
-      "通知音が鳴っています。「この端末の通知音を停止」を押すまで繰り返します。";
-  }
+  alarmPlaybackState = "STARTING";
+  setAlarmModalSoundStatus(
+    "通知音の再生を開始しています。",
+    "starting"
+  );
 
   if (restartButton) {
     restartButton.classList.add(
@@ -7845,33 +7858,55 @@ function playAlarmPattern() {
 
   const startTime =
     context.currentTime + 0.03;
+  let tones = [];
 
-  scheduleAlarmTone(
-    context,
-    startTime,
-    880,
-    0.22
-  );
-
-  scheduleAlarmTone(
-    context,
-    startTime + 0.32,
-    1175,
-    0.22
-  );
-
-  scheduleAlarmTone(
-    context,
-    startTime + 0.64,
-    880,
-    0.22
-  );
-
-  alarmRepeatTimer =
-    window.setTimeout(
-      playAlarmPattern,
-      1300
+  try {
+    tones = [
+      scheduleAlarmTone(context, startTime, 880, 0.22),
+      scheduleAlarmTone(context, startTime + 0.32, 1175, 0.22),
+      scheduleAlarmTone(context, startTime + 0.64, 880, 0.22)
+    ];
+    alarmActiveNodes.push(...tones);
+    await Promise.all(tones.map((tone) => tone.completion));
+    alarmActiveNodes = alarmActiveNodes.filter(
+      (node) => !tones.includes(node)
     );
+
+    if (
+      !alarmIsActive ||
+      !alarmSoundEnabled ||
+      generation !== alarmPlaybackGeneration
+    ) {
+      return;
+    }
+
+    alarmPlaybackState = "PLAYING";
+    alarmAudioVerificationState = "READY";
+    alarmAudioLastFailure = null;
+    alarmSoundError = "";
+    setAlarmModalSoundStatus(
+      "通知音の再生処理を確認しました。実際に音が聞こえることを確認してください。「この端末の通知音を停止」を押すまで繰り返します。",
+      "playing"
+    );
+    updateAllAlarmSoundControls();
+    alarmRepeatTimer = window.setTimeout(
+      () => {
+        void playAlarmPattern(generation);
+      },
+      400
+    );
+  } catch (error) {
+    tones.forEach((tone) => tone.stop());
+    alarmActiveNodes = alarmActiveNodes.filter(
+      (node) => !tones.includes(node)
+    );
+    if (
+      alarmIsActive &&
+      generation === alarmPlaybackGeneration
+    ) {
+      failActiveAlarmPlayback(error, "alarm-pattern");
+    }
+  }
 }
 
 
@@ -7882,40 +7917,54 @@ async function startAlarmSound() {
     return;
   }
   alarmIsActive = true;
+  alarmPlaybackState = "STARTING";
+  const generation = alarmPlaybackGeneration;
+  setAlarmModalSoundStatus(
+    "通知音の再生を準備しています。",
+    "starting"
+  );
 
-  const isReady =
-    await unlockAlarmAudio();
-
-  if (!alarmIsActive) {
+  let context = null;
+  try {
+    alarmAudioResumeInProgress = true;
+    context = getAlarmAudioContext();
+    await alarmAudioPolicy.resumeAudioContext(context);
+  } catch (error) {
+    if (
+      alarmIsActive &&
+      generation === alarmPlaybackGeneration
+    ) {
+      failActiveAlarmPlayback(error, "alarm-start");
+    }
     return;
+  } finally {
+    alarmAudioResumeInProgress = false;
   }
 
-  if (!isReady) {
-    showAlarmAudioFallback();
+  if (
+    !alarmIsActive ||
+    generation !== alarmPlaybackGeneration
+  ) {
     return;
   }
-
-  playAlarmPattern();
+  await playAlarmPattern(generation);
 }
 
 
-function showAlarmAudioFallback() {
-  const status =
-    document.getElementById(
-      "alarmSoundStatus"
-    );
-
+function showAlarmAudioFallback(failure = alarmAudioLastFailure) {
   const restartButton =
     document.getElementById(
       "restartAlarmButton"
     );
 
-  if (status) {
-    status.textContent =
-      "ブラウザが通知音をブロックしました。「通知音を鳴らす」を押してください。";
-  }
+  setAlarmModalSoundStatus(
+    failure?.modalMessage ||
+      "通知音を開始できませんでした。「通知音を鳴らす」を押してください。",
+    "error"
+  );
 
   if (restartButton) {
+    restartButton.textContent = "通知音を鳴らす";
     restartButton.classList.remove(
       "hidden"
     );
@@ -7935,8 +7984,10 @@ function updateAlarmModalSoundStatus() {
   if (!status || !restartButton) return;
 
   if (!alarmSoundEnabled) {
-    status.textContent =
-      "通知音はOFFです。緊急通知はベルから確認できます。";
+    setAlarmModalSoundStatus(
+      "通知音はOFFです。緊急通知はベルから確認できます。",
+      "off"
+    );
     restartButton.textContent =
       "通知音をONにする";
     restartButton.classList.remove(
@@ -7951,7 +8002,9 @@ function updateAlarmModalSoundStatus() {
 
 
 function stopAlarmSound() {
+  alarmPlaybackGeneration += 1;
   alarmIsActive = false;
+  alarmPlaybackState = "STOPPED";
 
   if (alarmRepeatTimer) {
     window.clearTimeout(
@@ -7962,18 +8015,8 @@ function stopAlarmSound() {
   }
 
   alarmActiveNodes.forEach(
-    (oscillator ) => {
-      try {
-        oscillator.stop();
-      } catch (error) {
-        /* すでに停止済みの場合は何もしない。 */
-      }
-
-      try {
-        oscillator.disconnect();
-      } catch (error) {
-        /* すでに切断済みの場合は何もしない。 */
-      }
+    (tone) => {
+      tone.stop();
     }
   );
 
@@ -8078,8 +8121,10 @@ function showAlarmNotification(
   }
 
   if (status) {
-    status.textContent =
-      "通知音を準備しています。";
+    setAlarmModalSoundStatus(
+      "通知モーダルを表示しました。通知音はまだ開始していません。",
+      "starting"
+    );
   }
 
   if (restartButton) {
@@ -8138,6 +8183,7 @@ function closeAlarmNotification() {
 
   if (status) {
     status.textContent = "";
+    delete status.dataset.state;
   }
 
   if (
@@ -8370,7 +8416,11 @@ async function executeNotificationTest({
       );
     }
 
-    await unlockAlarmAudio();
+    if (alarmSoundEnabled) {
+      await unlockAlarmAudio({
+        source: "notification-test-user-gesture"
+      });
+    }
 
     if (!serverTest) {
       serverTest = await startServerNotificationTest(keyword);
@@ -8900,10 +8950,7 @@ async function waitForTestNotificationPresentation(
         ) {
           return "PLAYBACK_BLOCKED";
         }
-        if (
-          alarmIsActive &&
-          alarmAudioReadiness() === "READY"
-        ) {
+        if (alarmPlaybackState === "PLAYING") {
           return "PLAYBACK_REQUESTED";
         }
       }

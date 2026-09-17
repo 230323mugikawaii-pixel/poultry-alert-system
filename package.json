@@ -13,6 +13,7 @@
     "lint": "pnpm --filter @call-now/api lint",
     "mail:gmail:renew-watches": "pnpm --filter @call-now/api mail:gmail:renew-watches",
     "test": "pnpm --filter @call-now/api test",
+    "test:alarm-audio": "node --test tests/alarm-audio.test.mjs",
     "test:frontend-alerts": "node --test tests/frontend-alerts.test.mjs",
     "test:frontend-auth": "node --test tests/frontend-auth-foundation.test.mjs",
     "test:frontend-communications": "node --test tests/frontend-communications.test.mjs",
@@ -25,6 +26,6 @@
     "test:postgres": "pnpm --filter @call-now/api test:postgres",
     "test:coverage": "pnpm --filter @call-now/api test:coverage",
     "typecheck": "pnpm --filter @call-now/api typecheck",
-    "verify": "pnpm test:keywords && pnpm test:monitoring-keywords && pnpm test:notification-test-execution && pnpm test:frontend-auth && pnpm test:frontend-onboarding && pnpm test:frontend-alerts && pnpm test:frontend-communications && pnpm test:frontend-contract-settings && pnpm test:frontend-notification-members && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "verify": "pnpm test:keywords && pnpm test:monitoring-keywords && pnpm test:notification-test-execution && pnpm test:alarm-audio && pnpm test:frontend-auth && pnpm test:frontend-onboarding && pnpm test:frontend-alerts && pnpm test:frontend-communications && pnpm test:frontend-contract-settings && pnpm test:frontend-notification-members && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   }
 }
