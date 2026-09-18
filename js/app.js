@@ -256,6 +256,8 @@ let alarmAudioLastFailure = null;
 let alarmAudioResumeInProgress = false;
 let alarmPlaybackState = "IDLE";
 let alarmPlaybackGeneration = 0;
+let alarmPageActive = true;
+let alarmAudioAbortController = new AbortController();
 let alarmPlaybackCycleCount = 0;
 let alarmRepeatTimer = null;
 let alarmActiveNodes = [];
@@ -2232,6 +2234,8 @@ async function coordinateAlertPresentation(
   audience,
   presentationContext
 ) {
+  if (!alarmPageActive) return;
+  const generation = alarmPlaybackGeneration;
   pendingAlertPresentationIds.add(alert.id);
   try {
     const claimed =
@@ -2253,6 +2257,8 @@ async function coordinateAlertPresentation(
       (candidate) => candidate.id === alert.id
     );
     if (
+      !alarmPageActive ||
+      generation !== alarmPlaybackGeneration ||
       !latest ||
       latest.status !== "ACTIVE" ||
       latest.readAt ||
@@ -7726,7 +7732,12 @@ function initializeAlarmNotification() {
   });
 
   window.addEventListener("pagehide", () => {
+    alarmPageActive = false;
     stopAlarmSound();
+  });
+  window.addEventListener("pageshow", () => {
+    // BFCache restoration permits new actions, never old pending operations.
+    alarmPageActive = true;
   });
 
   updateAllAlarmSoundControls();
@@ -7829,6 +7840,9 @@ function recordAlarmAudioFailure(error, phase) {
 async function unlockAlarmAudio({
   source = "explicit-enable"
 } = {}) {
+  if (!alarmPageActive) return false;
+  const generation = alarmPlaybackGeneration;
+  const signal = alarmAudioAbortController.signal;
   try {
     const context = getAlarmAudioContext();
     if (!context) {
@@ -7841,7 +7855,8 @@ async function unlockAlarmAudio({
     alarmSoundError = "";
     alarmAudioLastFailure = null;
     updateAllAlarmSoundControls();
-    await alarmAudioPolicy.verifyUserGesturePlayback(context);
+    await alarmAudioPolicy.verifyUserGesturePlayback(context, { signal });
+    if (!alarmPageActive || generation !== alarmPlaybackGeneration) return false;
     alarmAudioVerificationState = "READY";
     console.info("Alarm audio confirmation completed", {
       contextState: context.state,
@@ -7850,6 +7865,7 @@ async function unlockAlarmAudio({
     updateAllAlarmSoundControls();
     return true;
   } catch (error) {
+    if (!alarmPageActive || generation !== alarmPlaybackGeneration) return false;
     recordAlarmAudioFailure(error, source);
     return false;
   }
@@ -7857,9 +7873,11 @@ async function unlockAlarmAudio({
 
 
 async function enableAlarmAudio(audience) {
+  const generation = alarmPlaybackGeneration;
   const ready = await unlockAlarmAudio({
     source: `enable-${String(audience || "UNKNOWN").toLowerCase()}`
   });
+  if (!alarmPageActive || generation !== alarmPlaybackGeneration) return false;
   if (ready) {
     saveAlarmSoundPreference(true);
     alarmSoundError = "";
@@ -7872,6 +7890,8 @@ async function enableAlarmAudio(audience) {
 }
 
 async function toggleAlarmSoundPreference(audience) {
+  if (!alarmPageActive) return;
+  const generation = alarmPlaybackGeneration;
   if (
     alarmSoundEnabled &&
     alarmAudioReadiness() === "READY"
@@ -7886,14 +7906,18 @@ async function toggleAlarmSoundPreference(audience) {
   }
 
   const ready = await enableAlarmAudio(audience);
+  if (!alarmPageActive || generation !== alarmPlaybackGeneration) return;
   if (ready && currentAlarmAlertContext) {
     await startAlarmSound();
   }
 }
 
 async function enableAlarmSoundForCurrentAlert() {
+  if (!alarmPageActive) return;
+  const generation = alarmPlaybackGeneration;
   const audience = currentAlarmAlertContext?.audience || "OWNER";
   const ready = await enableAlarmAudio(audience);
+  if (!alarmPageActive || generation !== alarmPlaybackGeneration) return;
   if (ready && currentAlarmAlertContext) {
     await startAlarmSound();
   } else if (currentAlarmAlertContext) {
@@ -8018,6 +8042,7 @@ function failActiveAlarmPlayback(error, phase) {
 
 async function playAlarmPattern(generation) {
   if (
+    !alarmPageActive ||
     !alarmIsActive ||
     !alarmSoundEnabled ||
     generation !== alarmPlaybackGeneration
@@ -8081,6 +8106,7 @@ async function playAlarmPattern(generation) {
     );
 
     if (
+      !alarmPageActive ||
       !alarmIsActive ||
       !alarmSoundEnabled ||
       generation !== alarmPlaybackGeneration
@@ -8134,6 +8160,7 @@ async function playAlarmPattern(generation) {
 
 
 async function startAlarmSound() {
+  if (!alarmPageActive) return;
   stopAlarmSound();
   if (!alarmSoundEnabled) {
     updateAlarmModalSoundStatus();
@@ -8159,7 +8186,9 @@ async function startAlarmSound() {
   try {
     alarmAudioResumeInProgress = true;
     context = getAlarmAudioContext();
-    await alarmAudioPolicy.resumeAudioContext(context);
+    await alarmAudioPolicy.resumeAudioContext(context, {
+      signal: alarmAudioAbortController.signal
+    });
   } catch (error) {
     if (
       alarmIsActive &&
@@ -8169,10 +8198,13 @@ async function startAlarmSound() {
     }
     return;
   } finally {
-    alarmAudioResumeInProgress = false;
+    if (generation === alarmPlaybackGeneration) {
+      alarmAudioResumeInProgress = false;
+    }
   }
 
   if (
+    !alarmPageActive ||
     !alarmIsActive ||
     generation !== alarmPlaybackGeneration
   ) {
@@ -8234,6 +8266,12 @@ function updateAlarmModalSoundStatus() {
 
 function stopAlarmSound() {
   alarmPlaybackGeneration += 1;
+  alarmAudioAbortController.abort();
+  alarmAudioAbortController = new AbortController();
+  alarmAudioResumeInProgress = false;
+  if (alarmAudioVerificationState === "VERIFYING") {
+    alarmAudioVerificationState = "UNVERIFIED";
+  }
   alarmIsActive = false;
   alarmPlaybackState = alarmAudioPolicy.transitionPlaybackState(
     alarmPlaybackState,
@@ -8291,10 +8329,14 @@ async function waitForAlarmModalPaint(context) {
 
 
 async function startAlarmAfterModalPresentation(context) {
+  if (!alarmPageActive) return;
+  const generation = alarmPlaybackGeneration;
   await waitForAlarmModalPaint(context);
   const modal = document.getElementById("alarmModal");
   if (
-    currentAlarmAlertContext?.alertId !== context?.alertId ||
+    !alarmPageActive ||
+    generation !== alarmPlaybackGeneration ||
+    currentAlarmAlertContext !== context ||
     modal?.classList.contains("hidden") ||
     !alarmSoundEnabled
   ) {
@@ -8309,6 +8351,7 @@ function showAlarmNotification(
   detectedAt,
   alertContext = null
 ) {
+  if (!alarmPageActive) return;
   const modal =
     document.getElementById(
       "alarmModal"

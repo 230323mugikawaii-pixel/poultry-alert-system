@@ -13,7 +13,7 @@
     "lint": "pnpm --filter @call-now/api lint",
     "mail:gmail:renew-watches": "pnpm --filter @call-now/api mail:gmail:renew-watches",
     "test": "pnpm --filter @call-now/api test",
-    "test:alarm-audio": "node --test tests/alarm-audio.test.mjs",
+    "test:alarm-audio": "node --test tests/alarm-audio.test.mjs tests/alarm-lifecycle.test.mjs",
     "test:alert-tab-coordination": "node --test tests/alert-tab-coordination.test.mjs",
     "test:frontend-alerts": "node --test tests/frontend-alerts.test.mjs",
     "test:frontend-auth": "node --test tests/frontend-auth-foundation.test.mjs",

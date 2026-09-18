@@ -50,7 +50,7 @@ test("the shared interface tokens and accessible interaction states are defined"
   assert.match(cssSource, /@media \(prefers-reduced-motion:\s*reduce\)/);
   assert.match(cssSource, /@media \(max-width:\s*390px\)/);
   assert.match(cssSource, /@media \(max-width:\s*340px\)/);
-  assert.match(htmlSource, /css\/style\.css\?v=33/);
+  assert.match(htmlSource, /css\/style\.css\?v=34/);
 });
 
 test("Home keeps monitoring controls without a duplicate alert surface", () => {

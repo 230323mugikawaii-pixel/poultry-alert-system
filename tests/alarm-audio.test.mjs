@@ -102,6 +102,107 @@ test("a context that stays suspended is not reported as ready", async () => {
   );
 });
 
+test("resume itself times out while suspended and late resolution never creates a tone", async () => {
+  const context = createFakeAudioContext();
+  let resolveResume;
+  let tones = 0;
+  context.resume = () =>
+    new Promise((resolve) => {
+      resolveResume = resolve;
+    });
+  context.createOscillator = () => {
+    tones += 1;
+    throw new Error("unexpected tone");
+  };
+  const result = alarmAudio
+    .verifyUserGesturePlayback(context, {
+      timeoutMilliseconds: 5,
+    })
+    .then(
+      () => "success",
+      (error) => error,
+    );
+  const outcome = await Promise.race([
+    result,
+    new Promise((resolve) => setTimeout(() => resolve("still pending"), 30)),
+  ]);
+  context.state = "running";
+  resolveResume();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(outcome.name, "AudioPlaybackTimeoutError");
+  assert.equal(
+    alarmAudio.classifyPlaybackError(outcome, "suspended").code,
+    "PLAYBACK_TIMEOUT",
+  );
+  assert.equal(tones, 0);
+});
+
+test("cancelling resume rejects promptly and handles a late native rejection", async () => {
+  const context = createFakeAudioContext();
+  const controller = new AbortController();
+  let rejectResume;
+  context.resume = () =>
+    new Promise((_resolve, reject) => {
+      rejectResume = reject;
+    });
+  const result = alarmAudio
+    .resumeAudioContext(context, {
+      signal: controller.signal,
+      timeoutMilliseconds: 100,
+    })
+    .then(
+      () => "success",
+      (error) => error.name,
+    );
+  controller.abort();
+  const outcome = await Promise.race([
+    result,
+    new Promise((resolve) => setTimeout(() => resolve("still pending"), 20)),
+  ]);
+  rejectResume(new Error("late native failure"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(outcome, "AbortError");
+});
+
+test("already cancelled enablement does not call resume or create nodes", async () => {
+  const context = createFakeAudioContext();
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    alarmAudio.verifyUserGesturePlayback(context, {
+      signal: controller.signal,
+    }),
+    { name: "AbortError" },
+  );
+  assert.equal(context.resumeCalls, 0);
+});
+
+test("cancellation also stops an in-flight confirmation tone", async () => {
+  const context = createFakeAudioContext({
+    initialState: "running",
+    endTone: false,
+  });
+  const controller = new AbortController();
+  let stops = 0;
+  const create = context.createOscillator;
+  context.createOscillator = () => {
+    const oscillator = create();
+    const stop = oscillator.stop;
+    oscillator.stop = () => {
+      stops += 1;
+      stop();
+    };
+    return oscillator;
+  };
+  const result = alarmAudio.verifyUserGesturePlayback(context, {
+    signal: controller.signal,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  controller.abort();
+  await assert.rejects(result, { name: "AbortError" });
+  assert.equal(stops, 2); // scheduled end, then immediate cancellation
+});
+
 test("tone completion timeout is surfaced instead of reporting playback", async () => {
   const context = createFakeAudioContext({
     initialState: "running",

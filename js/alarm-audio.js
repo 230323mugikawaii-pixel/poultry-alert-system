@@ -71,6 +71,8 @@
         code = "ABORTED";
       } else if (name === "NotSupportedError") {
         code = "NOT_SUPPORTED";
+      } else if (name === "AudioPlaybackTimeoutError") {
+        code = "PLAYBACK_TIMEOUT";
       } else if (
         name === "AudioContextInterruptedError" ||
         name === "AudioContextSuspendedError" ||
@@ -79,8 +81,6 @@
         contextState === "closed"
       ) {
         code = "CONTEXT_INTERRUPTED";
-      } else if (name === "AudioPlaybackTimeoutError") {
-        code = "PLAYBACK_TIMEOUT";
       }
 
       return Object.freeze({
@@ -91,7 +91,17 @@
       });
     }
 
-    async function resumeAudioContext(context) {
+    function throwIfCancelled(signal) {
+      if (signal?.aborted) {
+        throw createPlaybackError("AbortError", "Audio operation cancelled");
+      }
+    }
+
+    async function resumeAudioContext(
+      context,
+      { signal, timeoutMilliseconds = 2000 } = {},
+    ) {
+      throwIfCancelled(signal);
       if (!context) {
         throw createPlaybackError(
           "NotSupportedError",
@@ -103,9 +113,34 @@
         context.state === "suspended" ||
         context.state === "interrupted"
       ) {
-        await context.resume();
+        let timeoutId;
+        let cancel;
+        const interruption = new Promise((_resolve, reject) => {
+          cancel = () =>
+            reject(
+              createPlaybackError("AbortError", "Audio operation cancelled"),
+            );
+          signal?.addEventListener("abort", cancel, { once: true });
+          timeoutId = globalThis.setTimeout(() => {
+            reject(
+              createPlaybackError(
+                "AudioPlaybackTimeoutError",
+                "Audio resume did not complete",
+              ),
+            );
+          }, timeoutMilliseconds);
+        });
+        try {
+          // Call resume inside the user gesture. The native operation cannot be
+          // cancelled, but neither a late resolve nor reject can resume this flow.
+          await Promise.race([context.resume(), interruption]);
+        } finally {
+          globalThis.clearTimeout(timeoutId);
+          signal?.removeEventListener("abort", cancel);
+        }
       }
 
+      throwIfCancelled(signal);
       if (context.state !== "running") {
         throw createPlaybackError(
           "AudioContextSuspendedError",
@@ -234,8 +269,10 @@
       };
     }
 
-    async function verifyUserGesturePlayback(context) {
-      await resumeAudioContext(context);
+    async function verifyUserGesturePlayback(context, options = {}) {
+      const { signal } = options;
+      await resumeAudioContext(context, options);
+      throwIfCancelled(signal);
       const confirmation = createTone(context, {
         duration: 0.18,
         frequency: 660,
@@ -243,7 +280,14 @@
         type: "sine",
         volume: 0.14,
       });
-      await confirmation.completion;
+      const cancel = () => confirmation.stop();
+      signal?.addEventListener("abort", cancel, { once: true });
+      try {
+        await confirmation.completion;
+        throwIfCancelled(signal);
+      } finally {
+        signal?.removeEventListener("abort", cancel);
+      }
 
       if (context.state !== "running") {
         throw createPlaybackError(
