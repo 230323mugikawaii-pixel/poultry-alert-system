@@ -281,7 +281,10 @@ export class MailConnectionService {
         watch = {
           providerCursor: started.providerCursor,
           expiration: started.expiration,
-          renewedAt: now
+          // Treat the successful users.watch response as the beginning of the
+          // new monitoring interval. Messages that predate this boundary must
+          // not be recovered after a pause/resume cycle.
+          renewedAt: this.now()
         };
       } catch (error) {
         await this.handleMonitoringStartFailure(target.connection, error);
@@ -368,6 +371,13 @@ export class MailConnectionService {
         providerToken.provider === activeProvider &&
         plaintext === activeRefreshToken
       ) {
+        return;
+      }
+      if (providerToken.provider === "GOOGLE" && activeProvider === "GOOGLE") {
+        // Google revocation invalidates the user's project-wide OAuth grant,
+        // including a replacement refresh token issued by the same project.
+        // The encrypted database value has already been replaced, so retain
+        // the provider grant until the user explicitly disconnects it.
         return;
       }
       await this.requireProvider(providerToken.provider).revokeAuthorization(

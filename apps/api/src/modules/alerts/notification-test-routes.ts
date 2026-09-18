@@ -42,6 +42,9 @@ const ConfirmResponse = Type.Object({
   test: NotificationTestResponse,
   alertCreated: Type.Boolean()
 });
+const CurrentResponse = Type.Object({
+  test: Type.Union([NotificationTestResponse, Type.Null()])
+});
 
 export function createNotificationTestRoutes(
   authService: AuthService,
@@ -90,29 +93,82 @@ export function createNotificationTestRoutes(
       async (request, reply) => {
         requireSameOrigin(request.headers.origin);
         const userId = await authenticateOwner(request, request.params.teamId);
-        await securityThrottle.consume(
-          [
-            throttleRule("notification_test_team", [request.params.teamId], 3),
-            throttleRule("notification_test_owner", [userId], 3),
-            throttleRule("notification_test_source", [request.ip], 12)
-          ],
-          {
-            code: "NOTIFICATION_TEST_RATE_LIMITED",
-            message:
-              "通知テストが続いています。少し時間をおいてお試しください。",
-            statusCode: 429
+        try {
+          await securityThrottle.consume(
+            [
+              throttleRule(
+                "notification_test_team",
+                [request.params.teamId],
+                5
+              ),
+              throttleRule("notification_test_owner", [userId], 5),
+              throttleRule("notification_test_source", [request.ip], 12)
+            ],
+            {
+              code: "NOTIFICATION_TEST_RATE_LIMITED",
+              message:
+                "通知テストの回数が上限に達しました。表示された時刻以降にもう一度お試しください。",
+              statusCode: 429
+            }
+          );
+        } catch (error) {
+          if (
+            error instanceof AppError &&
+            error.code === "NOTIFICATION_TEST_RATE_LIMITED"
+          ) {
+            request.log.info(
+              {
+                event: "notification_test_rate_limited",
+                scope: error.details?.scope ?? null,
+                retryAt: error.details?.retryAt ?? null,
+                retryAfterSeconds: error.details?.retryAfterSeconds ?? null,
+                limit: error.details?.limit ?? null,
+                windowMinutes: error.details?.windowMinutes ?? null
+              },
+              "Notification test event"
+            );
           }
-        );
+          throw error;
+        }
         const result = await service.start({
           teamId: request.params.teamId,
           actorUserId: userId,
           keyword: request.body.keyword
         });
+        request.log.info(
+          {
+            event: "notification_test_start_accepted",
+            notificationTestId: result.test.id,
+            notificationTestRequestId: result.test.requestId,
+            notificationTestStatus: result.test.status,
+            created: result.created
+          },
+          "Notification test event"
+        );
         reply.header("Cache-Control", "no-store");
         await reply.status(result.created ? 201 : 200).send({
           test: serializeTest(result.test),
           created: result.created
         });
+      }
+    );
+
+    app.get(
+      "/api/v1/teams/:teamId/notification-tests/current",
+      {
+        schema: {
+          params: TeamParams,
+          response: { 200: CurrentResponse }
+        }
+      },
+      async (request, reply) => {
+        const userId = await authenticateOwner(request, request.params.teamId);
+        const test = await service.getOpenForOwner({
+          teamId: request.params.teamId,
+          actorUserId: userId
+        });
+        reply.header("Cache-Control", "no-store");
+        return { test: test ? serializeTest(test) : null };
       }
     );
 
@@ -154,6 +210,16 @@ export function createNotificationTestRoutes(
           actorUserId: userId,
           requestId: request.body.requestId
         });
+        request.log.info(
+          {
+            event: "notification_test_alert_created",
+            notificationTestId: result.test.id,
+            notificationTestRequestId: result.test.requestId,
+            alertId: result.test.alertId,
+            alertCreated: result.created
+          },
+          "Notification test event"
+        );
         reply.header("Cache-Control", "no-store");
         return {
           test: serializeTest(result.test),
@@ -189,6 +255,14 @@ export function createNotificationTestRoutes(
           requestId: request.body.requestId,
           reasonCode: request.body.reasonCode
         });
+        request.log.info(
+          {
+            event: "notification_test_failed",
+            notificationTestId: test.id,
+            notificationTestRequestId: test.requestId
+          },
+          "Notification test event"
+        );
         reply.header("Cache-Control", "no-store");
         return serializeTest(test);
       }
@@ -212,6 +286,14 @@ export function createNotificationTestRoutes(
           actorUserId: userId,
           requestId: request.body.requestId
         });
+        request.log.info(
+          {
+            event: "notification_test_expired",
+            notificationTestId: test.id,
+            notificationTestRequestId: test.requestId
+          },
+          "Notification test event"
+        );
         reply.header("Cache-Control", "no-store");
         return serializeTest(test);
       }

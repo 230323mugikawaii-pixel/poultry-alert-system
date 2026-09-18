@@ -16,6 +16,18 @@ const htmlSource = readFileSync(
   new URL("../index.html", import.meta.url),
   "utf8"
 );
+const cssSource = readFileSync(
+  new URL("../css/style.css", import.meta.url),
+  "utf8"
+);
+
+test("compact setup progress wraps on narrow screens without hiding steps", () => {
+  assert.match(cssSource, /\.setup-progress\s*\{[^}]*flex-wrap:\s*wrap/s);
+  assert.match(
+    cssSource,
+    /\.setup-progress span\s*\{[^}]*max-width:\s*100%;[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere/s
+  );
+});
 
 test("guest owners enter monitoring setup without a separate primary-login screen", () => {
   assert.match(

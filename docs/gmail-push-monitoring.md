@@ -57,11 +57,13 @@ The command prints counts only and never prints mailbox addresses, credentials, 
 
 The API also performs a best-effort reconciliation on startup and every minute while enabled. The frequent check does not renew healthy watches: the database query selects only missing or near-expiry watches. Multiple instances are safe: watch renewal preserves existing cursors, and mailbox processing uses database leases plus Alert uniqueness.
 
+Pausing and disconnecting are different operations. Pausing keeps the Google authorization and connection but clears its watch cursor, records no active monitoring interval, and calls `users.stop` on a best-effort basis. Resuming first completes a new `users.watch`, then stores that response's current history cursor and the start of a new monitoring interval before pausing the previously active Google connection. Only one Google connection can be active per Team. A failed new watch leaves the previous connection active.
+
 ## Failure handling
 
 - `invalid_grant`, HTTP 401, and permission loss move the authorization and its connections to `REAUTH_REQUIRED`.
 - HTTP 429, 5xx, and network timeouts use bounded retry with exponential backoff and jitter. An exhausted webhook attempt returns 503 so Pub/Sub can redeliver.
-- An old History API cursor returning 404 triggers a bounded 72-hour recent-INBOX recovery (maximum 500 unique messages), including a five-minute overlap before the last successful sync and deduplicated by Gmail message ID. The cursor is changed only after recovery succeeds.
+- An old History API cursor returning 404 triggers a bounded 72-hour recent-INBOX recovery (maximum 500 unique messages), including a five-minute overlap before the last successful sync and deduplicated by Gmail message ID. The recovery boundary can never precede the start of the current monitoring interval, and each fetched message's Gmail `internalDate` is checked against that exact boundary. Messages received while an account was paused are therefore not backfilled after resume. The cursor is changed only after recovery succeeds.
 - Disconnect clears local cursor/watch state first. If no other connection uses the authorization, `users.stop` and token revocation are best-effort; their failure never re-enables local monitoring.
 
 ## Staging end-to-end check

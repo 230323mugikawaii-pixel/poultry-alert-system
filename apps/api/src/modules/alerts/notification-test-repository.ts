@@ -69,5 +69,10 @@ export interface NotificationTestRepository {
     readonly testId: string;
     readonly actorUserId: string;
   }): Promise<NotificationTestRecord>;
+  getOpenForOwner(input: {
+    readonly teamId: string;
+    readonly actorUserId: string;
+    readonly now: Date;
+  }): Promise<NotificationTestRecord | null>;
   expireOpen(now: Date): Promise<number>;
 }

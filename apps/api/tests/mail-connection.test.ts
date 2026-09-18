@@ -457,7 +457,7 @@ describe("MailConnectionService", () => {
     });
   });
 
-  it("rotates on reauthorization, disconnects locally first, and marks revoked grants", async () => {
+  it("preserves a rotated Google grant until explicit disconnect", async () => {
     const fixture = createServiceFixture();
     const first = await fixture.service.createAuthorizationRequest(
       "owner-user-id",
@@ -485,7 +485,7 @@ describe("MailConnectionService", () => {
       code: "valid-gmail-code",
       authenticatedUserId: "owner-user-id"
     });
-    expect(fixture.provider.revokedTokens).toContain(syntheticRefreshToken);
+    expect(fixture.provider.revokedTokens).not.toContain(syntheticRefreshToken);
 
     await fixture.service.markProviderFailure({
       authorizationId: connected.authorizationId,

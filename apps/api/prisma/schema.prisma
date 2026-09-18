@@ -650,6 +650,7 @@ model MailConnection {
   providerCursor       String?               @db.VarChar(2048)
   providerSubscriptionExpiresAt DateTime?     @db.Timestamptz(3)
   providerSubscriptionRenewedAt DateTime?     @db.Timestamptz(3)
+  monitoringStartedAt  DateTime?             @db.Timestamptz(3)
   syncLeaseToken       String?               @db.VarChar(64)
   syncLeaseExpiresAt   DateTime?              @db.Timestamptz(3)
   lastSyncAt           DateTime?             @db.Timestamptz(3)

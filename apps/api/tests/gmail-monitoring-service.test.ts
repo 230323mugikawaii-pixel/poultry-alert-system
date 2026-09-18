@@ -45,7 +45,10 @@ describe("Gmail watch reconciliation", () => {
       failed: 0
     });
     expect(fixture.repository.connection.providerCursor).toBe("100");
+    expect(fixture.repository.connection.monitoringStartedAt).toEqual(now);
 
+    const monitoringStartedAt =
+      fixture.repository.connection.monitoringStartedAt;
     fixture.repository.connection = {
       ...fixture.repository.connection,
       providerSubscriptionExpiresAt: new Date(0)
@@ -54,6 +57,9 @@ describe("Gmail watch reconciliation", () => {
     expect(fixture.repository.connection.providerCursor).toBe("100");
     expect(fixture.repository.connection.providerSubscriptionExpiresAt).toEqual(
       watch("999").expiration
+    );
+    expect(fixture.repository.connection.monitoringStartedAt).toEqual(
+      monitoringStartedAt
     );
   });
 
@@ -192,7 +198,8 @@ describe("Gmail history processing", () => {
     const fixture = createFixture({ cursor: "1" });
     fixture.repository.connection = {
       ...fixture.repository.connection,
-      lastSyncAt: new Date(now.getTime() - 60 * 60 * 1_000)
+      lastSyncAt: new Date(now.getTime() - 60 * 60 * 1_000),
+      monitoringStartedAt: new Date(now.getTime() - 72 * 60 * 60 * 1_000)
     };
     fixture.api.historyErrors.push(
       new GmailApiRequestError(404, "GMAIL_HTTP_404")
@@ -217,6 +224,57 @@ describe("Gmail history processing", () => {
     expect(fixture.api.recentAfter).toEqual([
       new Date(now.getTime() - 65 * 60 * 1_000)
     ]);
+  });
+
+  it("never recovers messages received before the current monitoring interval", async () => {
+    const fixture = createFixture({ cursor: "1" });
+    const monitoringStartedAt = new Date(now.getTime() - 10 * 60 * 1_000);
+    fixture.repository.connection = {
+      ...fixture.repository.connection,
+      lastSyncAt: new Date(now.getTime() - 2 * 60 * 60 * 1_000),
+      monitoringStartedAt
+    };
+    fixture.api.historyErrors.push(
+      new GmailApiRequestError(404, "GMAIL_HTTP_404")
+    );
+    fixture.api.watchResults.push(watch("500"));
+    fixture.api.recentPages.push({
+      messageIds: ["paused-message", "resumed-message"],
+      nextPageToken: null
+    });
+    fixture.api.messages.set(
+      "paused-message",
+      message(
+        "paused-message",
+        "停電",
+        "",
+        ["INBOX"],
+        new Date(monitoringStartedAt.getTime() - 1).getTime().toString()
+      )
+    );
+    fixture.api.messages.set(
+      "resumed-message",
+      message(
+        "resumed-message",
+        "停電",
+        "",
+        ["INBOX"],
+        new Date(monitoringStartedAt.getTime() + 1).getTime().toString()
+      )
+    );
+
+    await fixture.service.processPushNotification({
+      emailAddress: "monitor@example.com",
+      historyId: "450"
+    });
+
+    expect(fixture.api.recentAfter).toEqual([monitoringStartedAt]);
+    expect(
+      fixture.alerts.created.map(({ sourceEventId }) => sourceEventId)
+    ).toEqual(["resumed-message"]);
+    expect(fixture.logs).toContainEqual({
+      event: "gmail_message_outside_monitoring_window"
+    });
   });
 
   it("ignores sent, draft, spam, and trash messages even if a keyword matches", async () => {
@@ -331,6 +389,7 @@ class MemoryGmailMonitoringRepository implements GmailMonitoringRepository {
       email: "monitor@example.com",
       keywords: ["停電", "Call Now", "東京 電力"],
       providerCursor: cursor,
+      monitoringStartedAt: null,
       lastSyncAt: null,
       providerSubscriptionExpiresAt: null,
       refreshToken: {
@@ -373,10 +432,15 @@ class MemoryGmailMonitoringRepository implements GmailMonitoringRepository {
   public async recordWatch(input: {
     readonly initialCursor: string;
     readonly expiration: Date;
+    readonly renewedAt: Date;
   }) {
+    const started = this.connection.providerCursor === null;
     this.connection = {
       ...this.connection,
       providerCursor: this.connection.providerCursor ?? input.initialCursor,
+      monitoringStartedAt: started
+        ? input.renewedAt
+        : this.connection.monitoringStartedAt,
       providerSubscriptionExpiresAt: input.expiration
     };
     return true;
@@ -390,6 +454,10 @@ class MemoryGmailMonitoringRepository implements GmailMonitoringRepository {
         this.connection.providerCursor,
         input.cursor
       ),
+      monitoringStartedAt:
+        this.connection.monitoringStartedAt ??
+        input.watch?.renewedAt ??
+        input.now,
       lastSyncAt: input.now,
       providerSubscriptionExpiresAt:
         input.watch?.expiration ?? this.connection.providerSubscriptionExpiresAt
@@ -552,11 +620,12 @@ function message(
   id: string,
   subject: string,
   body: string,
-  labelIds: readonly string[] = ["INBOX"]
+  labelIds: readonly string[] = ["INBOX"],
+  internalDate = now.getTime().toString()
 ): GmailMessage {
   return {
     id,
-    internalDate: "1788436800000",
+    internalDate,
     labelIds,
     snippet: "",
     payload: {

@@ -164,6 +164,13 @@ const mailConnectionKeywordBackfillMigration = readFileSync(
   ),
   "utf8"
 );
+const gmailMonitoringResumeBoundaryMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/20260913000100_gmail_monitoring_resume_boundary/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 const migrationBeforeGmailPush =
   baseMigration +
   gmailMigration +
@@ -185,9 +192,12 @@ const migrationBeforeSingleActiveGoogle =
   migrationBeforeGmailPush + gmailPushMonitoringMigration;
 const migrationBeforeMailConnectionKeywordBackfill =
   migrationBeforeSingleActiveGoogle + singleActiveGoogleMonitoringMigration;
-const migration =
+const migrationBeforeGmailMonitoringResumeBoundary =
   migrationBeforeMailConnectionKeywordBackfill +
   mailConnectionKeywordBackfillMigration;
+const migration =
+  migrationBeforeGmailMonitoringResumeBoundary +
+  gmailMonitoringResumeBoundaryMigration;
 
 const databases: PGlite[] = [];
 
@@ -342,6 +352,67 @@ describe("PostgreSQL migrations", () => {
     expect(teamKeywords.rows).toEqual([
       { keyword: "停電", sortOrder: 0 },
       { keyword: "通電", sortOrder: 1 }
+    ]);
+  });
+
+  it("backfills only the current monitoring interval for active Google connections", async () => {
+    const database = new PGlite();
+    databases.push(database);
+    await database.exec(migrationBeforeGmailMonitoringResumeBoundary);
+    await database.exec(`
+      INSERT INTO users (id, email, "updatedAt") VALUES
+        ('00000000-0000-0000-0000-000000000040', 'boundary-owner@example.com', now());
+      INSERT INTO teams (id, "publicCode", "updatedAt") VALUES
+        ('10000000-0000-0000-0000-000000000040', '882731', now());
+      INSERT INTO mail_authorizations (
+        id, "userId", provider, "providerSubject", email, "updatedAt"
+      ) VALUES
+        ('30000000-0000-0000-0000-000000000040',
+         '00000000-0000-0000-0000-000000000040',
+         'GOOGLE', 'boundary-subject-active', 'active-boundary@example.com', now()),
+        ('30000000-0000-0000-0000-000000000041',
+         '00000000-0000-0000-0000-000000000040',
+         'GOOGLE', 'boundary-subject-paused', 'paused-boundary@example.com', now());
+      INSERT INTO mail_connections (
+        id, "teamId", "mailAuthorizationId", provider, status, "createdAt", "updatedAt"
+      ) VALUES
+        ('40000000-0000-0000-0000-000000000040',
+         '10000000-0000-0000-0000-000000000040',
+         '30000000-0000-0000-0000-000000000040', 'GOOGLE', 'ACTIVE',
+         '2026-09-01T00:00:00.000Z', now()),
+        ('40000000-0000-0000-0000-000000000041',
+         '10000000-0000-0000-0000-000000000040',
+         '30000000-0000-0000-0000-000000000041', 'GOOGLE', 'PAUSED',
+         '2026-09-01T00:00:00.000Z', now());
+      INSERT INTO audit_events (
+        id, "teamId", action, "targetType", "targetId", "createdAt"
+      ) VALUES (
+        '50000000-0000-0000-0000-000000000040',
+        '10000000-0000-0000-0000-000000000040',
+        'MAIL_MONITORING_RESUMED', 'MailConnection',
+        '40000000-0000-0000-0000-000000000040',
+        '2026-09-13T01:02:03.000Z'
+      );
+    `);
+
+    await database.exec(gmailMonitoringResumeBoundaryMigration);
+    const connections = await database.query<{
+      id: string;
+      monitoringStartedAt: Date | null;
+    }>(`
+      SELECT id, "monitoringStartedAt"
+      FROM mail_connections
+      ORDER BY id;
+    `);
+    expect(connections.rows).toEqual([
+      {
+        id: "40000000-0000-0000-0000-000000000040",
+        monitoringStartedAt: new Date("2026-09-13T01:02:03.000Z")
+      },
+      {
+        id: "40000000-0000-0000-0000-000000000041",
+        monitoringStartedAt: null
+      }
     ]);
   });
 
@@ -505,12 +576,14 @@ describe("PostgreSQL migrations", () => {
         AND column_name IN (
           'providerSubscriptionExpiresAt',
           'providerSubscriptionRenewedAt',
+          'monitoringStartedAt',
           'syncLeaseToken',
           'syncLeaseExpiresAt'
         )
       ORDER BY column_name;
     `);
     expect(gmailMonitoringColumns.rows).toEqual([
+      { column_name: "monitoringStartedAt" },
       { column_name: "providerSubscriptionExpiresAt" },
       { column_name: "providerSubscriptionRenewedAt" },
       { column_name: "syncLeaseExpiresAt" },

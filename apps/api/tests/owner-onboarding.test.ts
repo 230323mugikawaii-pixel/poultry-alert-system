@@ -223,9 +223,41 @@ describe("owner monitoring onboarding", () => {
 
     expect(revokedTokens).toEqual([]);
   });
+
+  it("does not revoke a superseded Google token after replacing it", async () => {
+    const revokedTokens: string[] = [];
+    const fixture = createFixture(revokedTokens, true);
+    const firstRequest = await fixture.service.createAuthorizationRequest({
+      provider: "GOOGLE",
+      authenticatedUserId: null
+    });
+    const first = await fixture.service.completeAuthorization({
+      provider: "GOOGLE",
+      state: firstRequest.state,
+      code: "valid-google-code",
+      authenticatedUserId: null,
+      clientContext: {}
+    });
+    const secondRequest = await fixture.service.createAuthorizationRequest({
+      provider: "GOOGLE",
+      authenticatedUserId: first.login?.user.id ?? null
+    });
+    await fixture.service.completeAuthorization({
+      provider: "GOOGLE",
+      state: secondRequest.state,
+      code: "valid-google-code",
+      authenticatedUserId: first.login?.user.id ?? null,
+      clientContext: {}
+    });
+
+    expect(revokedTokens).toEqual([]);
+  });
 });
 
-function createFixture(revokedTokens: string[] = []) {
+function createFixture(
+  revokedTokens: string[] = [],
+  rotateGoogleRefreshToken = false
+) {
   const authRepository = new MemoryAuthRepository();
   const repository = new MemoryOwnerOnboardingRepository();
   const teamRepository = new MemoryTeamRepository();
@@ -241,7 +273,12 @@ function createFixture(revokedTokens: string[] = []) {
     now: () => now
   });
   const providerAdapters = [
-    createProvider("GOOGLE", "owner@example.com", revokedTokens),
+    createProvider(
+      "GOOGLE",
+      "owner@example.com",
+      revokedTokens,
+      rotateGoogleRefreshToken
+    ),
     createProvider("MICROSOFT", "owner@company.example", revokedTokens)
   ];
   return {
@@ -270,8 +307,10 @@ function createFixture(revokedTokens: string[] = []) {
 function createProvider(
   provider: MailProviderId,
   email: string,
-  revokedTokens: string[]
+  revokedTokens: string[],
+  rotateRefreshToken = false
 ): MailProviderAdapter {
+  let exchangeCount = 0;
   return {
     provider,
     createAuthorizationUrl: ({ state, codeChallenge, nonce }) => {
@@ -283,12 +322,15 @@ function createProvider(
     },
     exchangeCode: async ({ code }): Promise<MailOAuthGrant> => {
       if (!code.startsWith("valid-")) throw new Error("invalid_code");
+      exchangeCount += 1;
       return {
         provider,
         subject: `${provider.toLowerCase()}-subject`,
         email,
         emailVerified: true,
-        refreshToken: `refresh-${provider}`,
+        refreshToken: `refresh-${provider}${
+          rotateRefreshToken ? `-${exchangeCount}` : ""
+        }`,
         grantedScopes:
           provider === "GOOGLE"
             ? ["openid", "email", "gmail.readonly"]

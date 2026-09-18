@@ -14,7 +14,7 @@
   <title>Call Now</title>
 
   <!-- デザイン用CSS -->
-    <link rel="stylesheet" href="css/style.css?v=32"/>
+    <link rel="stylesheet" href="css/style.css?v=34"/>
 </head>
 
 <body>
@@ -175,7 +175,7 @@
           onclick="toggleAlarmSoundPreference('NOTIFICATION_MEMBER')"
         >
           <span aria-hidden="true">🔊</span>
-          <span class="sound-toggle-label">通知音 ON</span>
+          <span class="sound-toggle-label">通知音 状態確認中</span>
         </button>
         <button
           id="notificationMemberNotificationCenterButton"
@@ -1118,7 +1118,7 @@
           onclick="toggleAlarmSoundPreference('OWNER')"
         >
           <span aria-hidden="true">🔊</span>
-          <span class="sound-toggle-label">通知音 ON</span>
+          <span class="sound-toggle-label">通知音 状態確認中</span>
         </button>
         <button
           id="notificationCenterButton"
@@ -1842,8 +1842,12 @@
 
     <script src="js/keyword-policy.js?v=2"></script>
     <script src="js/monitoring-keyword-policy.js?v=1"></script>
+    <script src="js/mail-connection-refresh.js?v=1"></script>
+    <script src="js/notification-test-execution.js?v=1"></script>
+    <script src="js/alarm-audio.js?v=3"></script>
+    <script src="js/alert-tab-coordination.js?v=1"></script>
     <script src="js/owner-onboarding-routing.js?v=2"></script>
-    <script src="js/app.js?v=34"></script>
+    <script src="js/app.js?v=41"></script>
 <script>
   window.openKeywordEdit = function () {
     setupMode = "edit";

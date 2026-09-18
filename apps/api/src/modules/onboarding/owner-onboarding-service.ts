@@ -324,6 +324,13 @@ export class OwnerOnboardingService {
       if (provider === activeProvider && plaintext === activeRefreshToken) {
         return;
       }
+      if (provider === "GOOGLE" && activeProvider === "GOOGLE") {
+        // Google revocation invalidates the user's project-wide OAuth grant,
+        // including a replacement refresh token issued by the same project.
+        // The encrypted database value has already been replaced, so retain
+        // the provider grant until the user explicitly disconnects it.
+        return;
+      }
       await this.requireProvider(provider).revokeAuthorization(plaintext);
     } catch {
       // Local state is already unusable. Provider revocation is best-effort.
