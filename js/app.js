@@ -169,13 +169,16 @@ const notificationTestExecutionPolicy =
   window.CallNowNotificationTestExecution;
 const alarmAudioPolicy =
   window.CallNowAlarmAudio;
+const alertTabCoordinationPolicy =
+  window.CallNowAlertTabCoordination;
 
 if (
   !keywordPolicy ||
   !monitoringKeywordPolicy ||
   !mailConnectionRefreshPolicy ||
   !notificationTestExecutionPolicy ||
-  !alarmAudioPolicy
+  !alarmAudioPolicy ||
+  !alertTabCoordinationPolicy
 ) {
   throw new Error(
     "アプリ機能を読み込めませんでした。"
@@ -204,8 +207,9 @@ const TEST_DETECTION_TIMEOUT_MS =
 const ALERT_SOUND_SETTING_KEY =
   "callNowAlertSoundSetting";
 const ALERT_SOUND_SETTING_VERSION = 1;
-const NOTIFIED_ALERT_IDS_KEY =
+const LEGACY_NOTIFIED_ALERT_IDS_KEY =
   "callNowNotifiedAlertIds";
+const ALERT_PAGE_STARTED_AT = Date.now();
 const ALERT_FALLBACK_DELAY_MS = 4000;
 const ALERT_FALLBACK_INTERVAL_MS = 4000;
 const ALERT_LONG_DISCONNECT_MS = 12000;
@@ -215,7 +219,33 @@ const NOTIFICATION_TEST_SYNC_DEBOUNCE_MS = 150;
 const NOTIFICATION_TEST_PRESENTATION_TIMEOUT_MS = 10000;
 
 const APP_BUILD_VERSION =
-  "2026-09-18.1";
+  "2026-09-18.2";
+
+const alertTabCoordinator =
+  alertTabCoordinationPolicy.createCoordinator({
+    storage: (() => {
+      try {
+        return window.localStorage;
+      } catch {
+        return null;
+      }
+    })(),
+    lockManager: window.navigator?.locks || null,
+    randomUuid:
+      typeof window.crypto?.randomUUID === "function"
+        ? window.crypto.randomUUID.bind(window.crypto)
+        : null,
+    createChannel:
+      typeof window.BroadcastChannel === "function"
+        ? (name) => new BroadcastChannel(name)
+        : null,
+    addStorageListener: (listener) => {
+      window.addEventListener("storage", listener);
+    },
+    removeStorageListener: (listener) => {
+      window.removeEventListener("storage", listener);
+    }
+  });
 
 let alarmAudioContext = null;
 let alarmSoundEnabled =
@@ -315,6 +345,7 @@ const expandedEmergencyAlertIds = {
 };
 const notifiedAlertIds =
   loadNotifiedAlertIds();
+const pendingAlertPresentationIds = new Set();
 let legacyGoogleAccountsFallbackBackup =
   [];
 let contractStorageMigrationPending =
@@ -2180,11 +2211,69 @@ function refreshAlertsForAudience(audience) {
 
 function findNextLocalAlert(alerts) {
   return alerts.find(
-    (alert) =>
-      alert.status === "ACTIVE" &&
-      !alert.readAt &&
-      !notifiedAlertIds.has(alert.id)
+    (alert) => {
+      if (alertTabCoordinator.hasHandled(alert.id)) {
+        notifiedAlertIds.add(alert.id);
+      }
+      return (
+        alertTabCoordinationPolicy.shouldPresentAlert(
+          alert,
+          ALERT_PAGE_STARTED_AT
+        ) &&
+        !notifiedAlertIds.has(alert.id) &&
+        !pendingAlertPresentationIds.has(alert.id)
+      );
+    }
   );
+}
+
+async function coordinateAlertPresentation(
+  alert,
+  audience,
+  presentationContext
+) {
+  pendingAlertPresentationIds.add(alert.id);
+  try {
+    const claimed =
+      await alertTabCoordinator.claimPresentation(alert.id);
+    notifiedAlertIds.add(alert.id);
+    if (!claimed) {
+      recordAlertPresentationEvent(
+        presentationContext,
+        "ANOTHER_TAB_OWNS_PRESENTATION"
+      );
+      return;
+    }
+
+    const latestAlerts =
+      audience === "OWNER"
+        ? ownerAlerts
+        : notificationMemberAlerts;
+    const latest = latestAlerts.find(
+      (candidate) => candidate.id === alert.id
+    );
+    if (
+      !latest ||
+      latest.status !== "ACTIVE" ||
+      latest.readAt ||
+      !alarmSoundEnabled
+    ) {
+      return;
+    }
+
+    showAlarmNotification(
+      latest.matchedKeyword,
+      latest.detectedAt,
+      {
+        ...(presentationContext || {}),
+        alertId: latest.id,
+        audience,
+        kind: latest.kind || "REAL"
+      }
+    );
+  } finally {
+    pendingAlertPresentationIds.delete(alert.id);
+  }
 }
 
 function createAlertPresentationContext(alert, audience, source) {
@@ -2308,13 +2397,14 @@ function applyAlertUpdate(alerts, audience, presentationContext = null) {
     ? alerts.find((alert) => alert.id === presentationContext.alertId)
     : findNextLocalAlert(alerts);
   if (nextAlert) {
-    rememberNotifiedAlert(nextAlert.id);
     if (alarmSoundEnabled) {
-      showAlarmNotification(nextAlert.matchedKeyword, nextAlert.detectedAt, {
-        ...(presentationContext || {}),
-        alertId: nextAlert.id,
+      void coordinateAlertPresentation(
+        nextAlert,
         audience,
-        kind: nextAlert.kind || "REAL"});
+        presentationContext
+      );
+    } else {
+      rememberNotifiedAlert(nextAlert.id, "SILENT");
     }
   }
 }
@@ -7523,29 +7613,49 @@ function saveAlarmSoundPreference(enabled) {
 }
 
 function loadNotifiedAlertIds() {
+  const loaded = new Set(
+    alertTabCoordinator.handledAlertIds()
+  );
   try {
     const saved = JSON.parse(
-      window.sessionStorage.getItem(NOTIFIED_ALERT_IDS_KEY) || "[]"
+      window.sessionStorage.getItem(LEGACY_NOTIFIED_ALERT_IDS_KEY) || "[]"
     );
     if (Array.isArray(saved)) {
-      return new Set(saved.filter((value) => typeof value === "string"));
+      saved
+        .filter((value) => typeof value === "string")
+        .forEach((alertId) => {
+          loaded.add(alertId);
+          alertTabCoordinator.markHandled(
+            alertId,
+            "PRESENTED"
+          );
+        });
     }
   } catch {
-    /* 保存値が壊れている場合は空の履歴から開始する。 */
+    /* 共有履歴を正として継続する。 */
   }
-  return new Set();
+  return loaded;
 }
 
-function rememberNotifiedAlert(alertId) {
+function rememberNotifiedAlert(
+  alertId,
+  state = "PRESENTED"
+) {
   notifiedAlertIds.add(alertId);
-  try {
-    window.sessionStorage.setItem(
-      NOTIFIED_ALERT_IDS_KEY,
-      JSON.stringify(Array.from(notifiedAlertIds).slice(-100))
-    );
-  } catch {
-    /* 通知表示自体は継続する。 */
-  }
+  alertTabCoordinator.markHandled(alertId, state);
+}
+
+function handleExternalAlertPresentation(record) {
+  if (!record?.id) return;
+  notifiedAlertIds.add(record.id);
+  pendingAlertPresentationIds.delete(record.id);
+  if (currentAlarmAlertContext?.alertId !== record.id) return;
+  recordAlertPresentationEvent(
+    currentAlarmAlertContext,
+    "ANOTHER_TAB_HANDLED_ALERT",
+    { handledState: record.state }
+  );
+  closeAlarmNotification();
 }
 
 function initializeAlarmNotification() {
@@ -7585,6 +7695,10 @@ function initializeAlarmNotification() {
     );
   }
 
+  alertTabCoordinator.subscribe(
+    handleExternalAlertPresentation
+  );
+
   window.addEventListener("storage", (event) => {
     if (event.key !== ALERT_SOUND_SETTING_KEY) return;
     alarmSoundEnabled = loadAlarmSoundPreference();
@@ -7611,11 +7725,19 @@ function initializeAlarmNotification() {
     }
   });
 
+  window.addEventListener("pagehide", () => {
+    stopAlarmSound();
+  });
+
   updateAllAlarmSoundControls();
 }
 
 
 function stopCurrentAlarmLocally() {
+  const alertId = currentAlarmAlertContext?.alertId;
+  if (alertId) {
+    rememberNotifiedAlert(alertId, "STOPPED");
+  }
   closeAlarmNotification();
 }
 

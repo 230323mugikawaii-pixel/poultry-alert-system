@@ -64,6 +64,10 @@ test("local alarm stop is the only alarm modal action", () => {
   )?.[0];
   assert.ok(localStopFunction, "local alarm stop handler should be present");
   assert.match(localStopFunction, /closeAlarmNotification\(\)/);
+  assert.match(
+    localStopFunction,
+    /rememberNotifiedAlert\(alertId,\s*"STOPPED"\)/,
+  );
   assert.doesNotMatch(
     localStopFunction,
     /acknowledgeAlert|resolveAlert|fetch\(/,
@@ -115,8 +119,11 @@ test("sound-off alerts update the bell and badge without opening the alarm", () 
   assert.match(updateFunction, /renderEmergencyNotifications/);
   assert.match(updateFunction, /renderNotificationBadge/);
   assert.match(updateFunction, /if \(alarmSoundEnabled\)/);
-  assert.match(updateFunction, /showAlarmNotification/);
-  assert.match(updateFunction, /rememberNotifiedAlert\(nextAlert\.id\)/);
+  assert.match(updateFunction, /coordinateAlertPresentation/);
+  assert.match(
+    updateFunction,
+    /rememberNotifiedAlert\(nextAlert\.id, "SILENT"\)/,
+  );
   assert.match(
     updateFunction,
     /currentAlarmAlertContext\?\.audience === audience && !current/,
@@ -184,10 +191,40 @@ test("SSE reconnects with list refresh, fallback polling, and alert-id deduplica
   assert.match(appSource, /ALERT_FALLBACK_INTERVAL_MS/);
   assert.match(appSource, /stopAlertFallbackPolling/);
   assert.match(appSource, /refreshAlertsForAudience/);
-  assert.match(appSource, /rememberNotifiedAlert\(nextAlert\.id\)/);
-  assert.match(appSource, /window\.sessionStorage\.setItem/);
+  assert.match(appSource, /claimPresentation\(alert\.id\)/);
+  assert.doesNotMatch(appSource, /window\.sessionStorage\.setItem/);
   assert.match(appSource, /stream-error/);
   assert.match(appSource, /handleAlertSessionEnded/);
+});
+
+test("one browser coordinates alert playback across tabs", () => {
+  assert.match(
+    htmlSource,
+    /js\/alert-tab-coordination\.js\?v=1/,
+  );
+  assert.match(appSource, /CallNowAlertTabCoordination/);
+  assert.match(appSource, /alertTabCoordinator\.claimPresentation/);
+  assert.match(appSource, /pendingAlertPresentationIds/);
+  assert.match(appSource, /handleExternalAlertPresentation/);
+  assert.match(appSource, /ANOTHER_TAB_OWNS_PRESENTATION/);
+  assert.match(appSource, /ANOTHER_TAB_HANDLED_ALERT/);
+  assert.match(appSource, /window\.localStorage/);
+  assert.match(appSource, /window\.navigator\?\.locks/);
+  assert.match(appSource, /new BroadcastChannel\(name\)/);
+  assert.doesNotMatch(
+    appSource,
+    /sessionStorage\.setItem\([^)]*callNowNotifiedAlertIds/,
+  );
+});
+
+test("startup eligibility keeps old tests quiet and unseen real alerts eligible", () => {
+  assert.match(appSource, /ALERT_PAGE_STARTED_AT/);
+  assert.match(
+    appSource,
+    /alertTabCoordinationPolicy\.shouldPresentAlert/,
+  );
+  assert.match(appSource, /LEGACY_NOTIFIED_ALERT_IDS_KEY/);
+  assert.match(appSource, /handledAlertIds\(\)/);
 });
 
 test("notification details are data-minimized without shared response state", () => {
