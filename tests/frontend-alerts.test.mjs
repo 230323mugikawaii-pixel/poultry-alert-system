@@ -310,8 +310,9 @@ test("notification tests distinguish rate limits and audio outcomes", () => {
   assert.match(appSource, /formatNotificationTestRetryAt/);
   assert.match(
     appSource,
-    /通知テストは\$\{subject\}から\$\{windowMinutes\}分間に\$\{limit\}回まで/,
+    /テスト回数の上限に達しました。\$\{retryDescription\}/,
   );
+  assert.match(appSource, /details\.limit \|\| 5/);
   assert.match(appSource, /PLAYBACK_REQUESTED/);
   assert.match(appSource, /PLAYBACK_BLOCKED/);
   assert.match(appSource, /SOUND_DISABLED/);
@@ -326,7 +327,7 @@ test("notification tests distinguish rate limits and audio outcomes", () => {
 });
 
 test("owner and participant screens provide persistent sound controls", () => {
-  assert.match(htmlSource, /js\/alarm-audio\.js\?v=1/);
+  assert.match(htmlSource, /js\/alarm-audio\.js\?v=2/);
   assert.match(htmlSource, /id="ownerEnableAudioButton"/);
   assert.match(htmlSource, /id="notificationMemberEnableAudioButton"/);
   assert.match(htmlSource, /id="ownerSoundToggleButton"/);
@@ -366,12 +367,50 @@ test("alarm modal reports rendering separately from audibility", () => {
   );
   assert.match(
     appSource,
-    /通知音の再生処理を確認しました。実際に音が聞こえることを確認してください。/,
+    /通知音を再生しています。「この端末の通知音を停止」を押すまで繰り返します。/,
   );
   assert.match(appSource, /setAlarmModalSoundStatus/);
   assert.match(appSource, /showAlarmAudioFallback\(failure/);
   assert.match(appSource, /tone\.stop\(\)/);
   assert.match(cssSource, /alarm-sound-status\[data-state="playing"\]/);
+});
+
+test("alarm reaches PLAYING once and keeps the status stable across repeats", () => {
+  const patternFunction = appSource.match(
+    /async function playAlarmPattern\(generation\) \{[\s\S]*?\n\}\n\n\nasync function startAlarmSound/,
+  )?.[0];
+  assert.ok(patternFunction, "alarm pattern player should be present");
+  assert.doesNotMatch(patternFunction, /"STARTING"/);
+  assert.doesNotMatch(
+    patternFunction,
+    /通知音の再生を開始しています。/,
+  );
+  assert.match(patternFunction, /"PATTERN_COMPLETED"/);
+  assert.match(
+    patternFunction,
+    /previousPlaybackState !== "PLAYING"/,
+  );
+  assert.match(
+    patternFunction,
+    /通知音を再生しています。「この端末の通知音を停止」を押すまで繰り返します。/,
+  );
+});
+
+test("visible alarm is opened and painted before sound is requested", () => {
+  const showFunction = appSource.match(
+    /function showAlarmNotification\([\s\S]*?\n\}\n\n\nfunction closeAlarmNotification/,
+  )?.[0];
+  assert.ok(showFunction, "alarm modal renderer should be present");
+  const openPosition = showFunction.indexOf('"MODAL_OPEN"');
+  const startPosition = showFunction.indexOf(
+    "startAlarmAfterModalPresentation",
+  );
+  assert.ok(openPosition >= 0);
+  assert.ok(startPosition > openPosition);
+  assert.match(appSource, /waitForModalPaintBoundary/);
+  assert.match(appSource, /"MODAL_PAINT_FRAME"/);
+  assert.match(appSource, /"AUDIO_START_REQUESTED"/);
+  assert.match(appSource, /"FIRST_AUDIO_PATTERN_SCHEDULED"/);
 });
 
 test("local stop invalidates every pending alarm repeat", () => {

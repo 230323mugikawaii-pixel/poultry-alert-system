@@ -61,7 +61,7 @@ test("uses the server retry duration and unlocks without resetting counters", ()
   controller.rateLimit(token, {
     retryAt: "2026-09-16T00:10:00.000Z",
     retryAfterSeconds: 600,
-    rateLimit: { limit: 3, windowMinutes: 10 },
+    rateLimit: { limit: 5, windowMinutes: 10 },
   });
 
   assert.deepEqual(
@@ -78,4 +78,22 @@ test("uses the server retry duration and unlocks without resetting counters", ()
   assert.equal(controller.refreshRateLimit(), true);
   assert.equal(controller.getView().blocked, false);
   assert.equal(controller.getState().message, "通知テストを再実行できます。");
+});
+
+test("uses the server retry timestamp when Retry-After is unavailable", () => {
+  let now = Date.parse("2026-09-16T00:00:00.000Z");
+  const controller = notificationTestExecution.createController({
+    now: () => now,
+  });
+  const token = controller.begin("停電");
+  controller.rateLimit(token, {
+    retryAt: "2026-09-16T00:10:00.000Z",
+    retryAfterSeconds: 0,
+    rateLimit: { limit: 5, windowMinutes: 10 },
+  });
+
+  assert.equal(controller.getView().remainingSeconds, 600);
+  now += 600_000;
+  assert.equal(controller.refreshRateLimit(), true);
+  assert.equal(controller.getView().blocked, false);
 });

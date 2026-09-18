@@ -122,13 +122,21 @@
         const seconds = Number.isFinite(retryAfterSeconds)
           ? Math.max(0, Math.ceil(retryAfterSeconds))
           : 0;
+        const retryAtMilliseconds = Date.parse(retryAt || "");
+        const retryDeadlineAt =
+          seconds > 0
+            ? now() + seconds * 1000
+            : Number.isFinite(retryAtMilliseconds) &&
+                retryAtMilliseconds > now()
+              ? retryAtMilliseconds
+              : null;
         publish({
           ...state,
           phase: "RATE_LIMITED",
           message: "",
           error,
           retryAt,
-          retryDeadlineAt: seconds > 0 ? now() + seconds * 1000 : null,
+          retryDeadlineAt,
           rateLimit,
         });
         return true;

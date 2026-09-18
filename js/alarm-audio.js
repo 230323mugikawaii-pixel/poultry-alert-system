@@ -255,12 +255,40 @@
       return true;
     }
 
+    function transitionPlaybackState(currentState, event) {
+      if (event === "INITIAL_START") return "STARTING";
+      if (event === "PATTERN_COMPLETED") {
+        return currentState === "STARTING" || currentState === "PLAYING"
+          ? "PLAYING"
+          : currentState;
+      }
+      if (event === "BLOCK") return "BLOCKED";
+      if (event === "STOP") return "STOPPED";
+      return currentState;
+    }
+
+    function waitForModalPaintBoundary({
+      isVisible,
+      requestFrame,
+    }) {
+      if (!isVisible || typeof requestFrame !== "function") {
+        return Promise.resolve("SKIPPED_BACKGROUND");
+      }
+      return new Promise((resolve) => {
+        requestFrame(() => {
+          requestFrame(() => resolve("PAINT_FRAME"));
+        });
+      });
+    }
+
     return {
       classifyPlaybackError,
       createPlaybackError,
       createTone,
       resumeAudioContext,
+      transitionPlaybackState,
       verifyUserGesturePlayback,
+      waitForModalPaintBoundary,
     };
   },
 );

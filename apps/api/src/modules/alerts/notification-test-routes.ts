@@ -99,9 +99,9 @@ export function createNotificationTestRoutes(
               throttleRule(
                 "notification_test_team",
                 [request.params.teamId],
-                3
+                5
               ),
-              throttleRule("notification_test_owner", [userId], 3),
+              throttleRule("notification_test_owner", [userId], 5),
               throttleRule("notification_test_source", [request.ip], 12)
             ],
             {

@@ -140,7 +140,18 @@ describe("notification test routes", () => {
         },
         payload
       });
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 10; index += 1) {
+      const readExisting = await app.inject({
+        method: "GET",
+        url: `${url}/current`,
+        headers: {
+          cookie: `${environment.COOKIE_NAME}=${owner.sessionToken}`
+        }
+      });
+      expect(readExisting.statusCode, readExisting.body).toBe(200);
+    }
+
+    for (let index = 0; index < 5; index += 1) {
       const response = await start();
       expect(response.statusCode, response.body).toBe(201);
       expect(response.json()).toMatchObject({
@@ -163,7 +174,7 @@ describe("notification test routes", () => {
       error: {
         code: "NOTIFICATION_TEST_RATE_LIMITED",
         details: {
-          limit: 3,
+          limit: 5,
           windowMinutes: 10,
           retryAt: "2026-08-31T01:10:00.000Z",
           retryAfterSeconds: 600

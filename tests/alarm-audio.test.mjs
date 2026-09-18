@@ -133,3 +133,50 @@ test("locally stopping a tone completes it without a later timeout", async () =>
   });
   await new Promise((resolve) => setTimeout(resolve, 20));
 });
+
+test("repeated patterns remain PLAYING after the first completed cycle", () => {
+  let state = alarmAudio.transitionPlaybackState("IDLE", "INITIAL_START");
+  assert.equal(state, "STARTING");
+
+  state = alarmAudio.transitionPlaybackState(state, "PATTERN_COMPLETED");
+  assert.equal(state, "PLAYING");
+
+  for (let cycle = 0; cycle < 10; cycle += 1) {
+    state = alarmAudio.transitionPlaybackState(state, "PATTERN_COMPLETED");
+    assert.equal(state, "PLAYING");
+  }
+
+  state = alarmAudio.transitionPlaybackState(state, "STOP");
+  assert.equal(state, "STOPPED");
+  assert.equal(
+    alarmAudio.transitionPlaybackState(state, "PATTERN_COMPLETED"),
+    "STOPPED",
+  );
+});
+
+test("visible alarm waits for two animation frames before audio", async () => {
+  const frames = [];
+  const pending = alarmAudio.waitForModalPaintBoundary({
+    isVisible: true,
+    requestFrame: (callback) => frames.push(callback),
+  });
+
+  assert.equal(frames.length, 1);
+  frames.shift()();
+  assert.equal(frames.length, 1);
+  frames.shift()();
+  assert.equal(await pending, "PAINT_FRAME");
+});
+
+test("background alarm does not wait for animation frames", async () => {
+  let frameRequests = 0;
+  const result = await alarmAudio.waitForModalPaintBoundary({
+    isVisible: false,
+    requestFrame: () => {
+      frameRequests += 1;
+    },
+  });
+
+  assert.equal(result, "SKIPPED_BACKGROUND");
+  assert.equal(frameRequests, 0);
+});

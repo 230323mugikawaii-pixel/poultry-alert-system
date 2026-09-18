@@ -215,7 +215,7 @@ const NOTIFICATION_TEST_SYNC_DEBOUNCE_MS = 150;
 const NOTIFICATION_TEST_PRESENTATION_TIMEOUT_MS = 10000;
 
 const APP_BUILD_VERSION =
-  "2026-09-17.1";
+  "2026-09-18.1";
 
 let alarmAudioContext = null;
 let alarmSoundEnabled =
@@ -226,6 +226,7 @@ let alarmAudioLastFailure = null;
 let alarmAudioResumeInProgress = false;
 let alarmPlaybackState = "IDLE";
 let alarmPlaybackGeneration = 0;
+let alarmPlaybackCycleCount = 0;
 let alarmRepeatTimer = null;
 let alarmActiveNodes = [];
 let alarmIsActive = false;
@@ -299,6 +300,7 @@ let alertFallbackInterval = null;
 let alertLongDisconnectTimer = null;
 let activeAlertAudience = null;
 let currentAlarmAlertContext = null;
+const alertPresentationTimelines = new Map();
 const notificationSelectionModes = {
   OWNER: false,
   NOTIFICATION_MEMBER: false
@@ -2043,16 +2045,18 @@ async function fetchAlerts(path, audience) {
 async function refreshOwnerAlerts() {
   const alerts = await fetchOwnerAlerts();
   if (!Array.isArray(alerts)) return false;
-  ownerAlerts = alerts;
-  applyAlertUpdate(alerts, "OWNER");
+  applyAlertsForAudience(alerts, "OWNER", "refresh");
   return true;
 }
 
 async function refreshNotificationMemberAlerts() {
   const alerts = await fetchNotificationMemberAlerts();
   if (!Array.isArray(alerts)) return false;
-  notificationMemberAlerts = alerts;
-  applyAlertUpdate(alerts, "NOTIFICATION_MEMBER");
+  applyAlertsForAudience(
+    alerts,
+    "NOTIFICATION_MEMBER",
+    "refresh"
+  );
   return true;
 }
 
@@ -2099,7 +2103,7 @@ function startAlertEventStream(path, audience) {
     try {
       const payload = JSON.parse(event.data);
       const alerts = Array.isArray(payload.alerts) ? payload.alerts : [];
-      applyAlertsForAudience(alerts, audience);
+      applyAlertsForAudience(alerts, audience, "sse");
       setAlertStreamStatus(audience, "接続中", false);
     } catch {
       markAlertStreamDisconnected(audience);
@@ -2174,13 +2178,83 @@ function refreshAlertsForAudience(audience) {
     : refreshNotificationMemberAlerts();
 }
 
-function applyAlertsForAudience(alerts, audience) {
+function findNextLocalAlert(alerts) {
+  return alerts.find(
+    (alert) =>
+      alert.status === "ACTIVE" &&
+      !alert.readAt &&
+      !notifiedAlertIds.has(alert.id)
+  );
+}
+
+function createAlertPresentationContext(alert, audience, source) {
+  const testView = notificationTestExecutionController.getView();
+  const matchingTest =
+    alert.kind === "TEST" &&
+    (testView.alertId === alert.id ||
+      (testView.running && testView.keyword === alert.matchedKeyword));
+  const context = {
+    alertId: alert.id,
+    audience,
+    kind: alert.kind || "REAL",
+    notificationTestId: matchingTest ? testView.testId : null,
+    notificationTestRequestId: matchingTest ? testView.requestId : null,
+    source,
+    startedAt: performance.now()
+  };
+  alertPresentationTimelines.set(alert.id, {
+    startedAt: context.startedAt,
+    events: []
+  });
+  while (alertPresentationTimelines.size > 20) {
+    alertPresentationTimelines.delete(
+      alertPresentationTimelines.keys().next().value
+    );
+  }
+  recordAlertPresentationEvent(context, "CLIENT_ALERT_RECEIVED");
+  return context;
+}
+
+function recordAlertPresentationEvent(context, event, details = {}) {
+  if (!context?.alertId) return;
+  const timeline = alertPresentationTimelines.get(context.alertId);
+  if (!timeline) return;
+  const entry = {
+    event,
+    elapsedMilliseconds: Math.max(
+      0,
+      Math.round((performance.now() - timeline.startedAt) * 10) / 10
+    ),
+    alertId: context.alertId,
+    audience: context.audience,
+    alertKind: context.kind,
+    notificationTestId: context.notificationTestId,
+    notificationTestRequestId: context.notificationTestRequestId,
+    source: context.source,
+    visibility: document.visibilityState,
+    ...details
+  };
+  timeline.events.push(entry);
+  console.info("Alert presentation timeline", entry);
+}
+
+function applyAlertsForAudience(alerts, audience, source = "refresh") {
+  const nextAlert = findNextLocalAlert(alerts);
+  const presentationContext = nextAlert
+    ? createAlertPresentationContext(nextAlert, audience, source)
+    : null;
   if (audience === "OWNER") {
     ownerAlerts = alerts;
   } else {
     notificationMemberAlerts = alerts;
   }
-  applyAlertUpdate(alerts, audience);
+  if (presentationContext) {
+    recordAlertPresentationEvent(
+      presentationContext,
+      "ALERT_STORE_APPLIED"
+    );
+  }
+  applyAlertUpdate(alerts, audience, presentationContext);
 }
 
 function handleAlertSessionEnded(audience) {
@@ -2208,7 +2282,7 @@ function setAlertStreamStatus(audience, text, reconnecting) {
     ?.classList.toggle("reconnecting", reconnecting);
 }
 
-function applyAlertUpdate(alerts, audience) {
+function applyAlertUpdate(alerts, audience, presentationContext = null) {
   pruneNotificationSelection(audience);
   renderEmergencyNotifications(
     audience === "OWNER"
@@ -2218,21 +2292,26 @@ function applyAlertUpdate(alerts, audience) {
     audience
   );
   renderNotificationBadge();
+  if (presentationContext) {
+    recordAlertPresentationEvent(
+      presentationContext,
+      "ALERT_LIST_RENDERED"
+    );
+  }
   const current = currentAlarmAlertContext?.audience === audience
     ? alerts.find((alert) => alert.id === currentAlarmAlertContext.alertId)
     : null;
   if (currentAlarmAlertContext?.audience === audience && !current) {
     closeAlarmNotification();
   }
-  const nextAlert = alerts.find(
-    (alert) =>
-      alert.status === "ACTIVE" &&
-      !alert.readAt &&
-      !notifiedAlertIds.has(alert.id));
+  const nextAlert = presentationContext
+    ? alerts.find((alert) => alert.id === presentationContext.alertId)
+    : findNextLocalAlert(alerts);
   if (nextAlert) {
     rememberNotifiedAlert(nextAlert.id);
     if (alarmSoundEnabled) {
       showAlarmNotification(nextAlert.matchedKeyword, nextAlert.detectedAt, {
+        ...(presentationContext || {}),
         alertId: nextAlert.id,
         audience,
         kind: nextAlert.kind || "REAL"});
@@ -7696,7 +7775,10 @@ async function enableAlarmSoundForCurrentAlert() {
   if (ready && currentAlarmAlertContext) {
     await startAlarmSound();
   } else if (currentAlarmAlertContext) {
-    alarmPlaybackState = "BLOCKED";
+    alarmPlaybackState = alarmAudioPolicy.transitionPlaybackState(
+      alarmPlaybackState,
+      "BLOCK"
+    );
     showAlarmAudioFallback(alarmAudioLastFailure);
   }
 }
@@ -7804,7 +7886,10 @@ function setAlarmModalSoundStatus(message, state) {
 function failActiveAlarmPlayback(error, phase) {
   const failure = recordAlarmAudioFailure(error, phase);
   stopAlarmSound();
-  alarmPlaybackState = "BLOCKED";
+  alarmPlaybackState = alarmAudioPolicy.transitionPlaybackState(
+    alarmPlaybackState,
+    "BLOCK"
+  );
   showAlarmAudioFallback(failure);
 }
 
@@ -7844,12 +7929,6 @@ async function playAlarmPattern(generation) {
       "restartAlarmButton"
     );
 
-  alarmPlaybackState = "STARTING";
-  setAlarmModalSoundStatus(
-    "通知音の再生を開始しています。",
-    "starting"
-  );
-
   if (restartButton) {
     restartButton.classList.add(
       "hidden"
@@ -7858,6 +7937,13 @@ async function playAlarmPattern(generation) {
 
   const startTime =
     context.currentTime + 0.03;
+  if (alarmPlaybackCycleCount === 0) {
+    recordAlertPresentationEvent(
+      currentAlarmAlertContext,
+      "FIRST_AUDIO_PATTERN_SCHEDULED",
+      { firstToneDelayMilliseconds: 30 }
+    );
+  }
   let tones = [];
 
   try {
@@ -7880,14 +7966,29 @@ async function playAlarmPattern(generation) {
       return;
     }
 
-    alarmPlaybackState = "PLAYING";
+    const previousPlaybackState = alarmPlaybackState;
+    alarmPlaybackState = alarmAudioPolicy.transitionPlaybackState(
+      alarmPlaybackState,
+      "PATTERN_COMPLETED"
+    );
+    alarmPlaybackCycleCount += 1;
     alarmAudioVerificationState = "READY";
     alarmAudioLastFailure = null;
     alarmSoundError = "";
-    setAlarmModalSoundStatus(
-      "通知音の再生処理を確認しました。実際に音が聞こえることを確認してください。「この端末の通知音を停止」を押すまで繰り返します。",
-      "playing"
-    );
+    if (
+      previousPlaybackState !== "PLAYING" &&
+      alarmPlaybackState === "PLAYING"
+    ) {
+      setAlarmModalSoundStatus(
+        "通知音を再生しています。「この端末の通知音を停止」を押すまで繰り返します。",
+        "playing"
+      );
+      recordAlertPresentationEvent(
+        currentAlarmAlertContext,
+        "PLAYBACK_STATE_PLAYING",
+        { playbackCycle: alarmPlaybackCycleCount }
+      );
+    }
     updateAllAlarmSoundControls();
     alarmRepeatTimer = window.setTimeout(
       () => {
@@ -7917,11 +8018,19 @@ async function startAlarmSound() {
     return;
   }
   alarmIsActive = true;
-  alarmPlaybackState = "STARTING";
+  alarmPlaybackState = alarmAudioPolicy.transitionPlaybackState(
+    alarmPlaybackState,
+    "INITIAL_START"
+  );
+  alarmPlaybackCycleCount = 0;
   const generation = alarmPlaybackGeneration;
   setAlarmModalSoundStatus(
-    "通知音の再生を準備しています。",
+    "通知音の再生を開始しています。",
     "starting"
+  );
+  recordAlertPresentationEvent(
+    currentAlarmAlertContext,
+    "AUDIO_START_REQUESTED"
   );
 
   let context = null;
@@ -8004,7 +8113,11 @@ function updateAlarmModalSoundStatus() {
 function stopAlarmSound() {
   alarmPlaybackGeneration += 1;
   alarmIsActive = false;
-  alarmPlaybackState = "STOPPED";
+  alarmPlaybackState = alarmAudioPolicy.transitionPlaybackState(
+    alarmPlaybackState,
+    "STOP"
+  );
+  alarmPlaybackCycleCount = 0;
 
   if (alarmRepeatTimer) {
     window.clearTimeout(
@@ -8021,6 +8134,51 @@ function stopAlarmSound() {
   );
 
   alarmActiveNodes = [];
+}
+
+
+async function waitForAlarmModalPaint(context) {
+  let timeoutId = null;
+  const timeout = new Promise((resolve) => {
+    timeoutId = window.setTimeout(
+      () => resolve("PAINT_TIMEOUT"),
+      150
+    );
+  });
+  try {
+    const result = await Promise.race([
+      alarmAudioPolicy.waitForModalPaintBoundary({
+        isVisible: document.visibilityState === "visible",
+        requestFrame: window.requestAnimationFrame?.bind(window)
+      }),
+      timeout
+    ]);
+    recordAlertPresentationEvent(
+      context,
+      result === "PAINT_FRAME"
+        ? "MODAL_PAINT_FRAME"
+        : "MODAL_PAINT_WAIT_SKIPPED",
+      { paintBoundary: result }
+    );
+  } finally {
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId);
+    }
+  }
+}
+
+
+async function startAlarmAfterModalPresentation(context) {
+  await waitForAlarmModalPaint(context);
+  const modal = document.getElementById("alarmModal");
+  if (
+    currentAlarmAlertContext?.alertId !== context?.alertId ||
+    modal?.classList.contains("hidden") ||
+    !alarmSoundEnabled
+  ) {
+    return;
+  }
+  await startAlarmSound();
 }
 
 
@@ -8133,8 +8291,17 @@ function showAlarmNotification(
     );
   }
 
+  recordAlertPresentationEvent(
+    alertContext,
+    "MODAL_DOM_UPDATED"
+  );
+
   modal.classList.remove(
     "hidden"
+  );
+  recordAlertPresentationEvent(
+    alertContext,
+    "MODAL_OPEN"
   );
 
   if (stopButton) {
@@ -8144,7 +8311,7 @@ function showAlarmNotification(
   }
 
   if (alarmSoundEnabled) {
-    void startAlarmSound();
+    void startAlarmAfterModalPresentation(alertContext);
   } else {
     updateAlarmModalSoundStatus();
   }
@@ -8152,6 +8319,11 @@ function showAlarmNotification(
 
 
 function closeAlarmNotification() {
+  recordAlertPresentationEvent(
+    currentAlarmAlertContext,
+    "LOCAL_AUDIO_STOPPED",
+    { playbackState: alarmPlaybackState }
+  );
   stopAlarmSound();
 
   const modal =
@@ -8850,7 +9022,7 @@ function notificationTestRateLimitDetails(error) {
     ),
     rateLimit: {
       scope: details.scope || null,
-      limit: Number(details.limit || 3),
+      limit: Number(details.limit || 5),
       windowMinutes: Number(details.windowMinutes || 10)
     },
     error: error instanceof Error ? error.message : ""
@@ -8862,7 +9034,7 @@ function notificationTestRateLimitMessage({
   retryAfterSeconds,
   rateLimit
 }) {
-  const limit = Number(rateLimit?.limit || 3);
+  const limit = Number(rateLimit?.limit || 5);
   const windowMinutes = Number(
     rateLimit?.windowMinutes || 10
   );
@@ -8872,13 +9044,12 @@ function notificationTestRateLimitMessage({
     rateLimit?.scope === "notification_test_source"
       ? "同じ通信元"
       : "同じ契約または管理者";
-  const retryDescription = retryTime
-    ? `${retryTime}以降にもう一度お試しください。`
-    : "しばらく待ってからもう一度お試しください。";
-  const countdown = remaining > 0
-    ? `（あと${formatNotificationTestDuration(remaining)}）`
-    : "";
-  return `通知テストは${subject}から${windowMinutes}分間に${limit}回までです。${retryDescription}${countdown}`;
+  const retryDescription = remaining > 0
+    ? `あと${formatNotificationTestDuration(remaining)}で再実行できます。`
+    : retryTime
+      ? `${retryTime}以降に再実行できます。`
+      : "サーバーの制限が解除されてから再実行できます。";
+  return `テスト回数の上限に達しました。${retryDescription}（${subject}は${windowMinutes}分間に${limit}回まで）`;
 }
 
 function formatNotificationTestRetryAt(value) {
