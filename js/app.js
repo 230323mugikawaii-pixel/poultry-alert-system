@@ -169,6 +169,10 @@ const notificationTestExecutionPolicy =
   window.CallNowNotificationTestExecution;
 const alarmAudioPolicy =
   window.CallNowAlarmAudio;
+const htmlAlarmAudioPolicy =
+  window.CallNowHtmlAlarmAudio;
+// Keep Web Audio intact for comparison; HTML Audio is the current candidate.
+const ALARM_AUDIO_BACKEND = "html";
 const alertTabCoordinationPolicy =
   window.CallNowAlertTabCoordination;
 
@@ -178,6 +182,7 @@ if (
   !mailConnectionRefreshPolicy ||
   !notificationTestExecutionPolicy ||
   !alarmAudioPolicy ||
+  !htmlAlarmAudioPolicy ||
   !alertTabCoordinationPolicy
 ) {
   throw new Error(
@@ -219,7 +224,7 @@ const NOTIFICATION_TEST_SYNC_DEBOUNCE_MS = 150;
 const NOTIFICATION_TEST_PRESENTATION_TIMEOUT_MS = 10000;
 
 const APP_BUILD_VERSION =
-  "2026-09-18.2";
+  "2026-09-20.6";
 
 const alertTabCoordinator =
   alertTabCoordinationPolicy.createCoordinator({
@@ -248,6 +253,8 @@ const alertTabCoordinator =
   });
 
 let alarmAudioContext = null;
+let alarmHtmlAudio = null;
+let alarmEnableAfterPlayback = false;
 let alarmSoundEnabled =
   loadAlarmSoundPreference();
 let alarmSoundError = "";
@@ -7814,10 +7821,20 @@ function getAlarmAudioContext() {
 }
 
 
+function getHtmlAlarmAudio() {
+  if (!alarmHtmlAudio) {
+    alarmHtmlAudio = htmlAlarmAudioPolicy.createPlayer();
+  }
+  return alarmHtmlAudio;
+}
+
+
 function classifyAlarmAudioFailure(error) {
   return alarmAudioPolicy.classifyPlaybackError(
     error,
-    alarmAudioContext?.state || "unavailable"
+    ALARM_AUDIO_BACKEND === "html"
+      ? "html-audio"
+      : alarmAudioContext?.state || "unavailable"
   );
 }
 
@@ -7830,7 +7847,8 @@ function recordAlarmAudioFailure(error, phase) {
   console.warn("Alarm audio playback failed", {
     code: failure.code,
     contextState: failure.contextState,
-    phase
+    phase,
+    detail: error?.playbackPhase || "unspecified"
   });
   updateAllAlarmSoundControls();
   return failure;
@@ -7844,8 +7862,10 @@ async function unlockAlarmAudio({
   const generation = alarmPlaybackGeneration;
   const signal = alarmAudioAbortController.signal;
   try {
-    const context = getAlarmAudioContext();
-    if (!context) {
+    const context = ALARM_AUDIO_BACKEND === "html"
+      ? null
+      : getAlarmAudioContext();
+    if (ALARM_AUDIO_BACKEND !== "html" && !context) {
       throw new DOMException(
         "Web Audio API is unavailable",
         "NotSupportedError"
@@ -7855,11 +7875,15 @@ async function unlockAlarmAudio({
     alarmSoundError = "";
     alarmAudioLastFailure = null;
     updateAllAlarmSoundControls();
-    await alarmAudioPolicy.verifyUserGesturePlayback(context, { signal });
+    if (ALARM_AUDIO_BACKEND === "html") {
+      await getHtmlAlarmAudio().playConfirmation({ signal }).completion;
+    } else {
+      await alarmAudioPolicy.verifyUserGesturePlayback(context, { signal });
+    }
     if (!alarmPageActive || generation !== alarmPlaybackGeneration) return false;
     alarmAudioVerificationState = "READY";
     console.info("Alarm audio confirmation completed", {
-      contextState: context.state,
+      contextState: context?.state || "html-audio",
       source
     });
     updateAllAlarmSoundControls();
@@ -7914,6 +7938,12 @@ async function toggleAlarmSoundPreference(audience) {
 
 async function enableAlarmSoundForCurrentAlert() {
   if (!alarmPageActive) return;
+  if (ALARM_AUDIO_BACKEND === "html" && currentAlarmAlertContext) {
+    if (alarmIsActive) return;
+    // Call play() in this click, not after awaiting a separate confirmation.
+    await startAlarmSound({ explicitEnable: true });
+    return;
+  }
   const generation = alarmPlaybackGeneration;
   const audience = currentAlarmAlertContext?.audience || "OWNER";
   const ready = await enableAlarmAudio(audience);
@@ -7935,6 +7965,12 @@ function updateAllAlarmSoundControls() {
 }
 
 function alarmAudioReadiness() {
+  if (ALARM_AUDIO_BACKEND === "html") {
+    if (typeof window.Audio !== "function") return "UNAVAILABLE";
+    return alarmAudioVerificationState === "READY"
+      ? "READY"
+      : "NEEDS_USER_GESTURE";
+  }
   if (!window.AudioContext && !window.webkitAudioContext) {
     return "UNAVAILABLE";
   }
@@ -7985,6 +8021,8 @@ function updateAlarmAudioReadiness(audience) {
     ? "通知音を有効にする"
     : "通知音をONにする";
   button.classList.toggle("hidden", ready || unavailable);
+  button.disabled = alarmAudioVerificationState === "VERIFYING";
+  toggle.disabled = alarmAudioVerificationState === "VERIFYING";
   container?.classList.toggle("ready", ready);
   container?.classList.toggle("off", !alarmSoundEnabled);
   container?.classList.toggle("error", Boolean(alarmSoundError));
@@ -8030,6 +8068,7 @@ function setAlarmModalSoundStatus(message, state) {
 
 
 function failActiveAlarmPlayback(error, phase) {
+  if (alarmEnableAfterPlayback) saveAlarmSoundPreference(false);
   const failure = recordAlarmAudioFailure(error, phase);
   stopAlarmSound();
   alarmPlaybackState = alarmAudioPolicy.transitionPlaybackState(
@@ -8056,12 +8095,13 @@ async function playAlarmPattern(generation) {
     );
   }
 
-  const context =
-    getAlarmAudioContext();
+  const context = ALARM_AUDIO_BACKEND === "html"
+    ? null
+    : getAlarmAudioContext();
 
   if (
-    !context ||
-    context.state !== "running"
+    ALARM_AUDIO_BACKEND !== "html" &&
+    (!context || context.state !== "running")
   ) {
     const error = alarmAudioPolicy.createPlaybackError(
       "AudioContextSuspendedError",
@@ -8083,7 +8123,7 @@ async function playAlarmPattern(generation) {
   }
 
   const startTime =
-    context.currentTime + 0.03;
+    (context?.currentTime || 0) + 0.03;
   if (alarmPlaybackCycleCount === 0) {
     recordAlertPresentationEvent(
       currentAlarmAlertContext,
@@ -8094,16 +8134,32 @@ async function playAlarmPattern(generation) {
   let tones = [];
 
   try {
-    tones = [
-      scheduleAlarmTone(context, startTime, 880, 0.22),
-      scheduleAlarmTone(context, startTime + 0.32, 1175, 0.22),
-      scheduleAlarmTone(context, startTime + 0.64, 880, 0.22)
-    ];
+    tones = ALARM_AUDIO_BACKEND === "html"
+      ? [getHtmlAlarmAudio().playLoop({
+          signal: alarmAudioAbortController.signal,
+          onCycle: () => {
+            if (alarmPageActive && alarmIsActive && generation === alarmPlaybackGeneration) {
+              alarmPlaybackCycleCount += 1;
+            }
+          },
+          onFailure: (error) => {
+            if (alarmPageActive && alarmIsActive && generation === alarmPlaybackGeneration) {
+              failActiveAlarmPlayback(error, "alarm-loop");
+            }
+          }
+        })]
+      : [
+          scheduleAlarmTone(context, startTime, 880, 0.22),
+          scheduleAlarmTone(context, startTime + 0.32, 1175, 0.22),
+          scheduleAlarmTone(context, startTime + 0.64, 880, 0.22)
+        ];
     alarmActiveNodes.push(...tones);
     await Promise.all(tones.map((tone) => tone.completion));
-    alarmActiveNodes = alarmActiveNodes.filter(
-      (node) => !tones.includes(node)
-    );
+    if (ALARM_AUDIO_BACKEND !== "html") {
+      alarmActiveNodes = alarmActiveNodes.filter(
+        (node) => !tones.includes(node)
+      );
+    }
 
     if (
       !alarmPageActive ||
@@ -8120,6 +8176,10 @@ async function playAlarmPattern(generation) {
       "PATTERN_COMPLETED"
     );
     alarmPlaybackCycleCount += 1;
+    if (alarmEnableAfterPlayback) {
+      saveAlarmSoundPreference(true);
+      alarmEnableAfterPlayback = false;
+    }
     alarmAudioVerificationState = "READY";
     alarmAudioLastFailure = null;
     alarmSoundError = "";
@@ -8138,6 +8198,9 @@ async function playAlarmPattern(generation) {
       );
     }
     updateAllAlarmSoundControls();
+    // HTML Audio repeats within its cancellable player after natural ended;
+    // the local WAV includes the full 1.3s period. No second app scheduler.
+    if (ALARM_AUDIO_BACKEND === "html") return;
     alarmRepeatTimer = window.setTimeout(
       () => {
         void playAlarmPattern(generation);
@@ -8159,9 +8222,14 @@ async function playAlarmPattern(generation) {
 }
 
 
-async function startAlarmSound() {
+async function startAlarmSound({ explicitEnable = false } = {}) {
   if (!alarmPageActive) return;
   stopAlarmSound();
+  if (explicitEnable) {
+    alarmEnableAfterPlayback = true;
+    alarmSoundEnabled = true;
+    alarmAudioVerificationState = "VERIFYING";
+  }
   if (!alarmSoundEnabled) {
     updateAlarmModalSoundStatus();
     return;
@@ -8181,6 +8249,11 @@ async function startAlarmSound() {
     currentAlarmAlertContext,
     "AUDIO_START_REQUESTED"
   );
+
+  if (ALARM_AUDIO_BACKEND === "html") {
+    await playAlarmPattern(generation);
+    return;
+  }
 
   let context = null;
   try {
@@ -8227,7 +8300,9 @@ function showAlarmAudioFallback(failure = alarmAudioLastFailure) {
   );
 
   if (restartButton) {
-    restartButton.textContent = "通知音を鳴らす";
+    restartButton.textContent = failure?.code === "PLAYBACK_STALLED"
+      ? "通知音を再試行"
+      : "通知音を鳴らす";
     restartButton.classList.remove(
       "hidden"
     );
@@ -8268,6 +8343,8 @@ function stopAlarmSound() {
   alarmPlaybackGeneration += 1;
   alarmAudioAbortController.abort();
   alarmAudioAbortController = new AbortController();
+  alarmHtmlAudio?.stop();
+  alarmEnableAfterPlayback = false;
   alarmAudioResumeInProgress = false;
   if (alarmAudioVerificationState === "VERIFYING") {
     alarmAudioVerificationState = "UNVERIFIED";
@@ -8294,6 +8371,7 @@ function stopAlarmSound() {
   );
 
   alarmActiveNodes = [];
+  updateAllAlarmSoundControls();
 }
 
 

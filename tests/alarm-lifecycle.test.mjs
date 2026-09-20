@@ -89,6 +89,9 @@ function fixture() {
   vm.runInContext(
     `
     let alarmPageActive = true;
+    const ALARM_AUDIO_BACKEND = "web-audio";
+    let alarmHtmlAudio = null;
+    let alarmEnableAfterPlayback = false;
     let alarmPlaybackGeneration = 0;
     let alarmAudioAbortController = new AbortController();
     let alarmSoundEnabled = true;

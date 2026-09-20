@@ -44,6 +44,12 @@
         modalMessage:
           "通知音の開始を確認できませんでした。「通知音を鳴らす」を押してください。",
       },
+      PLAYBACK_STALLED: {
+        controlMessage:
+          "通知音の再生が進んでいません。「通知音を再試行」を押してください。",
+        modalMessage:
+          "通知音の再生が進まなくなりました。「通知音を再試行」を押してください。",
+      },
       UNKNOWN: {
         controlMessage:
           "通知音を有効化できませんでした。ブラウザの音声設定を確認して、もう一度お試しください。",
@@ -73,7 +79,10 @@
         code = "NOT_SUPPORTED";
       } else if (name === "AudioPlaybackTimeoutError") {
         code = "PLAYBACK_TIMEOUT";
+      } else if (name === "AudioPlaybackStalledError") {
+        code = "PLAYBACK_STALLED";
       } else if (
+        name === "AudioPlaybackInterruptedError" ||
         name === "AudioContextInterruptedError" ||
         name === "AudioContextSuspendedError" ||
         contextState === "interrupted" ||
