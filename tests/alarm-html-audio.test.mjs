@@ -386,7 +386,12 @@ test("resource reload after natural ended runs >45s with one element and no nati
     starts = [f.time.now()];
   for (let i = 0; i < 36; i++) {
     await flush();
-    await f.time.advance(1300);
+    for (let tick = 1; tick <= 5; tick++) {
+      element.currentTime = tick * 0.25;
+      element.emit("timeupdate");
+      await f.time.advance(250);
+    }
+    await f.time.advance(50);
     element.end();
     await flush();
     starts.push(f.time.now());
@@ -654,4 +659,197 @@ test("trace records cycle/phase and safe media state, and remains bounded", asyn
   f.player.stop();
   assert.equal(f.player.getDiagnostics().at(-1).event, "STOPPED");
   assert.equal(f.player.getDiagnostics().at(-1).paused, true);
+});
+
+test("a late-cycle hung play recovers within 750ms without a second live element", async () => {
+  const f = fixture(),
+    pending = deferred(),
+    failures = [],
+    recoveries = [];
+  const run = f.player.playLoop({
+    onFailure: (e) => failures.push(e),
+    onRecovery: (e) => recoveries.push(e),
+  });
+  await flush();
+  const retired = f.audio;
+  retired.readyState = 0;
+  retired.networkState = 2;
+  retired.playResult = () => pending.promise;
+  retired.end();
+  await run.completion;
+  await flush();
+  await f.time.advance(749);
+  assert.equal(f.elements.length, 1);
+  await f.time.advance(1);
+  const replacement = f.audio;
+  assert.notEqual(replacement, retired);
+  assert.equal(retired.paused, true);
+  assert.equal(retired.src, "");
+  assert.equal(replacement.plays, 1);
+  assert.equal(f.elements.filter((a) => !a.paused).length, 1);
+  retired.paused = false;
+  pending.resolve();
+  retired.emit("ended");
+  retired.emit("pause");
+  await flush();
+  assert.equal(retired.paused, true);
+  assert.equal(replacement.paused, false);
+  replacement.end();
+  await flush();
+  assert.deepEqual(
+    recoveries.map((e) => e.recovering),
+    [true, false],
+  );
+  assert.deepEqual(failures, []);
+  assert.equal(
+    f.player.getDiagnostics().filter((e) => e.event === "RECOVERY_STARTED")
+      .length,
+    1,
+  );
+  f.player.stop();
+  await f.time.advance(11000);
+  assert.equal(f.elements.filter((a) => !a.paused).length, 0);
+  assert.equal(f.time.size, 0);
+});
+
+test("only consecutive recovery failures exhaust budget; success resets budget", async () => {
+  const f = fixture(),
+    failures = [];
+  const run = f.player.playLoop({ onFailure: (e) => failures.push(e) });
+  await flush();
+  f.audio.end();
+  await run.completion;
+  for (let n = 0; n < 3; n++) {
+    await f.time.advance(750);
+    await flush();
+    f.audio.end();
+    await flush();
+    assert.equal(failures.length, 0);
+  }
+  await f.time.advance(2250);
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].name, "AudioPlaybackStalledError");
+  const count = f.elements.length;
+  await f.time.advance(11000);
+  assert.equal(f.elements.length, count);
+  assert.equal(f.time.size, 0);
+});
+
+test("native progress with unresolved play Promise does not trigger false recovery", async () => {
+  const f = fixture(),
+    pending = deferred(),
+    failures = [];
+  const run = f.player.playLoop({ onFailure: (e) => failures.push(e) });
+  await flush();
+  f.audio.playResult = () => pending.promise;
+  f.audio.end();
+  await run.completion;
+  for (let tick = 1; tick <= 5; tick++) {
+    f.audio.currentTime = tick * 0.25;
+    f.audio.emit("timeupdate");
+    await f.time.advance(250);
+  }
+  f.audio.end();
+  await flush();
+  assert.equal(f.elements.length, 1);
+  assert.equal(f.audio.plays, 3);
+  assert.deepEqual(failures, []);
+  f.player.stop();
+  pending.resolve();
+  await flush();
+});
+
+for (const stopAt of [
+  "before-recovery",
+  "in-recovery-callback",
+  "after-recovery",
+]) {
+  test(`stop/Abort prevents recovery and late playback: ${stopAt}`, async () => {
+    const f = fixture(),
+      controller = new AbortController(),
+      pending = deferred();
+    const run = f.player.playLoop({
+      signal: controller.signal,
+      onRecovery: () => {
+        if (stopAt === "in-recovery-callback") controller.abort();
+      },
+    });
+    await flush();
+    const retired = f.audio;
+    retired.playResult = () => pending.promise;
+    retired.end();
+    await run.completion;
+    if (stopAt === "before-recovery") controller.abort();
+    await f.time.advance(750);
+    controller.abort();
+    const created = f.elements.length;
+    retired.paused = false;
+    pending.resolve();
+    await flush();
+    await f.time.advance(11000);
+    assert.equal(f.elements.length, created);
+    assert.equal(f.elements.filter((a) => !a.paused).length, 0);
+    assert.equal(f.time.size, 0);
+  });
+}
+
+test("recovery denied by Safari requires gesture without repeated autoplay attempts", async () => {
+  const f = fixture(),
+    failures = [];
+  const run = f.player.playLoop({ onFailure: (e) => failures.push(e) });
+  await flush();
+  f.audio.end();
+  await run.completion;
+  await f.time.advance(750);
+  f.audio.playResult = () =>
+    Promise.reject(Object.assign(new Error(), { name: "NotAllowedError" }));
+  f.audio.end();
+  await flush();
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].name, "NotAllowedError");
+  const count = f.elements.length;
+  await f.time.advance(11000);
+  assert.equal(f.elements.length, count);
+});
+
+test("pagehide during automatic recovery never starts again on pageshow", async () => {
+  const f = applicationFixture();
+  void f.run("startAlarmSound()");
+  await flush();
+  f.audio().end();
+  await flush();
+  await f.time.advance(750);
+  f.listeners.get("pagehide")();
+  f.listeners.get("pageshow")();
+  const created = f.elements.length;
+  await f.time.advance(11000);
+  assert.equal(f.elements.length, created);
+  assert.equal(f.elements.filter((a) => !a.paused).length, 0);
+  assert.equal(f.run("alarmActiveNodes.length"), 0);
+  assert.equal(f.time.size, 0);
+});
+
+test("first playing epoch is captured once and survives bounded trace rotation/recovery", async () => {
+  const audio = new FakeAudio(),
+    starts = [];
+  let epoch = 1789911300000;
+  const p = htmlAudio.createPlayer({
+    createAudio: () => audio,
+    wallNow: () => epoch,
+  });
+  const run = p.playLoop({ onFirstPlayback: (e) => starts.push(e) });
+  await flush();
+  audio.emit("playing");
+  for (let n = 0; n < 100; n++) {
+    epoch += 1300;
+    audio.end();
+    await flush();
+    audio.emit("playing");
+  }
+  assert.equal(starts.length, 1);
+  assert.equal(run.getFirstPlayback().epochMilliseconds, 1789911300000);
+  assert.ok(
+    p.getDiagnostics().every((e) => Number.isFinite(e.epochMilliseconds)),
+  );
+  p.stop();
 });

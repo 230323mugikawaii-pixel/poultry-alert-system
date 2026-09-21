@@ -365,7 +365,7 @@ test("notification tests distinguish rate limits and audio outcomes", () => {
 
 test("owner and participant screens provide persistent sound controls", () => {
   assert.match(htmlSource, /js\/alarm-audio\.js\?v=5/);
-  assert.match(htmlSource, /js\/alarm-html-audio\.js\?v=6/);
+  assert.match(htmlSource, /js\/alarm-html-audio\.js\?v=7/);
   assert.match(htmlSource, /id="ownerEnableAudioButton"/);
   assert.match(htmlSource, /id="notificationMemberEnableAudioButton"/);
   assert.match(htmlSource, /id="ownerSoundToggleButton"/);

@@ -24,7 +24,10 @@
     setTimer = setTimeout,
     clearTimer = clearTimeout,
     timeoutMilliseconds = 5000,
+    recoveryTimeoutMilliseconds = 750,
+    maxConsecutiveRecoveries = 2,
     now = () => performance.now(),
+    wallNow = () => Date.now(),
   } = {}) {
     let media = null;
     let current = null;
@@ -171,11 +174,13 @@
       signal,
       onFailure = () => {},
       onCycle = () => {},
+      onRecovery = () => {},
+      onFirstPlayback = () => {},
     } = {}) {
       stop();
       if (signal?.aborted) throw playbackError("AbortError");
       if (!media) media = createAudio();
-      const element = media;
+      let element = media;
       const operationId = ++sequence,
         startedAt = now();
       element.preload = "auto";
@@ -191,6 +196,9 @@
       let cycle = 0,
         previousTime = 0,
         progressed = false;
+      let consecutiveRecoveries = 0,
+        recovering = false,
+        firstPlayback = null;
       let deadline,
         deadlineVersion = 0;
       let resolve, reject;
@@ -204,6 +212,7 @@
           operationId,
           cycle,
           event,
+          epochMilliseconds: wallNow(),
           elapsedMs: Math.round(now() - startedAt),
           mediaTimeMs: Math.round(element.currentTime * 1000),
           accepted,
@@ -217,23 +226,25 @@
             : null,
           seeking: element.seeking,
           errorCode: element.error?.code || null,
+          consecutiveRecoveries,
         });
       }
       function listen(name, cycleId, fn) {
+        const observedElement = element;
         const handler = () => {
-          if (!closed && cycleId === cycle) {
+          if (!closed && cycleId === cycle && element === observedElement) {
             record(name);
             fn?.();
           }
         };
-        element.addEventListener(name, handler);
-        listeners.push([name, handler]);
+        observedElement.addEventListener(name, handler);
+        listeners.push([observedElement, name, handler]);
       }
       function clearCycle() {
         clearTimer(deadline);
         ++deadlineVersion;
-        listeners.forEach(([name, fn]) =>
-          element.removeEventListener(name, fn),
+        listeners.forEach(([target, name, fn]) =>
+          target.removeEventListener(name, fn),
         );
         listeners = [];
       }
@@ -259,12 +270,50 @@
       function cancel() {
         finish(playbackError("AbortError"), "loop-cancelled", true);
       }
+      function recover(error, phase) {
+        if (closed || signal?.aborted) return;
+        if (!completed || consecutiveRecoveries >= maxConsecutiveRecoveries) {
+          finish(error, phase);
+          return;
+        }
+        clearCycle();
+        ++consecutiveRecoveries;
+        recovering = true;
+        record("RECOVERY_STARTED");
+        // Never reuse a pending native play Promise's element. Disconnect its
+        // resource before making the replacement; stale callbacks capture it.
+        const retired = element;
+        silence(retired);
+        retired.removeAttribute("src");
+        retired.load();
+        if (media === retired) media = null;
+        onRecovery({ recovering: true, attempt: consecutiveRecoveries, phase });
+        if (closed || signal?.aborted) return;
+        try {
+          element = createAudio();
+          media = element;
+          element.preload = "auto";
+          element.src = SOURCES.loop;
+          element.loop = false;
+          element.muted = false;
+          element.volume = 1;
+          beginCycle();
+        } catch (failure) {
+          finish(failure, "loop-recovery-failed");
+        }
+      }
       function observeProgress(cycleId) {
-        if (closed || !accepted || element.paused || element.error)
+        if (closed || cycleId !== cycle || element.paused || element.error)
           return false;
         const time = element.currentTime;
         if (time <= previousTime + 0.001) return false;
         previousTime = time;
+        // Progress is stronger evidence than a stalled native play Promise.
+        // Do not retire an element that is demonstrably advancing.
+        if (!accepted) {
+          accepted = true;
+          record("NATIVE_PROGRESS_CONFIRMED");
+        }
         if (!progressed) {
           progressed = true;
           record("START_DEADLINE_CLEARED");
@@ -284,6 +333,12 @@
         }
         clearCycle();
         record("CYCLE_COMPLETE");
+        consecutiveRecoveries = 0;
+        if (recovering) {
+          recovering = false;
+          record("RECOVERY_COMPLETED");
+          onRecovery({ recovering: false, attempt: 0, phase: "loop-recovered" });
+        }
         if (!completed) {
           completed = true;
           record("FIRST_PATTERN_COMPLETE");
@@ -303,7 +358,7 @@
           // A delayed event alone is not failure. Inspect native state first.
           if (completeCycle(cycleId) || observeProgress(cycleId)) return;
           const startupTimeout = !completed && !accepted;
-          finish(
+          recover(
             playbackError(
               startupTimeout
                 ? "AudioPlaybackTimeoutError"
@@ -315,11 +370,12 @@
                 ? "loop-progress-stalled"
                 : "loop-no-progress",
           );
-        }, timeoutMilliseconds);
+        }, completed ? recoveryTimeoutMilliseconds : timeoutMilliseconds);
       }
       function beginCycle() {
         if (closed || signal?.aborted) return;
         const cycleId = ++cycle;
+        const cycleElement = element;
         accepted = false;
         progressed = false;
         previousTime = 0;
@@ -328,8 +384,18 @@
         element.load();
         record("RESOURCE_RELOADED");
         listen("timeupdate", cycleId, () => observeProgress(cycleId));
+        listen("playing", cycleId, () => {
+          if (!firstPlayback && !element.paused && !element.ended) {
+            firstPlayback = Object.freeze({
+              epochMilliseconds: wallNow(),
+              mediaTimeMilliseconds: Math.round(element.currentTime * 1000),
+              operationId,
+            });
+            onFirstPlayback({ ...firstPlayback });
+          }
+        });
         for (const name of [
-          "playing",
+          "play",
           "waiting",
           "stalled",
           "suspend",
@@ -358,10 +424,10 @@
         record("PLAY_CALL");
         try {
           // First play stays inside the actual click, without awaiting load.
-          Promise.resolve(element.play()).then(
+          Promise.resolve(cycleElement.play()).then(
             () => {
-              if (closed) {
-                if (!accepted) silence(element);
+              if (closed || cycleElement !== element) {
+                if (cycleElement !== element || !accepted) silence(cycleElement);
                 return;
               }
               if (cycleId !== cycle) return;
@@ -378,7 +444,11 @@
           finish(error, "loop-play-threw");
         }
       }
-      const operation = { completion, stop: cancel };
+      const operation = {
+        completion,
+        stop: cancel,
+        getFirstPlayback: () => firstPlayback && { ...firstPlayback },
+      };
       current = operation;
       signal?.addEventListener("abort", cancel, { once: true });
       beginCycle();

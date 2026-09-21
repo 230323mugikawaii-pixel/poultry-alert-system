@@ -22,15 +22,26 @@ and manual currentTime=0 replay previously stopped progressing at a boundary;
 same-element resource reload sustained the controlled comparison. The browser's
 internal cause is not established. No app-level second repeat timer is used.
 
-Each cycle is tagged separately. A five-second no-progress deadline checks
-currentTime and ended before diagnosing failure, so delayed events alone do
-not cause a false error. Successful ended clears that cycle's deadline, not the
-next cycle's. If a later cycle actually stops progressing, the UI leaves PLAYING
-and reports PLAYBACK_STALLED; it does not claim the initial start failed. Native
+Each cycle is tagged separately. The initial five-second no-progress deadline
+checks currentTime and ended before diagnosing failure; native progress also
+counts when Safari has not settled its play Promise. After one completed pattern,
+a 750ms no-progress deadline attempts at most two consecutive recoveries. It
+removes old listeners/deadlines, pauses and unloads the retired element, then
+creates ONE replacement and loads/plays the same local resource. Late native
+results only refer to the retired element. A completed recovery pattern resets
+the consecutive-failure budget. No retry is allowed after stop/Abort/pagehide.
+Actual recovery latency includes browser scheduling/loading and is not guaranteed
+to stay under one second in a suspended or throttled browser. The UI describes
+recovery explicitly; exhaustion leaves PLAYING and reports PLAYBACK_STALLED.
+Initial permission failure never triggers an autoplay retry. Native
 play rejection, pause, error and premature ended remain separate failures.
 The trace includes play calls/results, playing, timeupdate, ended, pause, error,
 waiting, stalled, suspend, seeking and seeked, with safe relative times/media
-states only. A bounded memory-only trace has no email, identity or credential.
+states only. It also records local OS epoch timestamps and the first native
+playing event once per operation, retained separately from the bounded trace.
+This supports same-Mac cross-browser timing; it is not acoustic-output proof or
+clock synchronization across different devices. No email, identity or credential
+is included in the player's trace.
 
 Cancellation removes all listeners and deadlines, pauses and resets currentTime.
 Pending native play is retired so late results cannot restart or stop a newer

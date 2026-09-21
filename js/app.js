@@ -224,7 +224,7 @@ const NOTIFICATION_TEST_SYNC_DEBOUNCE_MS = 150;
 const NOTIFICATION_TEST_PRESENTATION_TIMEOUT_MS = 10000;
 
 const APP_BUILD_VERSION =
-  "2026-09-20.6";
+  "2026-09-21.1";
 
 const alertTabCoordinator =
   alertTabCoordinationPolicy.createCoordinator({
@@ -8137,6 +8137,30 @@ async function playAlarmPattern(generation) {
     tones = ALARM_AUDIO_BACKEND === "html"
       ? [getHtmlAlarmAudio().playLoop({
           signal: alarmAudioAbortController.signal,
+          onFirstPlayback: (timing) => {
+            if (alarmPageActive && alarmIsActive && generation === alarmPlaybackGeneration) {
+              recordAlertPresentationEvent(
+                currentAlarmAlertContext,
+                "HTML_AUDIO_FIRST_PLAYING",
+                timing
+              );
+            }
+          },
+          onRecovery: ({ recovering, attempt, phase }) => {
+            if (alarmPageActive && alarmIsActive && generation === alarmPlaybackGeneration) {
+              setAlarmModalSoundStatus(
+                recovering
+                  ? "通知音の再生を復旧しています。"
+                  : "通知音を再生しています。「この端末の通知音を停止」を押すまで繰り返します。",
+                recovering ? "recovering" : "playing"
+              );
+              recordAlertPresentationEvent(
+                currentAlarmAlertContext,
+                recovering ? "HTML_AUDIO_RECOVERING" : "HTML_AUDIO_RECOVERED",
+                { attempt, phase }
+              );
+            }
+          },
           onCycle: () => {
             if (alarmPageActive && alarmIsActive && generation === alarmPlaybackGeneration) {
               alarmPlaybackCycleCount += 1;
