@@ -19,6 +19,7 @@ export interface AlertServiceOptions {
 
 export class AlertService {
   private readonly now: () => Date;
+  private readonly ingestionListeners = new Map<string, Set<() => void>>();
 
   public constructor(private readonly options: AlertServiceOptions) {
     this.now = options.now ?? (() => new Date());
@@ -57,13 +58,50 @@ export class AlertService {
         400
       );
     }
-    return this.options.repository.ingest({
-      ...input,
-      kind: input.kind ?? "REAL",
-      sourceEventId,
-      matchedKeyword,
-      now: this.now()
-    });
+    return this.options.repository
+      .ingest({
+        ...input,
+        kind: input.kind ?? "REAL",
+        sourceEventId,
+        matchedKeyword,
+        now: this.now()
+      })
+      .then((result) => {
+        // Wake local SSE readers only after the Alert/recipients transaction commits.
+        // This is a data-free hint, not delivery: readers reauthenticate and reload.
+        // Other API instances and missed hints retain the existing polling fallback.
+        if (result.created) {
+          for (const listener of this.ingestionListeners.get(input.teamId) ??
+            []) {
+            try {
+              listener();
+            } catch {
+              // A disconnected reader must never turn a committed ingest into failure.
+            }
+          }
+        }
+        return result;
+      });
+  }
+
+  public subscribeToIngestion(
+    teamId: string,
+    listener: () => void
+  ): () => void {
+    let listeners = this.ingestionListeners.get(teamId);
+    if (!listeners) {
+      listeners = new Set();
+      this.ingestionListeners.set(teamId, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+      if (
+        listeners.size === 0 &&
+        this.ingestionListeners.get(teamId) === listeners
+      )
+        this.ingestionListeners.delete(teamId);
+    };
   }
 
   public listForOwner(

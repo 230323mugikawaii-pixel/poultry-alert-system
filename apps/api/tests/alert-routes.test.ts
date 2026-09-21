@@ -3,8 +3,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import type { AppEnvironment } from "../src/config/env.js";
 import { AppError } from "../src/lib/app-error.js";
-import type { AlertRecord } from "../src/modules/alerts/alert-repository.js";
-import type { AlertService } from "../src/modules/alerts/alert-service.js";
+import type {
+  AlertRecord,
+  AlertRepository
+} from "../src/modules/alerts/alert-repository.js";
+import { AlertService } from "../src/modules/alerts/alert-service.js";
 import { AuthService } from "../src/modules/auth/auth-service.js";
 import type { NotificationMemberService } from "../src/modules/notification-members/notification-member-service.js";
 import { SecurityThrottleService } from "../src/modules/security/security-throttle-service.js";
@@ -86,6 +89,114 @@ afterEach(async () => {
 });
 
 describe("alert routes", () => {
+  it("delivers a committed Alert to authenticated OWNER/member SSE sockets without their next poll", async () => {
+    const teamId = randomUUID();
+    const alert = createAlert(teamId);
+    let committed = false;
+    const alertService = new AlertService({
+      repository: {
+        ingest: async () => {
+          committed = true;
+          return { alert, created: true };
+        },
+        listForOwner: async ({ teamId: requested }: { teamId: string }) =>
+          committed && requested === teamId ? [alert] : [],
+        listForNotificationMember: async ({
+          teamId: requested
+        }: {
+          teamId: string;
+        }) => (committed && requested === teamId ? [alert] : [])
+      } as unknown as AlertRepository
+    });
+    const memberService = createStreamingMemberService();
+    const authenticate = memberService.authenticate.bind(memberService);
+    memberService.authenticate = async (...args) => {
+      const result = await authenticate(...args);
+      return {
+        ...result,
+        member: { ...result.member, teamId },
+        team: { ...result.team, id: teamId }
+      };
+    };
+    const app = await buildApp({
+      environment,
+      authService: {
+        authenticate: async (token: string) => {
+          if (token !== "owner-token")
+            throw new AppError("UNAUTHENTICATED", "invalid", 401);
+          return { user: { id: "owner" } };
+        }
+      } as unknown as AuthService,
+      teamService: {
+        requireOwnerForTeam: async (user: string, requested: string) => {
+          if (user !== "owner" || requested !== teamId)
+            throw new AppError("OWNER_REQUIRED", "invalid", 403);
+        }
+      } as unknown as TeamService,
+      notificationMemberService: memberService,
+      alertService,
+      securityThrottleService: new SecurityThrottleService(
+        new MemorySecurityThrottleRepository(),
+        environment.AUTH_TOKEN_PEPPER
+      ),
+      logger: false
+    });
+    apps.push(app);
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const controller = new AbortController();
+    const signal = AbortSignal.any([
+      controller.signal,
+      AbortSignal.timeout(4000)
+    ]);
+    const connect = async (path: string, cookie: string) => {
+      const response = await fetch(address + path, {
+        signal,
+        headers: { origin: environment.PUBLIC_ORIGIN, cookie }
+      });
+      expect(response.status).toBe(200);
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      const until = async (marker: string) => {
+        let text = "";
+        while (!text.includes(marker)) {
+          const part = await reader.read();
+          if (part.done) throw new Error("SSE ended early");
+          text += decoder.decode(part.value, { stream: true });
+        }
+        return { text, at: performance.now() };
+      };
+      await until('"alerts":[]');
+      return until;
+    };
+    try {
+      const owner = await connect(
+        `/api/v1/teams/${teamId}/alerts/events`,
+        `${environment.COOKIE_NAME}=owner-token`
+      );
+      const member = await connect(
+        "/api/v1/notification-members/alerts/events",
+        `${environment.COOKIE_NAME}_member=member-token`
+      );
+      const receive = Promise.all([owner(alert.id), member(alert.id)]);
+      const before = performance.now();
+      await alertService.ingest({
+        teamId,
+        sourceMailConnectionId: alert.sourceMailConnectionId,
+        sourceEventId: "socket-wake",
+        matchedKeyword: "停電",
+        detectedAt: new Date()
+      });
+      const arrivals = await receive;
+      expect(Math.max(...arrivals.map((x) => x.at)) - before).toBeLessThan(
+        1000
+      );
+      expect(Math.abs(arrivals[0].at - arrivals[1].at)).toBeLessThan(1000);
+      for (const { text } of arrivals) expect(text).toContain('"kind":"REAL"');
+    } finally {
+      controller.abort();
+    }
+  });
+
   it("limits owner alerts to OWNER and returns a data-minimized member view", async () => {
     const authRepository = new MemoryAuthRepository();
     const emailSender = new MemoryMagicLinkEmailSender();
@@ -583,6 +694,10 @@ async function buildStreamingApp(
   memberService: NotificationMemberService,
   alertService: AlertService
 ) {
+  // Legacy route fixtures do not ingest; provide the production subscription contract.
+  if (typeof alertService.subscribeToIngestion !== "function") {
+    alertService.subscribeToIngestion = () => () => {};
+  }
   const app = await buildApp({
     environment,
     authService: {
