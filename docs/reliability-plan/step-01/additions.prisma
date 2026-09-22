@@ -1,0 +1,72 @@
+// PROPOSAL ONLY. Append these models to the existing schema.prisma.
+// Add reciprocal relation fields listed in ../existing-model-additions.md.
+// First PR: only these two tables + the legacy observation wrapper.
+// Do not add later/*.prisma or start new workers in the first PR.
+
+enum ReliabilityLane {
+  LEGACY
+  SHADOW
+  LIVE
+}
+
+enum MailEvaluationState {
+  DISCOVERED
+  FETCH_PENDING
+  EVALUATING
+  MATCHED
+  NOT_MATCHED
+  EXCLUDED
+  UNDETERMINED
+}
+
+model MailMessageLedger {
+  id                    String       @id @default(uuid()) @db.Uuid
+  teamId                String       @db.Uuid
+  provider              MailProvider
+  // Reuse MailAuthorization.id; retain it across reauthorization.
+  mailboxId             String       @db.Uuid
+  firstConnectionId     String       @db.Uuid
+  providerMessageId     String       @db.Text
+  // SHA-256 of JSON([version, teamId, provider, mailboxId, exactMessageId]).
+  messageKey            String       @unique @db.Char(64)
+  receivedAt            DateTime?    @db.Timestamptz(3)
+  firstSeenAt           DateTime     @default(now()) @db.Timestamptz(3)
+  lastSeenAt            DateTime     @default(now()) @db.Timestamptz(3)
+  alertId               String?      @unique @db.Uuid
+  team                  Team         @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  authorization         MailAuthorization @relation(fields: [mailboxId, provider], references: [id, provider], onDelete: Restrict)
+  firstConnection       MailConnection @relation(fields: [firstConnectionId], references: [id], onDelete: Restrict)
+  alert                 Alert?       @relation(fields: [alertId], references: [id], onDelete: Restrict)
+  evaluations           MailEvaluation[]
+
+  @@index([teamId, mailboxId, receivedAt])
+  @@index([mailboxId, firstSeenAt])
+  @@map("mail_message_ledger")
+}
+
+model MailEvaluation {
+  id                    String       @id @default(uuid()) @db.Uuid
+  messageId             String       @db.Uuid
+  connectionId          String       @db.Uuid
+  lane                  ReliabilityLane
+  state                 MailEvaluationState @default(DISCOVERED)
+  // Snapshot actual rules passed to the matcher, not mail contents.
+  keywordsSnapshot      String[]     @default([])
+  ruleHash              String       @db.Char(64)
+  matcherVersion        String       @db.VarChar(64)
+  matchedKeyword        String?      @db.VarChar(100)
+  exclusionCode         String?      @db.VarChar(64)
+  lastErrorCode         String?      @db.VarChar(100)
+  unresolvedSince       DateTime?    @db.Timestamptz(3)
+  decisionAt            DateTime?    @db.Timestamptz(3)
+  revision              Int          @default(0)
+  createdAt             DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime     @updatedAt @db.Timestamptz(3)
+  message               MailMessageLedger @relation(fields: [messageId], references: [id], onDelete: Restrict)
+  connection            MailConnection @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+
+  @@unique([messageId, lane])
+  @@index([connectionId, lane, state, createdAt])
+  @@index([state, unresolvedSince])
+  @@map("mail_evaluations")
+}

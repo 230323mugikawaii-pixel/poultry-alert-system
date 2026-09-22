@@ -1,0 +1,331 @@
+// PROPOSAL ONLY: add each group in its own later PR, not in step 01.
+// See existing-model-additions.md for reciprocal fields and additional columns.
+
+enum MonitorDesired {
+  RUNNING
+  PAUSED
+  DISCONNECTED
+}
+
+enum MonitorObserved {
+  UNKNOWN
+  HEALTHY
+  DEGRADED
+  AUTH_REQUIRED
+  RECOVERING
+}
+
+enum IngestionOwner {
+  LEGACY
+  LIVE
+}
+
+enum SyncPurpose {
+  DELTA
+  RECONCILE
+}
+
+enum SyncBatchKind {
+  DELTA
+  RECONCILE
+  RESYNC
+}
+
+enum DiscoveryTrigger {
+  PUSH
+  POLL
+  RECONCILE
+  RECOVERY
+}
+
+enum ReliabilityJobKind {
+  SYNC
+  RECONCILE
+  EVALUATE
+  RENEW_PROVIDER
+  HEALTH_AUDIT
+  SYNTHETIC_SEND
+}
+
+enum ReliabilityJobStatus {
+  READY
+  RUNNING
+  RETRY_WAIT
+  BLOCKED
+  DONE
+}
+
+enum ReliabilityOutboxKind {
+  ALERT_AVAILABLE
+  USER_MONITOR_STATUS
+  OPERATOR_INCIDENT
+}
+
+enum ReliabilityOutboxStatus {
+  PENDING
+  RUNNING
+  RETRY_WAIT
+  BLOCKED
+  DISPATCHED
+}
+
+enum ProviderRegistrationState {
+  UNKNOWN
+  ACTIVE
+  ERROR
+  EXPIRED
+  AUTH_REQUIRED
+  STOPPED
+}
+
+enum SyntheticRunStatus {
+  PLANNED
+  SENDING
+  SEND_UNKNOWN
+  WAITING
+  PASSED
+  FAILED
+}
+
+model MonitoringState {
+  connectionId       String            @id @db.Uuid
+  desired            MonitorDesired    @default(PAUSED)
+  observed           MonitorObserved   @default(UNKNOWN)
+  ingestionOwner     IngestionOwner    @default(LEGACY)
+  shadowEnabled      Boolean           @default(false)
+  generation         BigInt            @default(0)
+  // Never guess historical coverage that the old system did not record.
+  coverageKnownFrom  DateTime?          @db.Timestamptz(3)
+  recoveryFrom       DateTime?          @db.Timestamptz(3)
+  checkedAt          DateTime?          @db.Timestamptz(3)
+  lastErrorCode      String?            @db.VarChar(100)
+  updatedAt          DateTime           @updatedAt @db.Timestamptz(3)
+  connection         MailConnection    @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+
+  @@index([desired, observed])
+  @@map("monitoring_states")
+}
+
+model MonitoringEpoch {
+  id                 String           @id @default(uuid()) @db.Uuid
+  connectionId       String           @db.Uuid
+  revision           Int
+  startedAt          DateTime         @db.Timestamptz(3)
+  endedAt            DateTime?        @db.Timestamptz(3)
+  boundaryCursor     String?          @db.Text
+  keywordsSnapshot   String[]         @default([])
+  matcherVersion     String           @db.VarChar(64)
+  closeReason        String?          @db.VarChar(64)
+  createdAt          DateTime         @default(now()) @db.Timestamptz(3)
+  connection         MailConnection   @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+  evaluations        MailEvaluation[]
+
+  @@unique([connectionId, revision])
+  @@index([connectionId, startedAt, endedAt])
+  @@map("monitoring_epochs")
+}
+
+model MailSyncStream {
+  id                 String           @id @default(uuid()) @db.Uuid
+  connectionId       String           @db.Uuid
+  lane               ReliabilityLane
+  purpose            SyncPurpose
+  scopeKey           String           @default("INBOX") @db.VarChar(191)
+  acquiredCursor     String?          @db.Text
+  acquiredSeq        BigInt           @default(0)
+  evaluatedSeq       BigInt           @default(0)
+  nextSeq            BigInt           @default(1)
+  nextDueAt          DateTime         @default(now()) @db.Timestamptz(3)
+  lastEnumeratedAt   DateTime?         @db.Timestamptz(3)
+  lastVerifiedAt     DateTime?         @db.Timestamptz(3)
+  // Reconciliation coverage: move only when contiguous ranges are verified.
+  verifiedThrough    DateTime?         @db.Timestamptz(3)
+  updatedAt          DateTime          @updatedAt @db.Timestamptz(3)
+  connection         MailConnection   @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+  batches            MailSyncBatch[]
+
+  @@unique([connectionId, lane, purpose, scopeKey])
+  @@index([nextDueAt, purpose])
+  @@map("mail_sync_streams")
+}
+
+model MailSyncBatch {
+  id                    String           @id @default(uuid()) @db.Uuid
+  streamId              String           @db.Uuid
+  seq                   BigInt
+  kind                  SyncBatchKind
+  trigger               DiscoveryTrigger
+  fromInclusive         DateTime?        @db.Timestamptz(3)
+  toExclusive           DateTime?        @db.Timestamptz(3)
+  initialCursor         String?          @db.Text
+  pageCheckpoint        String?          @db.Text
+  pageNumber            Int              @default(0)
+  finalCursor           String?          @db.Text
+  enumerationFinishedAt DateTime?        @db.Timestamptz(3)
+  decisionsFinishedAt   DateTime?        @db.Timestamptz(3)
+  lastErrorCode         String?          @db.VarChar(100)
+  createdAt             DateTime         @default(now()) @db.Timestamptz(3)
+  stream                MailSyncStream   @relation(fields: [streamId], references: [id], onDelete: Restrict)
+  items                 MailSyncBatchItem[]
+
+  @@unique([streamId, seq])
+  @@index([streamId, enumerationFinishedAt, seq])
+  @@map("mail_sync_batches")
+}
+
+model MailSyncBatchItem {
+  batchId          String          @db.Uuid
+  evaluationId     String          @db.Uuid
+  batch            MailSyncBatch   @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  evaluation       MailEvaluation  @relation(fields: [evaluationId], references: [id], onDelete: Restrict)
+
+  @@id([batchId, evaluationId])
+  @@index([evaluationId])
+  @@map("mail_sync_batch_items")
+}
+
+model ReliabilityJob {
+  id               String               @id @default(uuid()) @db.Uuid
+  kind             ReliabilityJobKind
+  status           ReliabilityJobStatus @default(READY)
+  dedupeKey        String               @unique @db.Char(64)
+  // Runtime-validated tagged union of identifiers only, never tokens/bodies.
+  payload          Json                 @db.JsonB
+  availableAt      DateTime             @default(now()) @db.Timestamptz(3)
+  attempts         Int                  @default(0)
+  leaseToken       String?              @db.Uuid
+  leaseGeneration  BigInt               @default(0)
+  leaseUntil       DateTime?            @db.Timestamptz(3)
+  lastErrorCode    String?              @db.VarChar(100)
+  createdAt        DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime             @updatedAt @db.Timestamptz(3)
+  finishedAt       DateTime?            @db.Timestamptz(3)
+
+  @@index([kind, status, availableAt])
+  @@index([status, leaseUntil])
+  @@map("reliability_jobs")
+}
+
+model ReliabilityIncident {
+  id               String           @id @default(uuid()) @db.Uuid
+  scopeKey         String           @db.VarChar(191)
+  code             String           @db.VarChar(100)
+  firstSeenAt      DateTime         @default(now()) @db.Timestamptz(3)
+  lastSeenAt       DateTime         @default(now()) @db.Timestamptz(3)
+  occurrences      Int              @default(1)
+  resolvedAt       DateTime?        @db.Timestamptz(3)
+  safeMetadata     Json?            @db.JsonB
+  outboxEvents     ReliabilityOutbox[]
+
+  @@index([scopeKey, resolvedAt])
+  @@map("reliability_incidents")
+}
+
+model ReliabilityOutbox {
+  id                String                   @id @default(uuid()) @db.Uuid
+  eventKey          String                   @unique @db.Char(64)
+  kind              ReliabilityOutboxKind
+  status            ReliabilityOutboxStatus  @default(PENDING)
+  teamId            String?                  @db.Uuid
+  alertId           String?                  @db.Uuid
+  recipientId       String?                  @db.Uuid
+  incidentId        String?                  @db.Uuid
+  // Small safe status/version data only. No mail contents or credentials.
+  payload           Json                     @db.JsonB
+  availableAt       DateTime                 @default(now()) @db.Timestamptz(3)
+  attempts          Int                      @default(0)
+  leaseToken        String?                  @db.Uuid
+  leaseGeneration   BigInt                   @default(0)
+  leaseUntil        DateTime?                @db.Timestamptz(3)
+  lastErrorCode     String?                  @db.VarChar(100)
+  createdAt         DateTime                 @default(now()) @db.Timestamptz(3)
+  dispatchedAt      DateTime?                @db.Timestamptz(3)
+  team              Team?                    @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  // Requires @@unique([id, teamId]) on Alert.
+  alert             Alert?                   @relation(fields: [alertId, teamId], references: [id, teamId], onDelete: Restrict)
+  // Requires @@unique([id, alertId]) on AlertRecipient.
+  recipient         AlertRecipient?          @relation(fields: [recipientId, alertId], references: [id, alertId], onDelete: Restrict)
+  incident          ReliabilityIncident?     @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+
+  @@index([status, availableAt])
+  @@index([status, leaseUntil])
+  @@index([alertId])
+  @@map("reliability_outbox")
+}
+
+// Mailbox-scoped, not Team-scoped: users.stop must not stop another active Team.
+model ProviderRegistration {
+  id                   String                    @id @default(uuid()) @db.Uuid
+  mailboxId            String                    @db.Uuid
+  scopeKey             String                    @default("INBOX") @db.VarChar(191)
+  remoteId             String?                   @db.Text
+  retiringRemoteId     String?                   @db.Text
+  clientStateHash      String?                   @db.Char(64)
+  state                ProviderRegistrationState @default(UNKNOWN)
+  expiresAt            DateTime?                 @db.Timestamptz(3)
+  renewAfter           DateTime                  @default(now()) @db.Timestamptz(3)
+  lastRenewedAt        DateTime?                 @db.Timestamptz(3)
+  failures             Int                       @default(0)
+  generation           BigInt                    @default(0)
+  lastErrorCode        String?                   @db.VarChar(100)
+  authorization        MailAuthorization         @relation(fields: [mailboxId], references: [id], onDelete: Restrict)
+
+  @@unique([mailboxId, scopeKey])
+  @@index([state, renewAfter])
+  @@index([expiresAt])
+  @@map("provider_registrations")
+}
+
+model WorkerHeartbeat {
+  workerKey           String        @id @db.VarChar(191)
+  buildId             String        @db.VarChar(64)
+  lastHeartbeatAt     DateTime      @db.Timestamptz(3)
+  lastProgressAt      DateTime?     @db.Timestamptz(3)
+  expectedBy          DateTime      @db.Timestamptz(3)
+  lastErrorCode       String?       @db.VarChar(100)
+
+  @@index([expectedBy])
+  @@map("worker_heartbeats")
+}
+
+model SyntheticProbe {
+  id                  String           @id @default(uuid()) @db.Uuid
+  name                String           @unique @db.VarChar(120)
+  connectionId        String           @db.Uuid
+  enabled             Boolean          @default(false)
+  keyword             String           @db.VarChar(100)
+  intervalSeconds     Int              @default(300)
+  deadlineSeconds     Int              @default(180)
+  nextRunAt           DateTime         @db.Timestamptz(3)
+  connection          MailConnection   @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+  runs                SyntheticRun[]
+
+  @@index([enabled, nextRunAt])
+  @@map("synthetic_probes")
+}
+
+model SyntheticRun {
+  id                  String              @id @default(uuid()) @db.Uuid
+  probeId             String              @db.Uuid
+  scheduledFor        DateTime            @db.Timestamptz(3)
+  deadlineAt          DateTime            @db.Timestamptz(3)
+  status              SyntheticRunStatus  @default(PLANNED)
+  sendAttempts        Int                 @default(0)
+  sendRequestedAt     DateTime?           @db.Timestamptz(3)
+  sendAcceptedAt      DateTime?           @db.Timestamptz(3)
+  mailboxReceivedAt   DateTime?           @db.Timestamptz(3)
+  matchedAt           DateTime?           @db.Timestamptz(3)
+  outboxReadyAt       DateTime?           @db.Timestamptz(3)
+  pushSeenAt          DateTime?           @db.Timestamptz(3)
+  pollSeenAt          DateTime?           @db.Timestamptz(3)
+  reconcileSeenAt     DateTime?           @db.Timestamptz(3)
+  failedAt            DateTime?           @db.Timestamptz(3)
+  failureCode         String?             @db.VarChar(100)
+  alertId             String?             @db.Uuid
+  probe               SyntheticProbe     @relation(fields: [probeId], references: [id], onDelete: Restrict)
+  alert               Alert?              @relation(fields: [alertId], references: [id], onDelete: Restrict)
+
+  @@unique([probeId, scheduledFor])
+  @@index([status, deadlineAt])
+  @@map("synthetic_runs")
+}
