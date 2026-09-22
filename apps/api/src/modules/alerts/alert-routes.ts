@@ -152,15 +152,22 @@ export function createAlertRoutes(
       async (request, reply) => {
         requireSameOrigin(request);
         await authenticateOwner(request, request.params.teamId);
-        startAlertStream(request, reply, environment, async () => {
-          const userId = await authenticateOwner(
-            request,
-            request.params.teamId
-          );
-          return serializeAlerts(
-            await alertService.listForOwner(request.params.teamId, userId)
-          );
-        });
+        startAlertStream(
+          request,
+          reply,
+          environment,
+          (wake) =>
+            alertService.subscribeToIngestion(request.params.teamId, wake),
+          async () => {
+            const userId = await authenticateOwner(
+              request,
+              request.params.teamId
+            );
+            return serializeAlerts(
+              await alertService.listForOwner(request.params.teamId, userId)
+            );
+          }
+        );
       }
     );
 
@@ -271,16 +278,22 @@ export function createAlertRoutes(
       "/api/v1/notification-members/alerts/events",
       async (request, reply) => {
         requireSameOrigin(request);
-        await authenticateMember(request);
-        startAlertStream(request, reply, environment, async () => {
-          const authenticated = await authenticateMember(request);
-          return serializeAlerts(
-            await alertService.listForNotificationMember(
-              authenticated.team.id,
-              authenticated.member.id
-            )
-          );
-        });
+        const initial = await authenticateMember(request);
+        startAlertStream(
+          request,
+          reply,
+          environment,
+          (wake) => alertService.subscribeToIngestion(initial.team.id, wake),
+          async () => {
+            const authenticated = await authenticateMember(request);
+            return serializeAlerts(
+              await alertService.listForNotificationMember(
+                authenticated.team.id,
+                authenticated.member.id
+              )
+            );
+          }
+        );
       }
     );
 
@@ -351,10 +364,11 @@ export function createAlertRoutes(
   };
 }
 
-function startAlertStream(
+export function startAlertStream(
   request: FastifyRequest,
   reply: FastifyReply,
   environment: AppEnvironment,
+  subscribe: (wake: () => void) => () => void,
   load: () => Promise<ReturnType<typeof serializeAlerts>>
 ): void {
   reply.hijack();
@@ -373,11 +387,25 @@ function startAlertStream(
   let closed = false;
   let previousPayload = "";
   let pollRunning = false;
+  let reloadRequested = false;
+  let unsubscribe = (): void => {};
+  const close = (): void => {
+    if (closed) return;
+    closed = true;
+    clearInterval(timer);
+    unsubscribe();
+  };
   const poll = async (): Promise<void> => {
-    if (closed || pollRunning) return;
+    if (closed) return;
+    if (pollRunning) {
+      reloadRequested = true;
+      return;
+    }
     pollRunning = true;
+    reloadRequested = false;
     try {
       const payload = JSON.stringify(await load());
+      if (closed) return;
       if (payload !== previousPayload) {
         previousPayload = payload;
         response.write(`event: alerts\ndata: ${payload}\n\n`);
@@ -385,6 +413,7 @@ function startAlertStream(
         response.write(": keep-alive\n\n");
       }
     } catch (error) {
+      if (closed) return;
       if (isSessionEndedError(error)) {
         response.write(
           'event: session-ended\ndata: {"reason":"UNAUTHENTICATED"}\n\n'
@@ -398,17 +427,18 @@ function startAlertStream(
           'event: stream-error\ndata: {"reason":"TEMPORARY_UNAVAILABLE"}\n\n'
         );
       }
+      close();
       response.end();
     } finally {
       pollRunning = false;
+      // A commit during an in-flight read needs one follow-up, not concurrent reads.
+      if (reloadRequested && !closed) void poll();
     }
   };
-  void poll();
   const timer = setInterval(() => void poll(), 5_000);
-  request.raw.once("close", () => {
-    closed = true;
-    clearInterval(timer);
-  });
+  unsubscribe = subscribe(() => void poll());
+  response.once("close", close);
+  void poll();
 }
 
 function isSessionEndedError(error: unknown): boolean {

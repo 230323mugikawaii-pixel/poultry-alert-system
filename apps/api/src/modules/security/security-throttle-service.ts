@@ -43,7 +43,7 @@ export class SecurityThrottleService {
         lockMinutes: rule.lockMinutes
       });
       if (throttle.lockedUntil && throttle.lockedUntil > now) {
-        throw toAppError(error);
+        throw toAppError(error, rule, throttle.lockedUntil, now);
       }
     }
   }
@@ -57,7 +57,7 @@ export class SecurityThrottleService {
       assertRule(rule);
       const throttle = await this.repository.find(this.keyHash(rule));
       if (throttle?.lockedUntil && throttle.lockedUntil > now) {
-        throw toAppError(error);
+        throw toAppError(error, rule, throttle.lockedUntil, now);
       }
     }
   }
@@ -116,6 +116,20 @@ function defaultRateLimitError(): SecurityThrottleError {
   };
 }
 
-function toAppError(error: SecurityThrottleError): AppError {
-  return new AppError(error.code, error.message, error.statusCode ?? 429);
+function toAppError(
+  error: SecurityThrottleError,
+  rule: SecurityThrottleRule,
+  lockedUntil: Date,
+  now: Date
+): AppError {
+  return new AppError(error.code, error.message, error.statusCode ?? 429, {
+    scope: rule.scope,
+    limit: rule.maximumAttempts,
+    windowMinutes: rule.windowMinutes,
+    retryAt: lockedUntil.toISOString(),
+    retryAfterSeconds: Math.max(
+      1,
+      Math.ceil((lockedUntil.getTime() - now.getTime()) / 1_000)
+    )
+  });
 }

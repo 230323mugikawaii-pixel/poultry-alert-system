@@ -186,7 +186,17 @@ export class PrismaOwnerOnboardingRepository implements OwnerOnboardingRepositor
                   mailAuthorizationId: authorization.id,
                   status: { in: ["REAUTH_REQUIRED", "ERROR"] }
                 },
-                data: { status: "ACTIVE", lastErrorCode: null, revokedAt: null }
+                data: {
+                  status: "ACTIVE",
+                  providerCursor: null,
+                  providerSubscriptionExpiresAt: null,
+                  providerSubscriptionRenewedAt: null,
+                  monitoringStartedAt: null,
+                  syncLeaseToken: null,
+                  syncLeaseExpiresAt: null,
+                  lastErrorCode: null,
+                  revokedAt: null
+                }
               });
               return {
                 onboarding: null,
@@ -395,6 +405,7 @@ export class PrismaOwnerOnboardingRepository implements OwnerOnboardingRepositor
                 providerCursor: null,
                 providerSubscriptionExpiresAt: null,
                 providerSubscriptionRenewedAt: null,
+                monitoringStartedAt: null,
                 syncLeaseToken: null,
                 syncLeaseExpiresAt: null,
                 lastErrorCode: null,

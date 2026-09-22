@@ -78,8 +78,14 @@ describe("frontend mail connection boundary", () => {
     expect(script).toContain("監視を停止");
     expect(script).toContain("接続を解除");
     expect(script).toContain(
-      'class="mail-monitoring-state ${monitoringStateClass}"'
+      'class="mail-monitoring-state ${statusPresentation.className}"'
     );
+    expect(script).toContain("getMailConnectionStatusPresentation(connection)");
+    expect(script).toContain("mailConnectionsAreConfirmed()");
+    expect(script).toContain('"visibilitychange"');
+    expect(script).toContain('"another-tab-change"');
+    expect(script).toContain('"visible-poll"');
+    expect(script).toContain("接続状態を確認できません");
     expect(stylesheet).toMatch(
       /\.mail-monitoring-state\.active\s*\{[^}]*var\(--color-success\)/su
     );

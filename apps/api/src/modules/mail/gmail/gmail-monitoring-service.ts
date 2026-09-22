@@ -114,11 +114,12 @@ export class GmailMonitoringService {
           accessToken,
           this.options.topicName
         );
+        const renewedAt = this.now();
         const persisted = await this.options.repository.recordWatch({
           connectionId: connection.id,
           initialCursor: watch.historyId,
           expiration: watch.expiration,
-          renewedAt: now
+          renewedAt
         });
         if (persisted) {
           result.succeeded += 1;
@@ -336,13 +337,19 @@ export class GmailMonitoringService {
       accessToken,
       this.options.topicName
     );
+    const recoveryWatchStartedAt = this.now();
     const lookbackFloor =
       now.getTime() -
       this.options.historyRecoveryLookbackHours * 60 * 60 * 1_000;
     const lastSyncWithOverlap = connection.lastSyncAt
       ? connection.lastSyncAt.getTime() - HISTORY_RECOVERY_OVERLAP_MILLISECONDS
       : lookbackFloor;
-    const after = new Date(Math.max(lookbackFloor, lastSyncWithOverlap));
+    const monitoringStartedAt =
+      connection.monitoringStartedAt?.getTime() ??
+      recoveryWatchStartedAt.getTime();
+    const after = new Date(
+      Math.max(lookbackFloor, lastSyncWithOverlap, monitoringStartedAt)
+    );
     let pageToken: string | null = null;
     const messageIds = new Set<string>();
     do {
@@ -362,14 +369,17 @@ export class GmailMonitoringService {
     } while (pageToken);
 
     for (const messageId of messageIds) {
-      await this.processMessage(connection, accessToken, messageId, now);
+      await this.processMessage(connection, accessToken, messageId, now, after);
     }
     const advanced = await this.options.repository.advanceCursor({
       connectionId: connection.id,
       leaseToken,
       cursor: watch.historyId,
       now,
-      watch: { expiration: watch.expiration, renewedAt: now },
+      watch: {
+        expiration: watch.expiration,
+        renewedAt: recoveryWatchStartedAt
+      },
       recovered: true
     });
     if (!advanced) {
@@ -384,7 +394,8 @@ export class GmailMonitoringService {
     connection: GmailMonitoringConnection,
     accessToken: string,
     messageId: string,
-    now: Date
+    now: Date,
+    minimumInternalDate?: Date
   ): Promise<void> {
     let message: GmailMessage;
     try {
@@ -392,6 +403,13 @@ export class GmailMonitoringService {
     } catch (error) {
       if (error instanceof GmailApiRequestError && error.status === 404) return;
       throw error;
+    }
+    if (
+      minimumInternalDate &&
+      !isAtOrAfter(message.internalDate, minimumInternalDate)
+    ) {
+      this.logger.info("gmail_message_outside_monitoring_window");
+      return;
     }
     if (!isIncomingInboxMessage(message)) return;
     const matchedKeyword = findFirstMatchingKeyword(
@@ -433,6 +451,18 @@ export class GmailMonitoringService {
     }
     return refreshed.accessToken;
   }
+}
+
+function isAtOrAfter(
+  internalDate: string | null,
+  minimumInternalDate: Date
+): boolean {
+  if (!internalDate || !/^\d{1,16}$/u.test(internalDate)) return false;
+  const milliseconds = Number(internalDate);
+  return (
+    Number.isSafeInteger(milliseconds) &&
+    milliseconds >= minimumInternalDate.getTime()
+  );
 }
 
 function isIncomingInboxMessage(message: GmailMessage): boolean {

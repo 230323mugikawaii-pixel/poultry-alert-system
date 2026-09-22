@@ -163,10 +163,30 @@ const keywordPolicy =
   window.CallNowKeywordPolicy;
 const monitoringKeywordPolicy =
   window.CallNowMonitoringKeywordPolicy;
+const mailConnectionRefreshPolicy =
+  window.CallNowMailConnectionRefresh;
+const notificationTestExecutionPolicy =
+  window.CallNowNotificationTestExecution;
+const alarmAudioPolicy =
+  window.CallNowAlarmAudio;
+const htmlAlarmAudioPolicy =
+  window.CallNowHtmlAlarmAudio;
+// Keep Web Audio intact for comparison; HTML Audio is the current candidate.
+const ALARM_AUDIO_BACKEND = "html";
+const alertTabCoordinationPolicy =
+  window.CallNowAlertTabCoordination;
 
-if (!keywordPolicy || !monitoringKeywordPolicy) {
+if (
+  !keywordPolicy ||
+  !monitoringKeywordPolicy ||
+  !mailConnectionRefreshPolicy ||
+  !notificationTestExecutionPolicy ||
+  !alarmAudioPolicy ||
+  !htmlAlarmAudioPolicy ||
+  !alertTabCoordinationPolicy
+) {
   throw new Error(
-    "キーワード検証機能を読み込めませんでした。"
+    "アプリ機能を読み込めませんでした。"
   );
 }
 
@@ -192,19 +212,60 @@ const TEST_DETECTION_TIMEOUT_MS =
 const ALERT_SOUND_SETTING_KEY =
   "callNowAlertSoundSetting";
 const ALERT_SOUND_SETTING_VERSION = 1;
-const NOTIFIED_ALERT_IDS_KEY =
+const LEGACY_NOTIFIED_ALERT_IDS_KEY =
   "callNowNotifiedAlertIds";
+const ALERT_PAGE_STARTED_AT = Date.now();
 const ALERT_FALLBACK_DELAY_MS = 4000;
 const ALERT_FALLBACK_INTERVAL_MS = 4000;
 const ALERT_LONG_DISCONNECT_MS = 12000;
+const MAIL_CONNECTION_REFRESH_INTERVAL_MS = 15000;
+const MAIL_CONNECTION_REFRESH_DEBOUNCE_MS = 150;
+const NOTIFICATION_TEST_SYNC_DEBOUNCE_MS = 150;
+const NOTIFICATION_TEST_PRESENTATION_TIMEOUT_MS = 10000;
 
 const APP_BUILD_VERSION =
-  "2026-08-31.5";
+  "2026-09-21.1";
+
+const alertTabCoordinator =
+  alertTabCoordinationPolicy.createCoordinator({
+    storage: (() => {
+      try {
+        return window.localStorage;
+      } catch {
+        return null;
+      }
+    })(),
+    lockManager: window.navigator?.locks || null,
+    randomUuid:
+      typeof window.crypto?.randomUUID === "function"
+        ? window.crypto.randomUUID.bind(window.crypto)
+        : null,
+    createChannel:
+      typeof window.BroadcastChannel === "function"
+        ? (name) => new BroadcastChannel(name)
+        : null,
+    addStorageListener: (listener) => {
+      window.addEventListener("storage", listener);
+    },
+    removeStorageListener: (listener) => {
+      window.removeEventListener("storage", listener);
+    }
+  });
 
 let alarmAudioContext = null;
+let alarmHtmlAudio = null;
+let alarmEnableAfterPlayback = false;
 let alarmSoundEnabled =
   loadAlarmSoundPreference();
 let alarmSoundError = "";
+let alarmAudioVerificationState = "UNVERIFIED";
+let alarmAudioLastFailure = null;
+let alarmAudioResumeInProgress = false;
+let alarmPlaybackState = "IDLE";
+let alarmPlaybackGeneration = 0;
+let alarmPageActive = true;
+let alarmAudioAbortController = new AbortController();
+let alarmPlaybackCycleCount = 0;
 let alarmRepeatTimer = null;
 let alarmActiveNodes = [];
 let alarmIsActive = false;
@@ -229,6 +290,20 @@ let loginProviderAvailability = {
 };
 let currentTeam = null;
 let mailConnections = [];
+let mailConnectionLoadState = {
+  status: "idle",
+  reason: "initial",
+  confirmedAt: null
+};
+let mailConnectionRefreshTimer = null;
+let mailConnectionRefreshDebounceTimer = null;
+let mailConnectionBroadcastChannel = null;
+let mailConnectionMutationInProgress = false;
+let notificationTestRunPromise = null;
+let notificationTestSyncPromise = null;
+let notificationTestSyncTimer = null;
+let notificationTestRateLimitTimer = null;
+let notificationTestBroadcastChannel = null;
 let mailProviderAvailability = {
   GOOGLE: "UNKNOWN",
   MICROSOFT: "UNKNOWN"
@@ -264,6 +339,7 @@ let alertFallbackInterval = null;
 let alertLongDisconnectTimer = null;
 let activeAlertAudience = null;
 let currentAlarmAlertContext = null;
+const alertPresentationTimelines = new Map();
 const notificationSelectionModes = {
   OWNER: false,
   NOTIFICATION_MEMBER: false
@@ -278,6 +354,7 @@ const expandedEmergencyAlertIds = {
 };
 const notifiedAlertIds =
   loadNotifiedAlertIds();
+const pendingAlertPresentationIds = new Set();
 let legacyGoogleAccountsFallbackBackup =
   [];
 let contractStorageMigrationPending =
@@ -300,6 +377,30 @@ let paymentMode = "signup";
   編集前の料金
 */
 let priceBeforeEditing = BASE_PRICE;
+
+const mailConnectionRefreshCoordinator =
+  mailConnectionRefreshPolicy.createCoordinator({
+    load: ({ signal }) =>
+      fetchMailConnections(signal),
+    onStateChange: (state, connections) => {
+      mailConnectionLoadState = state;
+      if (
+        state.status === "ready" &&
+        Array.isArray(connections)
+      ) {
+        mailConnections = connections;
+      }
+      renderMailConnectionRefreshSurfaces();
+    }
+  });
+
+const notificationTestExecutionController =
+  notificationTestExecutionPolicy.createController({
+    onChange: (state) => {
+      logNotificationTestPhase(state);
+      renderNotificationTestExecutionState();
+    }
+  });
 
 
 function openAuthenticatedStartupDestination() {
@@ -326,6 +427,8 @@ function openAuthenticatedStartupDestination() {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
+  initializeMailConnectionSynchronization();
+  initializeNotificationTestSynchronization();
   void initializeApplication();
 });
 
@@ -372,8 +475,9 @@ async function initializeApplication() {
     if (hasActiveSubscription()) {
       mailProviderAvailability =
         await fetchMailProviderAvailability();
-      mailConnections =
-        await fetchMailConnections();
+      await refreshMailConnections({
+        reason: "application-start"
+      });
       hydrateContractKeywordsFromServer();
       if (currentTeam?.role === "OWNER") {
         await refreshNotificationMemberManagement();
@@ -1072,72 +1176,205 @@ function hydrateContractKeywordsFromServer() {
     currentTeam.seats?.seatCount ?? 1;
 }
 
-async function fetchMailConnections() {
+async function fetchMailConnections(signal) {
   if (currentTeam?.role !== "OWNER") {
     return [];
   }
 
-  try {
-    const response = await fetch(
-      apiUrl(
-        `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/mail-connections`
-      ),
-      {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json"
-        },
-        cache: "no-store"
+  const response = await fetch(
+    apiUrl(
+      `/api/v1/teams/${encodeURIComponent(currentTeam.id)}/mail-connections`
+    ),
+    {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        Accept: "application/json"
+      },
+      cache: "no-store",
+      signal
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `mail_connection_${response.status}`
+    );
+  }
+
+  const connections =
+    (await response.json())?.connections;
+  return Array.isArray(connections)
+    ? connections.filter(
+        (connection) =>
+          typeof connection?.id === "string" &&
+          typeof connection.email === "string" &&
+          (connection.provider === "GOOGLE" ||
+            connection.provider === "MICROSOFT")
+      )
+        .map((connection) => ({
+          ...connection,
+          keywords: Array.isArray(
+            connection.keywords
+          )
+            ? connection.keywords
+                .filter(
+                  (keyword) =>
+                    typeof keyword ===
+                    "string"
+                )
+                .map((keyword) =>
+                  keyword.trim()
+                )
+                .filter(Boolean)
+            : []
+        }))
+    : [];
+}
+
+
+function canRefreshMailConnections() {
+  return Boolean(
+    authenticatedUser &&
+      currentTeam?.role === "OWNER" &&
+      hasActiveSubscription()
+  );
+}
+
+
+function mailConnectionsAreConfirmed() {
+  return mailConnectionLoadState.status === "ready";
+}
+
+
+async function refreshMailConnections({
+  reason = "manual",
+  showLoading = true,
+  force = false
+} = {}) {
+  if (!canRefreshMailConnections()) {
+    mailConnections = [];
+    mailConnectionRefreshCoordinator.reset();
+    return {
+      applied: true,
+      ok: true,
+      value: []
+    };
+  }
+
+  if (
+    mailConnectionMutationInProgress &&
+    !force
+  ) {
+    return {
+      applied: false,
+      ok: false,
+      deferred: true
+    };
+  }
+
+  const result =
+    await mailConnectionRefreshCoordinator.refresh({
+      reason,
+      showLoading
+    });
+
+  return result;
+}
+
+
+function scheduleMailConnectionRefresh(
+  reason,
+  showLoading = true
+) {
+  if (
+    !canRefreshMailConnections() ||
+    mailConnectionMutationInProgress
+  ) {
+    return;
+  }
+
+  if (mailConnectionRefreshDebounceTimer) {
+    window.clearTimeout(
+      mailConnectionRefreshDebounceTimer
+    );
+  }
+
+  mailConnectionRefreshDebounceTimer =
+    window.setTimeout(() => {
+      mailConnectionRefreshDebounceTimer = null;
+      void refreshMailConnections({
+        reason,
+        showLoading
+      });
+    }, MAIL_CONNECTION_REFRESH_DEBOUNCE_MS);
+}
+
+
+function initializeMailConnectionSynchronization() {
+  document.addEventListener(
+    "visibilitychange",
+    () => {
+      if (document.visibilityState === "visible") {
+        scheduleMailConnectionRefresh("tab-visible");
+      }
+    }
+  );
+
+  window.addEventListener("focus", () => {
+    scheduleMailConnectionRefresh("window-focus");
+  });
+  window.addEventListener("online", () => {
+    scheduleMailConnectionRefresh("network-online");
+  });
+  window.addEventListener("pageshow", () => {
+    scheduleMailConnectionRefresh("page-show");
+  });
+
+  if (typeof BroadcastChannel === "function") {
+    mailConnectionBroadcastChannel =
+      new BroadcastChannel(
+        "call-now-mail-connections"
+      );
+    mailConnectionBroadcastChannel.addEventListener(
+      "message",
+      (event) => {
+        if (
+          event.data?.type ===
+          "mail-connections-changed"
+        ) {
+          scheduleMailConnectionRefresh(
+            "another-tab-change"
+          );
+        }
       }
     );
-
-    if (response.status === 401) {
-      return [];
-    }
-
-    if (!response.ok) {
-      throw new Error(
-        `mail_connection_${response.status}`
-      );
-    }
-
-    const connections =
-      (await response.json())?.connections;
-    return Array.isArray(connections)
-      ? connections.filter(
-          (connection) =>
-            typeof connection?.id === "string" &&
-            typeof connection.email === "string" &&
-            (connection.provider === "GOOGLE" ||
-              connection.provider === "MICROSOFT")
-          )
-          .map((connection) => ({
-            ...connection,
-            keywords: Array.isArray(
-              connection.keywords
-            )
-              ? connection.keywords
-                  .filter(
-                    (keyword) =>
-                      typeof keyword ===
-                      "string"
-                  )
-                  .map((keyword) =>
-                    keyword.trim()
-                  )
-                  .filter(Boolean)
-              : []
-          })
-        )
-      : [];
-  } catch (error) {
-    console.warn(
-      "メール監視アカウントの状態を確認できませんでした。",
-      error
-    );
-    return [];
   }
+
+  mailConnectionRefreshTimer =
+    window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        scheduleMailConnectionRefresh(
+          "visible-poll",
+          false
+        );
+      }
+    }, MAIL_CONNECTION_REFRESH_INTERVAL_MS);
+}
+
+
+function announceMailConnectionsChanged() {
+  mailConnectionBroadcastChannel?.postMessage({
+    type: "mail-connections-changed"
+  });
+}
+
+
+function renderMailConnectionRefreshSurfaces() {
+  renderMailMonitoringAccount();
+  renderConnectedGoogleAccounts();
+  renderTestKeywordCards();
+  updateVisibleContractConnectionStates();
 }
 
 
@@ -1848,16 +2085,18 @@ async function fetchAlerts(path, audience) {
 async function refreshOwnerAlerts() {
   const alerts = await fetchOwnerAlerts();
   if (!Array.isArray(alerts)) return false;
-  ownerAlerts = alerts;
-  applyAlertUpdate(alerts, "OWNER");
+  applyAlertsForAudience(alerts, "OWNER", "refresh");
   return true;
 }
 
 async function refreshNotificationMemberAlerts() {
   const alerts = await fetchNotificationMemberAlerts();
   if (!Array.isArray(alerts)) return false;
-  notificationMemberAlerts = alerts;
-  applyAlertUpdate(alerts, "NOTIFICATION_MEMBER");
+  applyAlertsForAudience(
+    alerts,
+    "NOTIFICATION_MEMBER",
+    "refresh"
+  );
   return true;
 }
 
@@ -1904,7 +2143,7 @@ function startAlertEventStream(path, audience) {
     try {
       const payload = JSON.parse(event.data);
       const alerts = Array.isArray(payload.alerts) ? payload.alerts : [];
-      applyAlertsForAudience(alerts, audience);
+      applyAlertsForAudience(alerts, audience, "sse");
       setAlertStreamStatus(audience, "接続中", false);
     } catch {
       markAlertStreamDisconnected(audience);
@@ -1979,13 +2218,145 @@ function refreshAlertsForAudience(audience) {
     : refreshNotificationMemberAlerts();
 }
 
-function applyAlertsForAudience(alerts, audience) {
+function findNextLocalAlert(alerts) {
+  return alerts.find(
+    (alert) => {
+      if (alertTabCoordinator.hasHandled(alert.id)) {
+        notifiedAlertIds.add(alert.id);
+      }
+      return (
+        alertTabCoordinationPolicy.shouldPresentAlert(
+          alert,
+          ALERT_PAGE_STARTED_AT
+        ) &&
+        !notifiedAlertIds.has(alert.id) &&
+        !pendingAlertPresentationIds.has(alert.id)
+      );
+    }
+  );
+}
+
+async function coordinateAlertPresentation(
+  alert,
+  audience,
+  presentationContext
+) {
+  if (!alarmPageActive) return;
+  const generation = alarmPlaybackGeneration;
+  pendingAlertPresentationIds.add(alert.id);
+  try {
+    const claimed =
+      await alertTabCoordinator.claimPresentation(alert.id);
+    notifiedAlertIds.add(alert.id);
+    if (!claimed) {
+      recordAlertPresentationEvent(
+        presentationContext,
+        "ANOTHER_TAB_OWNS_PRESENTATION"
+      );
+      return;
+    }
+
+    const latestAlerts =
+      audience === "OWNER"
+        ? ownerAlerts
+        : notificationMemberAlerts;
+    const latest = latestAlerts.find(
+      (candidate) => candidate.id === alert.id
+    );
+    if (
+      !alarmPageActive ||
+      generation !== alarmPlaybackGeneration ||
+      !latest ||
+      latest.status !== "ACTIVE" ||
+      latest.readAt ||
+      !alarmSoundEnabled
+    ) {
+      return;
+    }
+
+    showAlarmNotification(
+      latest.matchedKeyword,
+      latest.detectedAt,
+      {
+        ...(presentationContext || {}),
+        alertId: latest.id,
+        audience,
+        kind: latest.kind || "REAL"
+      }
+    );
+  } finally {
+    pendingAlertPresentationIds.delete(alert.id);
+  }
+}
+
+function createAlertPresentationContext(alert, audience, source) {
+  const testView = notificationTestExecutionController.getView();
+  const matchingTest =
+    alert.kind === "TEST" &&
+    (testView.alertId === alert.id ||
+      (testView.running && testView.keyword === alert.matchedKeyword));
+  const context = {
+    alertId: alert.id,
+    audience,
+    kind: alert.kind || "REAL",
+    notificationTestId: matchingTest ? testView.testId : null,
+    notificationTestRequestId: matchingTest ? testView.requestId : null,
+    source,
+    startedAt: performance.now()
+  };
+  alertPresentationTimelines.set(alert.id, {
+    startedAt: context.startedAt,
+    events: []
+  });
+  while (alertPresentationTimelines.size > 20) {
+    alertPresentationTimelines.delete(
+      alertPresentationTimelines.keys().next().value
+    );
+  }
+  recordAlertPresentationEvent(context, "CLIENT_ALERT_RECEIVED");
+  return context;
+}
+
+function recordAlertPresentationEvent(context, event, details = {}) {
+  if (!context?.alertId) return;
+  const timeline = alertPresentationTimelines.get(context.alertId);
+  if (!timeline) return;
+  const entry = {
+    event,
+    elapsedMilliseconds: Math.max(
+      0,
+      Math.round((performance.now() - timeline.startedAt) * 10) / 10
+    ),
+    alertId: context.alertId,
+    audience: context.audience,
+    alertKind: context.kind,
+    notificationTestId: context.notificationTestId,
+    notificationTestRequestId: context.notificationTestRequestId,
+    source: context.source,
+    visibility: document.visibilityState,
+    ...details
+  };
+  timeline.events.push(entry);
+  console.info("Alert presentation timeline", entry);
+}
+
+function applyAlertsForAudience(alerts, audience, source = "refresh") {
+  const nextAlert = findNextLocalAlert(alerts);
+  const presentationContext = nextAlert
+    ? createAlertPresentationContext(nextAlert, audience, source)
+    : null;
   if (audience === "OWNER") {
     ownerAlerts = alerts;
   } else {
     notificationMemberAlerts = alerts;
   }
-  applyAlertUpdate(alerts, audience);
+  if (presentationContext) {
+    recordAlertPresentationEvent(
+      presentationContext,
+      "ALERT_STORE_APPLIED"
+    );
+  }
+  applyAlertUpdate(alerts, audience, presentationContext);
 }
 
 function handleAlertSessionEnded(audience) {
@@ -2013,7 +2384,7 @@ function setAlertStreamStatus(audience, text, reconnecting) {
     ?.classList.toggle("reconnecting", reconnecting);
 }
 
-function applyAlertUpdate(alerts, audience) {
+function applyAlertUpdate(alerts, audience, presentationContext = null) {
   pruneNotificationSelection(audience);
   renderEmergencyNotifications(
     audience === "OWNER"
@@ -2023,24 +2394,30 @@ function applyAlertUpdate(alerts, audience) {
     audience
   );
   renderNotificationBadge();
+  if (presentationContext) {
+    recordAlertPresentationEvent(
+      presentationContext,
+      "ALERT_LIST_RENDERED"
+    );
+  }
   const current = currentAlarmAlertContext?.audience === audience
     ? alerts.find((alert) => alert.id === currentAlarmAlertContext.alertId)
     : null;
   if (currentAlarmAlertContext?.audience === audience && !current) {
     closeAlarmNotification();
   }
-  const nextAlert = alerts.find(
-    (alert) =>
-      alert.status === "ACTIVE" &&
-      !alert.readAt &&
-      !notifiedAlertIds.has(alert.id));
+  const nextAlert = presentationContext
+    ? alerts.find((alert) => alert.id === presentationContext.alertId)
+    : findNextLocalAlert(alerts);
   if (nextAlert) {
-    rememberNotifiedAlert(nextAlert.id);
     if (alarmSoundEnabled) {
-      showAlarmNotification(nextAlert.matchedKeyword, nextAlert.detectedAt, {
-        alertId: nextAlert.id,
+      void coordinateAlertPresentation(
+        nextAlert,
         audience,
-        kind: nextAlert.kind || "REAL"});
+        presentationContext
+      );
+    } else {
+      rememberNotifiedAlert(nextAlert.id, "SILENT");
     }
   }
 }
@@ -3078,7 +3455,9 @@ ${formatYen(totalPrice)}
     await refreshNotificationMemberManagement();
     mailProviderAvailability =
       await fetchMailProviderAvailability();
-    mailConnections = await fetchMailConnections();
+    await refreshMailConnections({
+      reason: "purchase-complete"
+    });
     hydrateContractKeywordsFromServer();
     ownerAlerts = (await fetchOwnerAlerts()) ?? [];
     openApp();
@@ -3111,6 +3490,11 @@ function openGoogleScreen(
   }
 
   googleScreenMode = mode;
+  if (mode === "manage") {
+    void refreshMailConnections({
+      reason: "monitoring-settings-open"
+    });
+  }
   const isAuthenticationMode =
     mode !== "manage";
 
@@ -3367,6 +3751,72 @@ function loginProviderMark(provider) {
 }
 
 
+function getMailConnectionStatusPresentation(
+  connection
+) {
+  if (!mailConnectionsAreConfirmed()) {
+    return mailConnectionLoadState.status === "error"
+      ? {
+          className: "unavailable",
+          text: "● 接続状態を確認できません"
+        }
+      : {
+          className: "checking",
+          text: "● 状態を確認中"
+        };
+  }
+
+  const requiresReauthorization =
+    connection.connectionStatus ===
+      "REAUTH_REQUIRED" ||
+    connection.authorizationStatus ===
+      "REAUTH_REQUIRED" ||
+    connection.connectionStatus === "ERROR" ||
+    connection.authorizationStatus === "ERROR";
+  if (requiresReauthorization) {
+    return {
+      className: "requires-reauthorization",
+      text: "● 再認証が必要です"
+    };
+  }
+  if (
+    connection.connectionStatus === "ACTIVE" &&
+    connection.authorizationStatus === "ACTIVE"
+  ) {
+    return {
+      className: "active",
+      text: "● 監視中"
+    };
+  }
+  if (connection.connectionStatus === "PAUSED") {
+    return {
+      className: "paused",
+      text: "● 監視停止中"
+    };
+  }
+  return {
+    className: "unavailable",
+    text: "● 接続状態を確認できません"
+  };
+}
+
+
+function mailConnectionRefreshNoticeHtml() {
+  if (mailConnectionLoadState.status === "ready") {
+    return "";
+  }
+  const isError =
+    mailConnectionLoadState.status === "error";
+  return `
+    <p class="mail-connection-refresh-notice ${isError ? "error" : ""}" role="status" aria-live="polite">
+      ${isError
+        ? "接続状態を確認できません。通信が復旧すると自動で再確認します。"
+        : "監視アカウントの状態を確認中です。"}
+    </p>
+  `;
+}
+
+
 function renderMailMonitoringAccount() {
   const status =
     document.getElementById(
@@ -3430,12 +3880,28 @@ function renderMailMonitoringAccount() {
     return;
   }
 
+  const stateConfirmed =
+    mailConnectionsAreConfirmed();
   googleProviderButton.disabled =
+    !stateConfirmed ||
     mailProviderAvailability.GOOGLE !==
       "AVAILABLE";
   microsoftProviderButton.disabled =
+    !stateConfirmed ||
     mailProviderAvailability.MICROSOFT !==
       "AVAILABLE";
+
+  if (!stateConfirmed) {
+    status.innerHTML = `
+      ${mailConnectionRefreshNoticeHtml()}
+      ${mailConnections.length > 0
+        ? `<div class="mail-connection-list">
+            ${mailConnections.map(renderMailConnectionItem).join("")}
+          </div>`
+        : ""}
+    `;
+    return;
+  }
 
   if (mailConnections.length === 0) {
     const deferredChoices =
@@ -3475,24 +3941,21 @@ function renderMailMonitoringAccount() {
 
 
 function renderMailConnectionItem(connection) {
+  const statusPresentation =
+    getMailConnectionStatusPresentation(connection);
+  const stateConfirmed =
+    mailConnectionsAreConfirmed();
   const requiresReauthorization =
-    connection.connectionStatus ===
-      "REAUTH_REQUIRED" ||
-    connection.authorizationStatus ===
-      "REAUTH_REQUIRED" ||
-    connection.connectionStatus === "ERROR" ||
-    connection.authorizationStatus === "ERROR";
+    stateConfirmed &&
+    statusPresentation.className ===
+      "requires-reauthorization";
   const reauthorizeDisabled =
+    !stateConfirmed ||
     mailProviderAvailability[
       connection.provider
     ] !== "AVAILABLE";
   const isPaused =
     connection.connectionStatus === "PAUSED";
-  const monitoringStateClass = requiresReauthorization
-    ? "requires-reauthorization"
-    : isPaused
-      ? "paused"
-      : "active";
   return `
     <article class="mail-connection-item">
       <div>
@@ -3502,12 +3965,8 @@ function renderMailConnectionItem(connection) {
         <p class="connected-account-email">
           ${escapeHtml(connection.email)}
         </p>
-        <p class="mail-monitoring-state ${monitoringStateClass}">
-          ${requiresReauthorization
-            ? "● 再認証が必要です"
-            : isPaused
-              ? "● 監視停止中"
-              : "● 監視中"}
+        <p class="mail-monitoring-state ${statusPresentation.className}">
+          ${statusPresentation.text}
         </p>
       </div>
       <div class="mail-account-actions">
@@ -3523,12 +3982,20 @@ function renderMailConnectionItem(connection) {
           <button
             type="button"
             class="btn outline"
+            ${stateConfirmed ? "" : "disabled"}
             onclick="setMailMonitoringState('${connection.id}', '${isPaused ? "resume" : "pause"}')"
-          >${isPaused ? "このアカウントで監視を開始" : "監視を停止"}</button>
+          >${stateConfirmed
+            ? isPaused
+              ? "このアカウントで監視を開始"
+              : "監視を停止"
+            : mailConnectionLoadState.status === "error"
+              ? "状態を確認できません"
+              : "状態を確認中"}</button>
         ` : ""}
         <button
           type="button"
           class="account-remove-button"
+          ${stateConfirmed ? "" : "disabled"}
           onclick="disconnectMailConnection('${connection.id}')"
         >接続を解除</button>
       </div>
@@ -3596,21 +4063,46 @@ async function updateOwnerMonitoringChoice(choiceId, action) {
 
 
 async function activateDeferredOwnerMonitoring(choiceId) {
-  await updateOwnerMonitoringChoice(choiceId, "activate");
-  mailConnections = await fetchMailConnections();
-  renderMailMonitoringAccount();
-  renderConnectedGoogleAccounts();
-  renderTestKeywordCards();
+  if (mailConnectionMutationInProgress) {
+    return;
+  }
+  mailConnectionMutationInProgress = true;
+  mailConnectionRefreshCoordinator.invalidate(
+    "deferred-monitoring-change"
+  );
+  try {
+    const result = await updateOwnerMonitoringChoice(
+      choiceId,
+      "activate"
+    );
+    await refreshMailConnections({
+      reason: result
+        ? "deferred-monitoring-changed"
+        : "deferred-monitoring-failed",
+      force: true
+    });
+    if (result) {
+      announceMailConnectionsChanged();
+    }
+  } finally {
+    mailConnectionMutationInProgress = false;
+  }
 }
 
 
 async function setMailMonitoringState(connectionId, action) {
   if (
     currentTeam?.role !== "OWNER" ||
-    !["pause", "resume"].includes(action)
+    !["pause", "resume"].includes(action) ||
+    !mailConnectionsAreConfirmed() ||
+    mailConnectionMutationInProgress
   ) {
     return;
   }
+  mailConnectionMutationInProgress = true;
+  mailConnectionRefreshCoordinator.invalidate(
+    `monitoring-${action}`
+  );
   try {
     const response = await fetch(
       apiUrl(
@@ -3629,17 +4121,34 @@ async function setMailMonitoringState(connectionId, action) {
           "監視状態を変更できませんでした。"
       );
     }
-    mailConnections = await fetchMailConnections();
-    renderMailMonitoringAccount();
-    renderConnectedGoogleAccounts();
-    renderTestKeywordCards();
+    const refreshResult =
+      await refreshMailConnections({
+        reason: `monitoring-${action}-complete`,
+        force: true
+      });
+    if (!refreshResult.ok) {
+      throw new Error(
+        "監視状態は変更されましたが、最新状態を確認できませんでした。通信状態を確認してください。"
+      );
+    }
+    announceMailConnectionsChanged();
   } catch (error) {
+    if (
+      mailConnectionLoadState.status !== "ready"
+    ) {
+      await refreshMailConnections({
+        reason: `monitoring-${action}-failed`,
+        force: true
+      });
+    }
     await showAppAlert(
       error instanceof Error
         ? error.message
         : "監視状態を変更できませんでした。",
       { title: "監視設定のエラー" }
     );
+  } finally {
+    mailConnectionMutationInProgress = false;
   }
 }
 
@@ -3716,6 +4225,13 @@ async function beginMailOAuth(
     return;
   }
 
+  if (!mailConnectionsAreConfirmed()) {
+    await showAppAlert(
+      "監視アカウントの最新状態を確認してから、もう一度お試しください。"
+    );
+    return;
+  }
+
   if (
     mailProviderAvailability[provider] !==
     "AVAILABLE"
@@ -3744,6 +4260,8 @@ async function disconnectMailConnection(
   connectionId
 ) {
   if (currentTeam?.role !== "OWNER" ||
+      !mailConnectionsAreConfirmed() ||
+      mailConnectionMutationInProgress ||
       !mailConnections.some(
         (connection) =>
           connection.id === connectionId
@@ -3764,6 +4282,10 @@ async function disconnectMailConnection(
     return;
   }
 
+  mailConnectionMutationInProgress = true;
+  mailConnectionRefreshCoordinator.invalidate(
+    "mail-connection-disconnect"
+  );
   try {
     const response = await fetch(
       apiUrl(
@@ -3784,15 +4306,29 @@ async function disconnectMailConnection(
       );
     }
 
-    mailConnections =
-      await fetchMailConnections();
-    renderMailMonitoringAccount();
-    renderConnectedGoogleAccounts();
-    renderTestKeywordCards();
+    const refreshResult =
+      await refreshMailConnections({
+        reason: "mail-connection-disconnected",
+        force: true
+      });
+    if (!refreshResult.ok) {
+      throw new Error(
+        "接続は解除されましたが、最新状態を確認できませんでした。"
+      );
+    }
+    announceMailConnectionsChanged();
     await showAppAlert(
       "メール監視アカウントの接続を解除しました。"
     );
   } catch (error) {
+    if (
+      mailConnectionLoadState.status !== "ready"
+    ) {
+      await refreshMailConnections({
+        reason: "mail-connection-disconnect-failed",
+        force: true
+      });
+    }
     console.error(
       "メール監視アカウントを解除できませんでした。",
       error
@@ -3800,6 +4336,8 @@ async function disconnectMailConnection(
     await showAppAlert(
       "メール監視アカウントを解除できませんでした。通信状態を確認して、もう一度お試しください。"
     );
+  } finally {
+    mailConnectionMutationInProgress = false;
   }
 }
 
@@ -3931,10 +4469,31 @@ function renderContractSettings() {
 
   container.replaceChildren();
   pendingContractChange = null;
+  const stateConfirmed =
+    mailConnectionsAreConfirmed();
   const canManage =
     currentTeam?.role === "OWNER" &&
-    hasActiveSubscription();
-  if (mailConnections.length === 0) {
+    hasActiveSubscription() &&
+    stateConfirmed;
+  if (!stateConfirmed) {
+    const notice =
+      document.createElement("p");
+    notice.id =
+      "contractMailConnectionStateNotice";
+    notice.className =
+      `mail-connection-refresh-notice ${mailConnectionLoadState.status === "error" ? "error" : ""}`;
+    notice.setAttribute("role", "status");
+    notice.setAttribute("aria-live", "polite");
+    notice.textContent =
+      mailConnectionLoadState.status === "error"
+        ? "接続状態を確認できません。通信が復旧すると自動で再確認します。"
+        : "監視アカウントの状態を確認中です。";
+    container.appendChild(notice);
+  }
+  if (
+    stateConfirmed &&
+    mailConnections.length === 0
+  ) {
     const empty =
       document.createElement("p");
     empty.className =
@@ -3972,24 +4531,16 @@ function renderContractSettings() {
       email.textContent =
         connection.email;
       title.append(providerName, email);
+      const statusPresentation =
+        getMailConnectionStatusPresentation(
+          connection
+        );
       const status =
         document.createElement("span");
       status.className =
-        `contract-provider-status ${
-          connection.connectionStatus === "ACTIVE"
-            ? "active"
-            : connection.connectionStatus === "PAUSED"
-              ? "paused"
-              : "requires-reauthorization"
-        }`;
+        `contract-provider-status ${statusPresentation.className}`;
       status.textContent =
-        connection.connectionStatus ===
-        "ACTIVE"
-          ? "● 監視中"
-          : connection.connectionStatus ===
-              "PAUSED"
-            ? "● 監視停止中"
-            : "● 再設定が必要";
+        statusPresentation.text;
       heading.append(title, status);
 
       const label =
@@ -4070,12 +4621,129 @@ function renderContractSettings() {
   if (!canManage) {
     setText(
       "contractSettingsError",
-      currentTeam?.role === "OWNER"
-        ? "現在の契約状態では変更できません。"
-        : "契約内容の変更は管理者のみ行えます。"
+      !stateConfirmed
+        ? "監視アカウントの最新状態を確認してから変更できます。"
+        : currentTeam?.role === "OWNER"
+          ? "現在の契約状態では変更できません。"
+          : "契約内容の変更は管理者のみ行えます。"
     );
   }
   updateContractSettingsPreview();
+}
+
+
+function updateVisibleContractConnectionStates() {
+  const page =
+    document.getElementById("keywordPage");
+  const container =
+    document.getElementById(
+      "contractSettingsProviders"
+    );
+  if (
+    !page?.classList.contains("active") ||
+    !container
+  ) {
+    return;
+  }
+
+  const cards = [
+    ...container.querySelectorAll(
+      "[data-contract-connection-id]"
+    )
+  ];
+  const renderedIds = cards.map(
+    (card) =>
+      card.dataset.contractConnectionId
+  );
+  const currentIds = mailConnections.map(
+    (connection) => connection.id
+  );
+  if (
+    mailConnectionsAreConfirmed() &&
+    JSON.stringify(renderedIds) !==
+      JSON.stringify(currentIds)
+  ) {
+    renderContractSettings();
+    return;
+  }
+
+  const notice =
+    document.getElementById(
+      "contractMailConnectionStateNotice"
+    );
+  if (mailConnectionsAreConfirmed()) {
+    notice?.remove();
+  } else {
+    const stateNotice =
+      notice ?? document.createElement("p");
+    stateNotice.id =
+      "contractMailConnectionStateNotice";
+    stateNotice.className =
+      `mail-connection-refresh-notice ${mailConnectionLoadState.status === "error" ? "error" : ""}`;
+    stateNotice.setAttribute("role", "status");
+    stateNotice.setAttribute(
+      "aria-live",
+      "polite"
+    );
+    stateNotice.textContent =
+      mailConnectionLoadState.status === "error"
+        ? "接続状態を確認できません。通信が復旧すると自動で再確認します。"
+        : "監視アカウントの状態を確認中です。";
+    if (!notice) {
+      container.prepend(stateNotice);
+    }
+  }
+
+  const canManage =
+    currentTeam?.role === "OWNER" &&
+    hasActiveSubscription() &&
+    mailConnectionsAreConfirmed();
+  cards.forEach((card) => {
+    const connection =
+      mailConnections.find(
+        (candidate) =>
+          candidate.id ===
+          card.dataset.contractConnectionId
+      );
+    const status = card.querySelector(
+      ".contract-provider-status"
+    );
+    if (connection && status) {
+      const presentation =
+        getMailConnectionStatusPresentation(
+          connection
+        );
+      status.className =
+        `contract-provider-status ${presentation.className}`;
+      status.textContent = presentation.text;
+    }
+    card
+      .querySelectorAll("input, button")
+      .forEach((control) => {
+        control.disabled = !canManage;
+      });
+  });
+
+  const saveButton =
+    document.getElementById(
+      "saveContractSettingsButton"
+    );
+  if (saveButton) {
+    saveButton.disabled = !canManage;
+  }
+  if (!mailConnectionsAreConfirmed()) {
+    setText(
+      "contractSettingsError",
+      "監視アカウントの最新状態を確認してから変更できます。"
+    );
+  } else if (
+    document.getElementById(
+      "contractSettingsError"
+    )?.textContent ===
+    "監視アカウントの最新状態を確認してから変更できます。"
+  ) {
+    setText("contractSettingsError", "");
+  }
 }
 
 function createContractKeywordRow(
@@ -4562,7 +5230,9 @@ async function applyPendingContractChange() {
     const appliedQuote = pending.quote;
     currentTeam = updatedTeam;
     pendingContractChange = null;
-    mailConnections = await fetchMailConnections();
+    await refreshMailConnections({
+      reason: "contract-settings-applied"
+    });
     hydrateContractKeywordsFromServer();
     synchronizeContractFromCurrentTeam();
     renderTestKeywordCards();
@@ -5368,21 +6038,7 @@ function updateContractStatusUI() {
       "renewContractButton"
     );
 
-  document
-    .querySelectorAll(
-      ".test-button"
-    )
-    .forEach((button) => {
-      button.disabled =
-        !activeSubscription || expired;
-
-      button.textContent =
-        !activeSubscription
-          ? "初期設定が必要です"
-          : expired
-            ? "契約更新が必要です"
-            : "テストを実行";
-    });
+  renderNotificationTestExecutionState();
 
   if (renewalButton) {
     renewalButton.textContent =
@@ -6260,40 +6916,51 @@ function renderConnectedGoogleAccounts() {
     document.createElement("div");
   monitoringAccount.className =
     "google-account-role";
+  const stateConfirmed =
+    mailConnectionsAreConfirmed();
   const activeMailConnections =
-    mailConnections.filter(
-      (connection) =>
-        connection.connectionStatus === "ACTIVE" &&
-        connection.authorizationStatus === "ACTIVE"
-    );
+    stateConfirmed
+      ? mailConnections.filter(
+          (connection) =>
+            connection.connectionStatus === "ACTIVE" &&
+            connection.authorizationStatus === "ACTIVE"
+        )
+      : [];
   const requiresMailReauthorization =
+    stateConfirmed &&
     mailConnections.some(
-      (connection) =>
-        ["REAUTH_REQUIRED", "ERROR"].includes(
-          connection.connectionStatus
-        ) ||
-        connection.authorizationStatus !== "ACTIVE"
-    );
+        (connection) =>
+          ["REAUTH_REQUIRED", "ERROR"].includes(
+            connection.connectionStatus
+          ) ||
+          connection.authorizationStatus !== "ACTIVE"
+      );
   const pausedMailConnections =
-    mailConnections.filter(
-      (connection) =>
-        connection.connectionStatus === "PAUSED"
-    );
+    stateConfirmed
+      ? mailConnections.filter(
+          (connection) =>
+            connection.connectionStatus === "PAUSED"
+        )
+      : [];
   const deferredMailChoices =
     ownerOnboarding?.choices?.filter(
       (choice) =>
         choice.status === "DEFERRED" && choice.email
     ) ?? [];
   const monitoringStatus =
-    mailConnections.length > 0
-      ? requiresMailReauthorization
-        ? `${mailConnections.length}件中、再認証が必要な接続があります`
-        : pausedMailConnections.length > 0
-          ? `${activeMailConnections.length}件監視中・${pausedMailConnections.length}件停止中`
-          : `${mailConnections.length}件接続中`
-      : deferredMailChoices.length > 0
-        ? `${deferredMailChoices.length}件設定保留`
-        : "接続されていません";
+    !stateConfirmed
+      ? mailConnectionLoadState.status === "error"
+        ? "接続状態を確認できません"
+        : "状態を確認中"
+      : mailConnections.length > 0
+        ? requiresMailReauthorization
+          ? `${mailConnections.length}件中、再認証が必要な接続があります`
+          : pausedMailConnections.length > 0
+            ? `${activeMailConnections.length}件監視中・${pausedMailConnections.length}件停止中`
+            : `${mailConnections.length}件接続中`
+        : deferredMailChoices.length > 0
+          ? `${deferredMailChoices.length}件設定保留`
+          : "接続されていません";
   const monitoringDetail =
     mailConnections.length > 0
       ? mailConnections
@@ -6367,12 +7034,23 @@ function showAppPage(
     void refreshNotificationMemberManagement();
   }
 
+  if (
+    ["homePage", "testPage", "keywordPage"].includes(
+      pageId
+    )
+  ) {
+    void refreshMailConnections({
+      reason: `app-page-${pageId}`
+    });
+  }
+
   if (pageId === "keywordPage") {
     renderContractSettings();
   }
 
   if (pageId === "testPage") {
     renderTestKeywordCards();
+    scheduleNotificationTestSynchronization("test-page-opened");
   }
 
   document
@@ -6506,6 +7184,12 @@ async function performLogout() {
   loginIdentities = [];
   currentTeam = null;
   mailConnections = [];
+  mailConnectionRefreshCoordinator.reset();
+  notificationTestExecutionController.reset();
+  if (notificationTestRateLimitTimer) {
+    window.clearInterval(notificationTestRateLimitTimer);
+    notificationTestRateLimitTimer = null;
+  }
   mailProviderAvailability = {
     GOOGLE: "UNKNOWN",
     MICROSOFT: "UNKNOWN"
@@ -6942,29 +7626,49 @@ function saveAlarmSoundPreference(enabled) {
 }
 
 function loadNotifiedAlertIds() {
+  const loaded = new Set(
+    alertTabCoordinator.handledAlertIds()
+  );
   try {
     const saved = JSON.parse(
-      window.sessionStorage.getItem(NOTIFIED_ALERT_IDS_KEY) || "[]"
+      window.sessionStorage.getItem(LEGACY_NOTIFIED_ALERT_IDS_KEY) || "[]"
     );
     if (Array.isArray(saved)) {
-      return new Set(saved.filter((value) => typeof value === "string"));
+      saved
+        .filter((value) => typeof value === "string")
+        .forEach((alertId) => {
+          loaded.add(alertId);
+          alertTabCoordinator.markHandled(
+            alertId,
+            "PRESENTED"
+          );
+        });
     }
   } catch {
-    /* 保存値が壊れている場合は空の履歴から開始する。 */
+    /* 共有履歴を正として継続する。 */
   }
-  return new Set();
+  return loaded;
 }
 
-function rememberNotifiedAlert(alertId) {
+function rememberNotifiedAlert(
+  alertId,
+  state = "PRESENTED"
+) {
   notifiedAlertIds.add(alertId);
-  try {
-    window.sessionStorage.setItem(
-      NOTIFIED_ALERT_IDS_KEY,
-      JSON.stringify(Array.from(notifiedAlertIds).slice(-100))
-    );
-  } catch {
-    /* 通知表示自体は継続する。 */
-  }
+  alertTabCoordinator.markHandled(alertId, state);
+}
+
+function handleExternalAlertPresentation(record) {
+  if (!record?.id) return;
+  notifiedAlertIds.add(record.id);
+  pendingAlertPresentationIds.delete(record.id);
+  if (currentAlarmAlertContext?.alertId !== record.id) return;
+  recordAlertPresentationEvent(
+    currentAlarmAlertContext,
+    "ANOTHER_TAB_HANDLED_ALERT",
+    { handledState: record.state }
+  );
+  closeAlarmNotification();
 }
 
 function initializeAlarmNotification() {
@@ -7004,14 +7708,43 @@ function initializeAlarmNotification() {
     );
   }
 
+  alertTabCoordinator.subscribe(
+    handleExternalAlertPresentation
+  );
+
   window.addEventListener("storage", (event) => {
     if (event.key !== ALERT_SOUND_SETTING_KEY) return;
     alarmSoundEnabled = loadAlarmSoundPreference();
     alarmSoundError = "";
+    alarmAudioLastFailure = null;
+    alarmAudioVerificationState = alarmSoundEnabled
+      ? "UNVERIFIED"
+      : "DISABLED";
     if (!alarmSoundEnabled) {
       closeAlarmNotification();
     }
     updateAllAlarmSoundControls();
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    updateAllAlarmSoundControls();
+    if (
+      currentAlarmAlertContext &&
+      alarmSoundEnabled &&
+      alarmPlaybackState === "BLOCKED"
+    ) {
+      showAlarmAudioFallback(alarmAudioLastFailure);
+    }
+  });
+
+  window.addEventListener("pagehide", () => {
+    alarmPageActive = false;
+    stopAlarmSound();
+  });
+  window.addEventListener("pageshow", () => {
+    // BFCache restoration permits new actions, never old pending operations.
+    alarmPageActive = true;
   });
 
   updateAllAlarmSoundControls();
@@ -7019,6 +7752,10 @@ function initializeAlarmNotification() {
 
 
 function stopCurrentAlarmLocally() {
+  const alertId = currentAlarmAlertContext?.alertId;
+  if (alertId) {
+    rememberNotifiedAlert(alertId, "STOPPED");
+  }
   closeAlarmNotification();
 }
 
@@ -7057,6 +7794,24 @@ function getAlarmAudioContext() {
     alarmAudioContext.addEventListener?.(
       "statechange",
       () => {
+        if (
+          alarmAudioContext?.state !== "running" &&
+          alarmAudioVerificationState === "READY"
+        ) {
+          alarmAudioVerificationState = "UNVERIFIED";
+        }
+        if (
+          alarmAudioContext?.state !== "running" &&
+          alarmIsActive &&
+          !alarmAudioResumeInProgress
+        ) {
+          const error = alarmAudioPolicy.createPlaybackError(
+            "AudioContextInterruptedError",
+            "AudioContext stopped while an alert was active"
+          );
+          failActiveAlarmPlayback(error, "context-state-change");
+          return;
+        }
         updateAllAlarmSoundControls();
       }
     );
@@ -7066,98 +7821,141 @@ function getAlarmAudioContext() {
 }
 
 
-async function unlockAlarmAudio() {
-  const context =
-    getAlarmAudioContext();
-
-  if (!context) {
-    return false;
+function getHtmlAlarmAudio() {
+  if (!alarmHtmlAudio) {
+    alarmHtmlAudio = htmlAlarmAudioPolicy.createPlayer();
   }
+  return alarmHtmlAudio;
+}
 
+
+function classifyAlarmAudioFailure(error) {
+  return alarmAudioPolicy.classifyPlaybackError(
+    error,
+    ALARM_AUDIO_BACKEND === "html"
+      ? "html-audio"
+      : alarmAudioContext?.state || "unavailable"
+  );
+}
+
+
+function recordAlarmAudioFailure(error, phase) {
+  const failure = classifyAlarmAudioFailure(error);
+  alarmAudioVerificationState = "FAILED";
+  alarmAudioLastFailure = failure;
+  alarmSoundError = failure.controlMessage;
+  console.warn("Alarm audio playback failed", {
+    code: failure.code,
+    contextState: failure.contextState,
+    phase,
+    detail: error?.playbackPhase || "unspecified"
+  });
+  updateAllAlarmSoundControls();
+  return failure;
+}
+
+
+async function unlockAlarmAudio({
+  source = "explicit-enable"
+} = {}) {
+  if (!alarmPageActive) return false;
+  const generation = alarmPlaybackGeneration;
+  const signal = alarmAudioAbortController.signal;
   try {
-    if (
-      context.state ===
-      "suspended"
-    ) {
-      await context.resume();
+    const context = ALARM_AUDIO_BACKEND === "html"
+      ? null
+      : getAlarmAudioContext();
+    if (ALARM_AUDIO_BACKEND !== "html" && !context) {
+      throw new DOMException(
+        "Web Audio API is unavailable",
+        "NotSupportedError"
+      );
     }
-
-    /*
-      Safariで、テストボタンを押した操作を
-      通知音の再生許可として記憶させる。
-    */
-    const oscillator =
-      context.createOscillator();
-
-    const gain =
-      context.createGain();
-
-    gain.gain.setValueAtTime(
-      0.0001,
-      context.currentTime
-    );
-
-    oscillator.connect(gain);
-    gain.connect(
-      context.destination
-    );
-
-    oscillator.start();
-    oscillator.stop(
-      context.currentTime + 0.01
-    );
-
-    const ready = context.state === "running";
+    alarmAudioVerificationState = "VERIFYING";
+    alarmSoundError = "";
+    alarmAudioLastFailure = null;
     updateAllAlarmSoundControls();
-    return ready;
+    if (ALARM_AUDIO_BACKEND === "html") {
+      await getHtmlAlarmAudio().playConfirmation({ signal }).completion;
+    } else {
+      await alarmAudioPolicy.verifyUserGesturePlayback(context, { signal });
+    }
+    if (!alarmPageActive || generation !== alarmPlaybackGeneration) return false;
+    alarmAudioVerificationState = "READY";
+    console.info("Alarm audio confirmation completed", {
+      contextState: context?.state || "html-audio",
+      source
+    });
+    updateAllAlarmSoundControls();
+    return true;
   } catch (error) {
-    console.warn(
-      "通知音の再生準備に失敗しました。",
-      error
-    );
-
-    updateAllAlarmSoundControls();
-
+    if (!alarmPageActive || generation !== alarmPlaybackGeneration) return false;
+    recordAlarmAudioFailure(error, source);
     return false;
   }
 }
 
 
 async function enableAlarmAudio(audience) {
-  const wasEnabled = alarmSoundEnabled;
-  const ready = await unlockAlarmAudio();
+  const generation = alarmPlaybackGeneration;
+  const ready = await unlockAlarmAudio({
+    source: `enable-${String(audience || "UNKNOWN").toLowerCase()}`
+  });
+  if (!alarmPageActive || generation !== alarmPlaybackGeneration) return false;
   if (ready) {
     saveAlarmSoundPreference(true);
     alarmSoundError = "";
+    alarmAudioLastFailure = null;
   } else {
-    if (!wasEnabled) saveAlarmSoundPreference(false);
-    alarmSoundError =
-      "通知音を有効にできませんでした。ブラウザの音声設定を確認してください。";
+    saveAlarmSoundPreference(false);
   }
   updateAllAlarmSoundControls();
   return ready;
 }
 
 async function toggleAlarmSoundPreference(audience) {
-  if (alarmSoundEnabled) {
+  if (!alarmPageActive) return;
+  const generation = alarmPlaybackGeneration;
+  if (
+    alarmSoundEnabled &&
+    alarmAudioReadiness() === "READY"
+  ) {
     saveAlarmSoundPreference(false);
     alarmSoundError = "";
+    alarmAudioLastFailure = null;
+    alarmAudioVerificationState = "DISABLED";
     closeAlarmNotification();
     updateAllAlarmSoundControls();
     return;
   }
 
   const ready = await enableAlarmAudio(audience);
+  if (!alarmPageActive || generation !== alarmPlaybackGeneration) return;
   if (ready && currentAlarmAlertContext) {
     await startAlarmSound();
   }
 }
 
 async function enableAlarmSoundForCurrentAlert() {
+  if (!alarmPageActive) return;
+  if (ALARM_AUDIO_BACKEND === "html" && currentAlarmAlertContext) {
+    if (alarmIsActive) return;
+    // Call play() in this click, not after awaiting a separate confirmation.
+    await startAlarmSound({ explicitEnable: true });
+    return;
+  }
+  const generation = alarmPlaybackGeneration;
   const audience = currentAlarmAlertContext?.audience || "OWNER";
   const ready = await enableAlarmAudio(audience);
+  if (!alarmPageActive || generation !== alarmPlaybackGeneration) return;
   if (ready && currentAlarmAlertContext) {
     await startAlarmSound();
+  } else if (currentAlarmAlertContext) {
+    alarmPlaybackState = alarmAudioPolicy.transitionPlaybackState(
+      alarmPlaybackState,
+      "BLOCK"
+    );
+    showAlarmAudioFallback(alarmAudioLastFailure);
   }
 }
 
@@ -7167,10 +7965,17 @@ function updateAllAlarmSoundControls() {
 }
 
 function alarmAudioReadiness() {
+  if (ALARM_AUDIO_BACKEND === "html") {
+    if (typeof window.Audio !== "function") return "UNAVAILABLE";
+    return alarmAudioVerificationState === "READY"
+      ? "READY"
+      : "NEEDS_USER_GESTURE";
+  }
   if (!window.AudioContext && !window.webkitAudioContext) {
     return "UNAVAILABLE";
   }
-  return alarmAudioContext?.state === "running"
+  return alarmAudioContext?.state === "running" &&
+    alarmAudioVerificationState === "READY"
     ? "READY"
     : "NEEDS_USER_GESTURE";
 }
@@ -7196,9 +8001,9 @@ function updateAlarmAudioReadiness(audience) {
     alarmSoundEnabled && readiness === "NEEDS_USER_GESTURE";
   const unavailable = readiness === "UNAVAILABLE";
   const label = alarmSoundEnabled
-    ? needsGesture
-      ? "通知音 ON・有効化必要"
-      : "通知音 ON"
+    ? ready
+      ? "通知音 ON"
+      : "通知音 有効化必要"
     : "通知音 OFF";
 
   status.textContent = alarmSoundError
@@ -7208,19 +8013,23 @@ function updateAlarmAudioReadiness(audience) {
       : unavailable
         ? "このブラウザでは通知音を利用できません。緊急通知はベルから確認できます。"
         : ready
-          ? "通知音を受け取る準備ができています。"
-          : "ブラウザの制限により、最初に一度だけ通知音を有効にしてください。";
+          ? "確認音の再生処理が完了し、通知音を受け取る準備ができています。"
+          : alarmAudioVerificationState === "VERIFYING"
+            ? "確認音を再生しています。"
+            : "最初に一度だけ通知音を有効にし、確認音が聞こえることを確かめてください。";
   button.textContent = alarmSoundEnabled
     ? "通知音を有効にする"
     : "通知音をONにする";
   button.classList.toggle("hidden", ready || unavailable);
+  button.disabled = alarmAudioVerificationState === "VERIFYING";
+  toggle.disabled = alarmAudioVerificationState === "VERIFYING";
   container?.classList.toggle("ready", ready);
   container?.classList.toggle("off", !alarmSoundEnabled);
   container?.classList.toggle("error", Boolean(alarmSoundError));
 
   toggle.classList.toggle("off", !alarmSoundEnabled);
   toggle.classList.toggle("needs-gesture", needsGesture);
-  toggle.setAttribute("aria-pressed", String(alarmSoundEnabled));
+  toggle.setAttribute("aria-pressed", String(ready));
   toggle.setAttribute("aria-label", `${label}。押すと切り替えます。`);
   toggle.setAttribute("title", `${label}。押すと切り替えます。`);
   const toggleLabel = toggle.querySelector(".sound-toggle-label");
@@ -7236,78 +8045,47 @@ function scheduleAlarmTone(
   frequency,
   duration
 ) {
-  const oscillator =
-    context.createOscillator();
-
-  const gain =
-    context.createGain();
-
-  oscillator.type = "square";
-
-  oscillator.frequency
-    .setValueAtTime(
-      frequency,
-      startTime
-    );
-
-  gain.gain.setValueAtTime(
-    0.0001,
-    startTime
-  );
-
-  gain.gain
-    .exponentialRampToValueAtTime(
-      0.28,
-      startTime + 0.02
-    );
-
-  gain.gain.setValueAtTime(
-    0.28,
-    startTime + duration - 0.04
-  );
-
-  gain.gain
-    .exponentialRampToValueAtTime(
-      0.0001,
-      startTime + duration
-    );
-
-  oscillator.connect(gain);
-  gain.connect(
-    context.destination
-  );
-
-  alarmActiveNodes.push(
-    oscillator
-  );
-
-  oscillator.addEventListener(
-    "ended",
-    () => {
-      alarmActiveNodes =
-        alarmActiveNodes.filter(
-          (node ) =>
-            node !== oscillator
-        );
-
-      oscillator.disconnect();
-      gain.disconnect();
-    },
+  return alarmAudioPolicy.createTone(
+    context,
     {
-      once: true
+      duration,
+      frequency,
+      startTime,
+      timeoutMilliseconds: 1800,
+      type: "square",
+      volume: 0.28
     }
-  );
-
-  oscillator.start(startTime);
-
-  oscillator.stop(
-    startTime + duration
   );
 }
 
 
-function playAlarmPattern() {
-  if (!alarmIsActive || !alarmSoundEnabled) {
+function setAlarmModalSoundStatus(message, state) {
+  const status = document.getElementById("alarmSoundStatus");
+  if (!status) return;
+  status.textContent = message;
+  status.dataset.state = state;
+}
+
+
+function failActiveAlarmPlayback(error, phase) {
+  if (alarmEnableAfterPlayback) saveAlarmSoundPreference(false);
+  const failure = recordAlarmAudioFailure(error, phase);
+  stopAlarmSound();
+  alarmPlaybackState = alarmAudioPolicy.transitionPlaybackState(
+    alarmPlaybackState,
+    "BLOCK"
+  );
+  showAlarmAudioFallback(failure);
+}
+
+
+async function playAlarmPattern(generation) {
+  if (
+    !alarmPageActive ||
+    !alarmIsActive ||
+    !alarmSoundEnabled ||
+    generation !== alarmPlaybackGeneration
+  ) {
     return;
   }
 
@@ -7317,31 +8095,26 @@ function playAlarmPattern() {
     );
   }
 
-  const context =
-    getAlarmAudioContext();
+  const context = ALARM_AUDIO_BACKEND === "html"
+    ? null
+    : getAlarmAudioContext();
 
   if (
-    !context ||
-    context.state !== "running"
+    ALARM_AUDIO_BACKEND !== "html" &&
+    (!context || context.state !== "running")
   ) {
-    showAlarmAudioFallback();
+    const error = alarmAudioPolicy.createPlaybackError(
+      "AudioContextSuspendedError",
+      "AudioContext is not running"
+    );
+    failActiveAlarmPlayback(error, "pattern-context-check");
     return;
   }
-
-  const status =
-    document.getElementById(
-      "alarmSoundStatus"
-    );
 
   const restartButton =
     document.getElementById(
       "restartAlarmButton"
     );
-
-  if (status) {
-    status.textContent =
-      "通知音が鳴っています。「この端末の通知音を停止」を押すまで繰り返します。";
-  }
 
   if (restartButton) {
     restartButton.classList.add(
@@ -7350,78 +8123,210 @@ function playAlarmPattern() {
   }
 
   const startTime =
-    context.currentTime + 0.03;
-
-  scheduleAlarmTone(
-    context,
-    startTime,
-    880,
-    0.22
-  );
-
-  scheduleAlarmTone(
-    context,
-    startTime + 0.32,
-    1175,
-    0.22
-  );
-
-  scheduleAlarmTone(
-    context,
-    startTime + 0.64,
-    880,
-    0.22
-  );
-
-  alarmRepeatTimer =
-    window.setTimeout(
-      playAlarmPattern,
-      1300
+    (context?.currentTime || 0) + 0.03;
+  if (alarmPlaybackCycleCount === 0) {
+    recordAlertPresentationEvent(
+      currentAlarmAlertContext,
+      "FIRST_AUDIO_PATTERN_SCHEDULED",
+      { firstToneDelayMilliseconds: 30 }
     );
+  }
+  let tones = [];
+
+  try {
+    tones = ALARM_AUDIO_BACKEND === "html"
+      ? [getHtmlAlarmAudio().playLoop({
+          signal: alarmAudioAbortController.signal,
+          onFirstPlayback: (timing) => {
+            if (alarmPageActive && alarmIsActive && generation === alarmPlaybackGeneration) {
+              recordAlertPresentationEvent(
+                currentAlarmAlertContext,
+                "HTML_AUDIO_FIRST_PLAYING",
+                timing
+              );
+            }
+          },
+          onRecovery: ({ recovering, attempt, phase }) => {
+            if (alarmPageActive && alarmIsActive && generation === alarmPlaybackGeneration) {
+              setAlarmModalSoundStatus(
+                recovering
+                  ? "通知音の再生を復旧しています。"
+                  : "通知音を再生しています。「この端末の通知音を停止」を押すまで繰り返します。",
+                recovering ? "recovering" : "playing"
+              );
+              recordAlertPresentationEvent(
+                currentAlarmAlertContext,
+                recovering ? "HTML_AUDIO_RECOVERING" : "HTML_AUDIO_RECOVERED",
+                { attempt, phase }
+              );
+            }
+          },
+          onCycle: () => {
+            if (alarmPageActive && alarmIsActive && generation === alarmPlaybackGeneration) {
+              alarmPlaybackCycleCount += 1;
+            }
+          },
+          onFailure: (error) => {
+            if (alarmPageActive && alarmIsActive && generation === alarmPlaybackGeneration) {
+              failActiveAlarmPlayback(error, "alarm-loop");
+            }
+          }
+        })]
+      : [
+          scheduleAlarmTone(context, startTime, 880, 0.22),
+          scheduleAlarmTone(context, startTime + 0.32, 1175, 0.22),
+          scheduleAlarmTone(context, startTime + 0.64, 880, 0.22)
+        ];
+    alarmActiveNodes.push(...tones);
+    await Promise.all(tones.map((tone) => tone.completion));
+    if (ALARM_AUDIO_BACKEND !== "html") {
+      alarmActiveNodes = alarmActiveNodes.filter(
+        (node) => !tones.includes(node)
+      );
+    }
+
+    if (
+      !alarmPageActive ||
+      !alarmIsActive ||
+      !alarmSoundEnabled ||
+      generation !== alarmPlaybackGeneration
+    ) {
+      return;
+    }
+
+    const previousPlaybackState = alarmPlaybackState;
+    alarmPlaybackState = alarmAudioPolicy.transitionPlaybackState(
+      alarmPlaybackState,
+      "PATTERN_COMPLETED"
+    );
+    alarmPlaybackCycleCount += 1;
+    if (alarmEnableAfterPlayback) {
+      saveAlarmSoundPreference(true);
+      alarmEnableAfterPlayback = false;
+    }
+    alarmAudioVerificationState = "READY";
+    alarmAudioLastFailure = null;
+    alarmSoundError = "";
+    if (
+      previousPlaybackState !== "PLAYING" &&
+      alarmPlaybackState === "PLAYING"
+    ) {
+      setAlarmModalSoundStatus(
+        "通知音を再生しています。「この端末の通知音を停止」を押すまで繰り返します。",
+        "playing"
+      );
+      recordAlertPresentationEvent(
+        currentAlarmAlertContext,
+        "PLAYBACK_STATE_PLAYING",
+        { playbackCycle: alarmPlaybackCycleCount }
+      );
+    }
+    updateAllAlarmSoundControls();
+    // HTML Audio repeats within its cancellable player after natural ended;
+    // the local WAV includes the full 1.3s period. No second app scheduler.
+    if (ALARM_AUDIO_BACKEND === "html") return;
+    alarmRepeatTimer = window.setTimeout(
+      () => {
+        void playAlarmPattern(generation);
+      },
+      400
+    );
+  } catch (error) {
+    tones.forEach((tone) => tone.stop());
+    alarmActiveNodes = alarmActiveNodes.filter(
+      (node) => !tones.includes(node)
+    );
+    if (
+      alarmIsActive &&
+      generation === alarmPlaybackGeneration
+    ) {
+      failActiveAlarmPlayback(error, "alarm-pattern");
+    }
+  }
 }
 
 
-async function startAlarmSound() {
+async function startAlarmSound({ explicitEnable = false } = {}) {
+  if (!alarmPageActive) return;
   stopAlarmSound();
+  if (explicitEnable) {
+    alarmEnableAfterPlayback = true;
+    alarmSoundEnabled = true;
+    alarmAudioVerificationState = "VERIFYING";
+  }
   if (!alarmSoundEnabled) {
     updateAlarmModalSoundStatus();
     return;
   }
   alarmIsActive = true;
+  alarmPlaybackState = alarmAudioPolicy.transitionPlaybackState(
+    alarmPlaybackState,
+    "INITIAL_START"
+  );
+  alarmPlaybackCycleCount = 0;
+  const generation = alarmPlaybackGeneration;
+  setAlarmModalSoundStatus(
+    "通知音の再生を開始しています。",
+    "starting"
+  );
+  recordAlertPresentationEvent(
+    currentAlarmAlertContext,
+    "AUDIO_START_REQUESTED"
+  );
 
-  const isReady =
-    await unlockAlarmAudio();
-
-  if (!alarmIsActive) {
+  if (ALARM_AUDIO_BACKEND === "html") {
+    await playAlarmPattern(generation);
     return;
   }
 
-  if (!isReady) {
-    showAlarmAudioFallback();
+  let context = null;
+  try {
+    alarmAudioResumeInProgress = true;
+    context = getAlarmAudioContext();
+    await alarmAudioPolicy.resumeAudioContext(context, {
+      signal: alarmAudioAbortController.signal
+    });
+  } catch (error) {
+    if (
+      alarmIsActive &&
+      generation === alarmPlaybackGeneration
+    ) {
+      failActiveAlarmPlayback(error, "alarm-start");
+    }
     return;
+  } finally {
+    if (generation === alarmPlaybackGeneration) {
+      alarmAudioResumeInProgress = false;
+    }
   }
 
-  playAlarmPattern();
+  if (
+    !alarmPageActive ||
+    !alarmIsActive ||
+    generation !== alarmPlaybackGeneration
+  ) {
+    return;
+  }
+  await playAlarmPattern(generation);
 }
 
 
-function showAlarmAudioFallback() {
-  const status =
-    document.getElementById(
-      "alarmSoundStatus"
-    );
-
+function showAlarmAudioFallback(failure = alarmAudioLastFailure) {
   const restartButton =
     document.getElementById(
       "restartAlarmButton"
     );
 
-  if (status) {
-    status.textContent =
-      "ブラウザが通知音をブロックしました。「通知音を鳴らす」を押してください。";
-  }
+  setAlarmModalSoundStatus(
+    failure?.modalMessage ||
+      "通知音を開始できませんでした。「通知音を鳴らす」を押してください。",
+    "error"
+  );
 
   if (restartButton) {
+    restartButton.textContent = failure?.code === "PLAYBACK_STALLED"
+      ? "通知音を再試行"
+      : "通知音を鳴らす";
     restartButton.classList.remove(
       "hidden"
     );
@@ -7441,8 +8346,10 @@ function updateAlarmModalSoundStatus() {
   if (!status || !restartButton) return;
 
   if (!alarmSoundEnabled) {
-    status.textContent =
-      "通知音はOFFです。緊急通知はベルから確認できます。";
+    setAlarmModalSoundStatus(
+      "通知音はOFFです。緊急通知はベルから確認できます。",
+      "off"
+    );
     restartButton.textContent =
       "通知音をONにする";
     restartButton.classList.remove(
@@ -7457,7 +8364,21 @@ function updateAlarmModalSoundStatus() {
 
 
 function stopAlarmSound() {
+  alarmPlaybackGeneration += 1;
+  alarmAudioAbortController.abort();
+  alarmAudioAbortController = new AbortController();
+  alarmHtmlAudio?.stop();
+  alarmEnableAfterPlayback = false;
+  alarmAudioResumeInProgress = false;
+  if (alarmAudioVerificationState === "VERIFYING") {
+    alarmAudioVerificationState = "UNVERIFIED";
+  }
   alarmIsActive = false;
+  alarmPlaybackState = alarmAudioPolicy.transitionPlaybackState(
+    alarmPlaybackState,
+    "STOP"
+  );
+  alarmPlaybackCycleCount = 0;
 
   if (alarmRepeatTimer) {
     window.clearTimeout(
@@ -7468,22 +8389,62 @@ function stopAlarmSound() {
   }
 
   alarmActiveNodes.forEach(
-    (oscillator ) => {
-      try {
-        oscillator.stop();
-      } catch (error) {
-        /* すでに停止済みの場合は何もしない。 */
-      }
-
-      try {
-        oscillator.disconnect();
-      } catch (error) {
-        /* すでに切断済みの場合は何もしない。 */
-      }
+    (tone) => {
+      tone.stop();
     }
   );
 
   alarmActiveNodes = [];
+  updateAllAlarmSoundControls();
+}
+
+
+async function waitForAlarmModalPaint(context) {
+  let timeoutId = null;
+  const timeout = new Promise((resolve) => {
+    timeoutId = window.setTimeout(
+      () => resolve("PAINT_TIMEOUT"),
+      150
+    );
+  });
+  try {
+    const result = await Promise.race([
+      alarmAudioPolicy.waitForModalPaintBoundary({
+        isVisible: document.visibilityState === "visible",
+        requestFrame: window.requestAnimationFrame?.bind(window)
+      }),
+      timeout
+    ]);
+    recordAlertPresentationEvent(
+      context,
+      result === "PAINT_FRAME"
+        ? "MODAL_PAINT_FRAME"
+        : "MODAL_PAINT_WAIT_SKIPPED",
+      { paintBoundary: result }
+    );
+  } finally {
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId);
+    }
+  }
+}
+
+
+async function startAlarmAfterModalPresentation(context) {
+  if (!alarmPageActive) return;
+  const generation = alarmPlaybackGeneration;
+  await waitForAlarmModalPaint(context);
+  const modal = document.getElementById("alarmModal");
+  if (
+    !alarmPageActive ||
+    generation !== alarmPlaybackGeneration ||
+    currentAlarmAlertContext !== context ||
+    modal?.classList.contains("hidden") ||
+    !alarmSoundEnabled
+  ) {
+    return;
+  }
+  await startAlarmSound();
 }
 
 
@@ -7492,6 +8453,7 @@ function showAlarmNotification(
   detectedAt,
   alertContext = null
 ) {
+  if (!alarmPageActive) return;
   const modal =
     document.getElementById(
       "alarmModal"
@@ -7584,8 +8546,10 @@ function showAlarmNotification(
   }
 
   if (status) {
-    status.textContent =
-      "通知音を準備しています。";
+    setAlarmModalSoundStatus(
+      "通知モーダルを表示しました。通知音はまだ開始していません。",
+      "starting"
+    );
   }
 
   if (restartButton) {
@@ -7594,8 +8558,17 @@ function showAlarmNotification(
     );
   }
 
+  recordAlertPresentationEvent(
+    alertContext,
+    "MODAL_DOM_UPDATED"
+  );
+
   modal.classList.remove(
     "hidden"
+  );
+  recordAlertPresentationEvent(
+    alertContext,
+    "MODAL_OPEN"
   );
 
   if (stopButton) {
@@ -7605,7 +8578,7 @@ function showAlarmNotification(
   }
 
   if (alarmSoundEnabled) {
-    void startAlarmSound();
+    void startAlarmAfterModalPresentation(alertContext);
   } else {
     updateAlarmModalSoundStatus();
   }
@@ -7613,6 +8586,11 @@ function showAlarmNotification(
 
 
 function closeAlarmNotification() {
+  recordAlertPresentationEvent(
+    currentAlarmAlertContext,
+    "LOCAL_AUDIO_STOPPED",
+    { playbackState: alarmPlaybackState }
+  );
   stopAlarmSound();
 
   const modal =
@@ -7644,6 +8622,7 @@ function closeAlarmNotification() {
 
   if (status) {
     status.textContent = "";
+    delete status.dataset.state;
   }
 
   if (
@@ -7701,6 +8680,41 @@ function renderTestKeywordCards() {
 
   container.innerHTML = "";
 
+  const executionView =
+    notificationTestExecutionController.getView();
+
+  if (!mailConnectionsAreConfirmed()) {
+    const stateCard =
+      document.createElement("article");
+    stateCard.className =
+      "card test-empty-card";
+    const message =
+      document.createElement("p");
+    message.setAttribute("role", "status");
+    message.setAttribute("aria-live", "polite");
+    message.textContent = executionView.running
+      ? executionView.message ||
+        "通知テストの処理状況を確認しています。"
+      : mailConnectionLoadState.status === "error"
+        ? "接続状態を確認できないため、通知テストを開始できません。通信が復旧すると自動で再確認します。"
+        : "監視アカウントの状態を確認中です。";
+    if (executionView.running) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "test-button";
+      button.disabled = true;
+      button.dataset.keyword = executionView.keyword || "";
+      button.textContent = notificationTestButtonText(executionView);
+      stateCard.append(message, button);
+    } else {
+      stateCard.appendChild(message);
+    }
+    container.appendChild(stateCard);
+    renderNotificationTestExecutionState();
+    updateContractStatusUI();
+    return;
+  }
+
   const activeGoogleConnection =
     monitoringKeywordPolicy.findActiveGoogleConnection(
       mailConnections
@@ -7739,6 +8753,7 @@ function renderTestKeywordCards() {
     );
     empty.append(message, button);
     container.appendChild(empty);
+    renderNotificationTestExecutionState();
     updateContractStatusUI();
     return;
   }
@@ -7765,6 +8780,7 @@ function renderTestKeywordCards() {
       <button
         type="button"
         class="test-button"
+        data-keyword="${escapeHtml(keyword)}"
       >
         テストを実行
       </button>
@@ -7778,12 +8794,8 @@ function renderTestKeywordCards() {
     if (button) {
       button.addEventListener(
         "click",
-        async () => {
-          await unlockAlarmAudio();
-          await testNotification(
-            keyword,
-            button
-          );
+        () => {
+          void testNotification(keyword);
         }
       );
     }
@@ -7791,159 +8803,625 @@ function renderTestKeywordCards() {
     container.appendChild(card);
   });
 
+  renderNotificationTestExecutionState();
   updateContractStatusUI();
 }
-async function testNotification(keyword, button) {
-  const testButtons =
-    document.querySelectorAll(
-      ".test-button"
-    );
-  let serverTest = null;
+async function testNotification(keyword) {
+  const token =
+    notificationTestExecutionController.begin(keyword);
+  if (token === null) {
+    renderNotificationTestExecutionState();
+    return;
+  }
+
+  const run = executeNotificationTest({
+    token,
+    keyword,
+    existingTest: null,
+    requestDelivery: true
+  });
+  notificationTestRunPromise = run;
+  try {
+    await run;
+  } finally {
+    if (notificationTestRunPromise === run) {
+      notificationTestRunPromise = null;
+    }
+  }
+}
+
+async function executeNotificationTest({
+  token,
+  keyword,
+  existingTest,
+  requestDelivery
+}) {
+  let serverTest = existingTest;
 
   try {
-    setText("notificationTestError", "");
-    setText("notificationTestStatus", "");
     if (isContractExpired()) {
-      setText(
-        "notificationTestError",
+      throw new Error(
         "契約期限が切れています。契約を更新してください。"
       );
-      return;
     }
-
-    if (!TEST_API_URL || !TEST_API_TOKEN) {
-      setText(
-        "notificationTestError",
-        "テストAPIのURLまたはトークンが設定されていません。"
-      );
-      return;
-    }
-
     if (!currentTeam || currentTeam.role !== "OWNER") {
-      setText(
-        "notificationTestError",
+      throw new Error(
         "通知テストは契約の管理者だけが実行できます。"
       );
-      return;
     }
-    testButtons.forEach((testButton) => {
-      testButton.dataset.originalText =
-        testButton.textContent.trim();
+    if (!TEST_API_URL || !TEST_API_TOKEN) {
+      throw new Error(
+        "テスト機能の設定を確認できませんでした。管理者へお問い合わせください。"
+      );
+    }
 
-      testButton.disabled = true;
-      testButton.textContent =
-        "少々お待ちください";
-    });
+    if (alarmSoundEnabled) {
+      await unlockAlarmAudio({
+        source: "notification-test-user-gesture"
+      });
+    }
 
-    serverTest = await startServerNotificationTest(
-      keyword
+    if (!serverTest) {
+      serverTest = await startServerNotificationTest(keyword);
+      announceNotificationTestChanged("started");
+    }
+    notificationTestExecutionController.transition(
+      token,
+      serverTest.status === "DETECTED"
+        ? "CREATING_ALERT"
+        : "WAITING_DETECTION",
+      {
+        testId: serverTest.id,
+        requestId: serverTest.requestId,
+        message:
+          serverTest.status === "DETECTED"
+            ? "テストメールを検知しました。通知を作成しています。"
+            : "テストを受け付けました。メールの到着と検知を確認しています（最大3分）。"
+      }
     );
 
-    if (serverTest.status === "DETECTED") {
-      await confirmServerNotificationTest(serverTest);
-      setText(
-        "notificationTestStatus",
-        "テスト通知を配信しました。管理者と有効な参加者へ通知しています。"
+    if (serverTest.status !== "DETECTED") {
+      if (requestDelivery && serverTest.created) {
+        notificationTestExecutionController.transition(
+          token,
+          "REQUESTING_DELIVERY",
+          {
+            message:
+              "テストを受け付けました。テストメールの送信を依頼しています。"
+          }
+        );
+        await requestNotificationTestDelivery(serverTest, keyword);
+      }
+
+      notificationTestExecutionController.transition(
+        token,
+        "WAITING_DETECTION",
+        {
+          message: serverTest.created
+            ? "テストメールを送信しました。メールの到着と検知を確認しています（最大3分）。"
+            : "受付済みのテストを確認しています。新しいテストメールは送信していません。"
+        }
       );
+      const detectedStatus =
+        await waitForTestDetection(
+          serverTest.requestId,
+          Math.max(
+            0,
+            Math.min(
+              TEST_DETECTION_TIMEOUT_MS,
+              new Date(serverTest.expiresAt).getTime() - Date.now()
+            )
+          )
+        );
+      if (!detectedStatus) {
+        await expireServerNotificationTest(serverTest);
+        notificationTestExecutionController.fail(token, {
+          error:
+            "3分以内にテストメールの検知を確認できませんでした。通知は作成されていません。"
+        });
+        announceNotificationTestChanged("expired");
+        return;
+      }
+    }
+
+    notificationTestExecutionController.transition(
+      token,
+      "CREATING_ALERT",
+      {
+        message:
+          "テストメールを検知しました。通知を作成しています。"
+      }
+    );
+    const confirmed =
+      await confirmServerNotificationTest(serverTest);
+    const completedTest = confirmed.test;
+    notificationTestExecutionController.transition(
+      token,
+      "WAITING_NOTIFICATION",
+      {
+        alertId: completedTest.alertId,
+        message:
+          "通知を作成しました。画面表示と通知音の再生要求を確認しています。"
+      }
+    );
+    announceNotificationTestChanged("alert-created");
+
+    const presentation =
+      await waitForTestNotificationPresentation(
+        completedTest.alertId,
+        NOTIFICATION_TEST_PRESENTATION_TIMEOUT_MS
+      );
+    if (presentation === "TIMEOUT") {
+      notificationTestExecutionController.fail(token, {
+        alertId: completedTest.alertId,
+        error:
+          "通知は作成されましたが、この画面への反映を確認できませんでした。ベルのお知らせを確認してください。"
+      });
       return;
     }
 
-    /*
-      Apps Scriptへテスト送信を依頼
-    */
-    try {
-      const response = await fetch(
-        TEST_API_URL,
-        {
-          method: "POST",
-          redirect: "follow",
-          body: JSON.stringify({
-            action: "sendTest",
-            token: TEST_API_TOKEN,
-            // キーワードはJSON本文で送り、URLやGmail検索式へ連結しない。
-            keyword: keyword,
-            requestId: serverTest.requestId
-          })
-        }
+    notificationTestExecutionController.complete(token, {
+      alertId: completedTest.alertId,
+      audioStatus: presentation,
+      message: notificationTestCompletionMessage(presentation)
+    });
+  } catch (error) {
+    if (
+      error?.code ===
+      "NOTIFICATION_TEST_RATE_LIMITED"
+    ) {
+      notificationTestExecutionController.rateLimit(
+        token,
+        notificationTestRateLimitDetails(error)
       );
-
-      const result = await response.json();
-
-      if (!result.ok) {
-        throw new Error(
-          `SERVER:${
-            result.error ||
-            "送信が拒否されました"
-          }`
-        );
-      }
-    } catch (error) {
-      /*
-        Apps Scriptには届いていても、
-        ブラウザが応答を取得できない場合がある。
-        サーバーから明確に拒否された場合だけ停止する。
-      */
-      if (
-        String(error.message)
-          .startsWith("SERVER:")
-      ) {
-        await failServerNotificationTest(
-          serverTest,
-          "DELIVERY_REQUEST_FAILED"
-        );
-        throw error;
-      }
-
-      console.warn(
-        "送信結果を読み取れませんでしたが、検知確認を続けます。",
+      startNotificationTestRateLimitTimer();
+    } else {
+      notificationTestExecutionController.fail(token, {
+        error: notificationTestErrorMessage(error)
+      });
+    }
+    if (
+      error?.code ===
+      "NOTIFICATION_TEST_RATE_LIMITED"
+    ) {
+      console.info(
+        "通知テストの回数制限をサーバーから受け取りました。"
+      );
+    } else {
+      console.error(
+        "テスト処理に失敗しました。",
         error
       );
     }
+  } finally {
+    announceNotificationTestChanged("finished");
+  }
+}
 
-    const detectedStatus =
-      await waitForTestDetection(
-        serverTest.requestId,
-        TEST_DETECTION_TIMEOUT_MS
-      );
-
-    if (detectedStatus) {
-      await confirmServerNotificationTest(
-        serverTest
-      );
-      setText(
-        "notificationTestStatus",
-        "テスト通知を配信しました。管理者と有効な参加者へ通知しています。"
-      );
-    } else {
-      await expireServerNotificationTest(
-        serverTest
-      );
-      setText(
-        "notificationTestError",
-        "3分以内にテストメールの検知を確認できなかったため、参加者へのテスト通知は送信されませんでした。"
+async function requestNotificationTestDelivery(
+  serverTest,
+  keyword
+) {
+  try {
+    const response = await fetch(
+      TEST_API_URL,
+      {
+        method: "POST",
+        redirect: "follow",
+        body: JSON.stringify({
+          action: "sendTest",
+          token: TEST_API_TOKEN,
+          keyword,
+          requestId: serverTest.requestId
+        })
+      }
+    );
+    const result = await response.json();
+    if (!result.ok) {
+      throw new Error(
+        `SERVER:${
+          result.error ||
+          "送信が拒否されました"
+        }`
       );
     }
   } catch (error) {
-    console.error(
-      "テスト処理に失敗しました。",
-      error
+    if (
+      String(error?.message || "")
+        .startsWith("SERVER:")
+    ) {
+      await failServerNotificationTest(
+        serverTest,
+        "DELIVERY_REQUEST_FAILED"
+      );
+      throw error;
+    }
+    console.info(
+      "テストメールの送信応答を取得できないため、サーバーの検知確認を継続します。"
     );
-
-    setText(
-      "notificationTestError",
-      notificationTestErrorMessage(error)
-    );
-  } finally {
-    testButtons.forEach((testButton) => {
-      testButton.disabled = false;
-
-      testButton.textContent =
-        testButton.dataset.originalText ||
-        "テストを実行";
-
-      delete testButton.dataset.originalText;
-    });
   }
+}
+
+function initializeNotificationTestSynchronization() {
+  const scheduleIfVisible = (reason) => {
+    if (document.visibilityState !== "hidden") {
+      scheduleNotificationTestSynchronization(reason);
+    }
+  };
+
+  document.addEventListener(
+    "visibilitychange",
+    () => {
+      if (document.visibilityState === "visible") {
+        scheduleNotificationTestSynchronization("tab-visible");
+      }
+    }
+  );
+  window.addEventListener("focus", () => {
+    scheduleNotificationTestSynchronization("window-focus");
+  });
+  window.addEventListener("online", () => {
+    scheduleNotificationTestSynchronization("network-online");
+  });
+  window.addEventListener("pageshow", () => {
+    scheduleIfVisible("page-show");
+  });
+
+  if (typeof BroadcastChannel === "function") {
+    notificationTestBroadcastChannel =
+      new BroadcastChannel(
+        "call-now-notification-tests"
+      );
+    notificationTestBroadcastChannel.addEventListener(
+      "message",
+      (event) => {
+        if (
+          event.data?.type ===
+          "notification-test-changed"
+        ) {
+          scheduleNotificationTestSynchronization(
+            "another-tab-change"
+          );
+        }
+      }
+    );
+  }
+}
+
+function scheduleNotificationTestSynchronization(reason) {
+  if (
+    !authenticatedUser ||
+    currentTeam?.role !== "OWNER" ||
+    !hasActiveSubscription() ||
+    notificationTestExecutionController.getView().blocked
+  ) {
+    return;
+  }
+  if (notificationTestSyncTimer) {
+    window.clearTimeout(notificationTestSyncTimer);
+  }
+  notificationTestSyncTimer = window.setTimeout(() => {
+    notificationTestSyncTimer = null;
+    void synchronizeCurrentNotificationTest(reason);
+  }, NOTIFICATION_TEST_SYNC_DEBOUNCE_MS);
+}
+
+async function synchronizeCurrentNotificationTest(reason) {
+  if (
+    notificationTestSyncPromise ||
+    notificationTestExecutionController.getView().blocked ||
+    currentTeam?.role !== "OWNER"
+  ) {
+    return;
+  }
+
+  const teamId = currentTeam.id;
+  const sync = (async () => {
+    try {
+      const response = await fetch(
+        apiUrl(
+          `/api/v1/teams/${encodeURIComponent(teamId)}/notification-tests/current`
+        ),
+        {
+          method: "GET",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+          cache: "no-store"
+        }
+      );
+      if (!response.ok || currentTeam?.id !== teamId) {
+        return;
+      }
+      const test = (await response.json().catch(() => null))?.test;
+      if (
+        !test?.id ||
+        !test.requestId ||
+        !["PENDING", "DETECTED"].includes(test.status) ||
+        notificationTestExecutionController.getView().blocked
+      ) {
+        return;
+      }
+      const token =
+        notificationTestExecutionController.begin(
+          test.keyword,
+          test.status === "DETECTED"
+            ? "CREATING_ALERT"
+            : "WAITING_DETECTION"
+        );
+      if (token === null) return;
+      notificationTestExecutionController.transition(
+        token,
+        test.status === "DETECTED"
+          ? "CREATING_ALERT"
+          : "WAITING_DETECTION",
+        {
+          testId: test.id,
+          requestId: test.requestId,
+          message:
+            test.status === "DETECTED"
+              ? "別のタブで検知されたテストから通知を作成しています。"
+              : "別のタブで受付済みのテストを確認しています。新しいテストメールは送信していません。"
+        }
+      );
+      const run = executeNotificationTest({
+        token,
+        keyword: test.keyword,
+        existingTest: {
+          ...test,
+          created: false
+        },
+        requestDelivery: false
+      });
+      notificationTestRunPromise = run;
+      try {
+        await run;
+      } finally {
+        if (notificationTestRunPromise === run) {
+          notificationTestRunPromise = null;
+        }
+      }
+    } catch (error) {
+      console.info(
+        `通知テストの進行状態を再確認できませんでした（${reason}）。`
+      );
+    }
+  })();
+  notificationTestSyncPromise = sync;
+  try {
+    await sync;
+  } finally {
+    if (notificationTestSyncPromise === sync) {
+      notificationTestSyncPromise = null;
+    }
+  }
+}
+
+function announceNotificationTestChanged(reason) {
+  notificationTestBroadcastChannel?.postMessage({
+    type: "notification-test-changed",
+    reason
+  });
+}
+
+function renderNotificationTestExecutionState() {
+  const view =
+    notificationTestExecutionController.getView();
+  const activeSubscription =
+    hasActiveSubscription();
+  const contractExpired =
+    activeSubscription && isContractExpired();
+  const statusMessage = view.message ||
+    notificationTestDefaultStatusMessage(view.phase);
+  const errorMessage =
+    view.phase === "RATE_LIMITED"
+      ? notificationTestRateLimitMessage({
+          retryAt: view.retryAt,
+          retryAfterSeconds: view.remainingSeconds,
+          rateLimit: view.rateLimit
+        })
+      : view.error;
+
+  setText("notificationTestStatus", statusMessage);
+  setText("notificationTestError", errorMessage || "");
+
+  document
+    .querySelectorAll(".test-button")
+    .forEach((button) => {
+      const keyword = button.dataset.keyword || "";
+      button.disabled =
+        !activeSubscription || contractExpired || view.blocked;
+      if (!activeSubscription) {
+        button.textContent = "初期設定が必要です";
+      } else if (contractExpired) {
+        button.textContent = "契約更新が必要です";
+      } else if (view.running && keyword !== view.keyword) {
+        button.textContent = "別のテストを実行中";
+      } else {
+        button.textContent = notificationTestButtonText(view);
+      }
+    });
+
+  const container = document.getElementById("testKeywordCards");
+  if (container) {
+    container.dataset.notificationTestPhase = view.phase;
+  }
+}
+
+function notificationTestButtonText(view) {
+  if (view.phase === "RATE_LIMITED" && view.remainingSeconds > 0) {
+    return `再実行まで ${formatNotificationTestDuration(
+      view.remainingSeconds
+    )}`;
+  }
+  const labels = {
+    STARTING: "受付中…",
+    REQUESTING_DELIVERY: "送信依頼中…",
+    WAITING_DETECTION: "メール検知待ち…",
+    CREATING_ALERT: "通知を作成中…",
+    WAITING_NOTIFICATION: "通知表示を確認中…"
+  };
+  return labels[view.phase] || "テストを実行";
+}
+
+function notificationTestDefaultStatusMessage(phase) {
+  const messages = {
+    STARTING: "通知テストを受け付けています。",
+    REQUESTING_DELIVERY:
+      "テストメールの送信を依頼しています。",
+    WAITING_DETECTION:
+      "メールの到着と検知を確認しています（最大3分）。",
+    CREATING_ALERT:
+      "メールを検知しました。通知を作成しています。",
+    WAITING_NOTIFICATION:
+      "通知を作成しました。画面表示と通知音の再生要求を確認しています。"
+  };
+  return messages[phase] || "";
+}
+
+function notificationTestRateLimitDetails(error) {
+  const details = error?.rateLimit || {};
+  return {
+    retryAt: error?.retryAt || details.retryAt || null,
+    retryAfterSeconds: Number(
+      error?.retryAfterSeconds ||
+        details.retryAfterSeconds ||
+        0
+    ),
+    rateLimit: {
+      scope: details.scope || null,
+      limit: Number(details.limit || 5),
+      windowMinutes: Number(details.windowMinutes || 10)
+    },
+    error: error instanceof Error ? error.message : ""
+  };
+}
+
+function notificationTestRateLimitMessage({
+  retryAt,
+  retryAfterSeconds,
+  rateLimit
+}) {
+  const limit = Number(rateLimit?.limit || 5);
+  const windowMinutes = Number(
+    rateLimit?.windowMinutes || 10
+  );
+  const retryTime = formatNotificationTestRetryAt(retryAt);
+  const remaining = Number(retryAfterSeconds || 0);
+  const subject =
+    rateLimit?.scope === "notification_test_source"
+      ? "同じ通信元"
+      : "同じ契約または管理者";
+  const retryDescription = remaining > 0
+    ? `あと${formatNotificationTestDuration(remaining)}で再実行できます。`
+    : retryTime
+      ? `${retryTime}以降に再実行できます。`
+      : "サーバーの制限が解除されてから再実行できます。";
+  return `テスト回数の上限に達しました。${retryDescription}（${subject}は${windowMinutes}分間に${limit}回まで）`;
+}
+
+function formatNotificationTestRetryAt(value) {
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("ja-JP", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).format(date);
+}
+
+function formatNotificationTestDuration(seconds) {
+  const safeSeconds = Math.max(0, Math.ceil(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  return minutes > 0
+    ? `${minutes}分${String(remainder).padStart(2, "0")}秒`
+    : `${remainder}秒`;
+}
+
+function startNotificationTestRateLimitTimer() {
+  if (notificationTestRateLimitTimer) {
+    window.clearInterval(notificationTestRateLimitTimer);
+  }
+  notificationTestRateLimitTimer = window.setInterval(() => {
+    const finished =
+      notificationTestExecutionController.refreshRateLimit();
+    renderNotificationTestExecutionState();
+    if (finished) {
+      window.clearInterval(notificationTestRateLimitTimer);
+      notificationTestRateLimitTimer = null;
+    }
+  }, 1000);
+}
+
+function logNotificationTestPhase(state) {
+  console.info("Notification test phase", {
+    phase: state.phase,
+    notificationTestId: state.testId,
+    notificationTestRequestId: state.requestId,
+    alertId: state.alertId
+  });
+}
+
+async function waitForTestNotificationPresentation(
+  alertId,
+  timeoutMilliseconds
+) {
+  if (!alertId) return "TIMEOUT";
+  const startedAt = Date.now();
+  const endTime = startedAt + timeoutMilliseconds;
+  let nextRefreshAt = startedAt;
+
+  while (Date.now() < endTime) {
+    const alert = ownerAlerts.find(
+      (candidate) => candidate.id === alertId
+    );
+    if (alert) {
+      if (!alarmSoundEnabled) {
+        return "SOUND_DISABLED";
+      }
+      if (currentAlarmAlertContext?.alertId === alertId) {
+        const restartButton =
+          document.getElementById("restartAlarmButton");
+        if (
+          restartButton &&
+          !restartButton.classList.contains("hidden")
+        ) {
+          return "PLAYBACK_BLOCKED";
+        }
+        if (alarmPlaybackState === "PLAYING") {
+          return "PLAYBACK_REQUESTED";
+        }
+      }
+      if (
+        notifiedAlertIds.has(alertId) &&
+        Date.now() - startedAt >= 1500
+      ) {
+        return "DISPLAYED";
+      }
+    }
+
+    if (Date.now() >= nextRefreshAt) {
+      await refreshOwnerAlerts();
+      nextRefreshAt = Date.now() + 2000;
+    }
+    await sleep(100);
+  }
+  return "TIMEOUT";
+}
+
+function notificationTestCompletionMessage(presentation) {
+  const messages = {
+    PLAYBACK_REQUESTED:
+      "通知を表示し、通知音の再生を開始しました。実際に音が聞こえることは、この端末で確認してください。",
+    PLAYBACK_BLOCKED:
+      "通知を表示しましたが、ブラウザが通知音をブロックしました。通知画面の「通知音を鳴らす」を押してください。",
+    SOUND_DISABLED:
+      "通知をベルへ表示しました。通知音はOFFです。音を確認する場合は通知音をONにしてください。",
+    DISPLAYED:
+      "通知を画面へ表示しました。通知音の状態は通知画面で確認してください。"
+  };
+  return messages[presentation] ||
+    "テスト通知を画面へ表示しました。";
 }
 
 async function startServerNotificationTest(keyword) {
@@ -7970,9 +9448,19 @@ async function startServerNotificationTest(keyword) {
         "通知テストを開始できませんでした。"
     );
     error.code = payload?.error?.code || "NOTIFICATION_TEST_START_FAILED";
+    error.retryAt = payload?.error?.details?.retryAt || null;
+    error.retryAfterSeconds = Number(
+      payload?.error?.details?.retryAfterSeconds ||
+        response.headers.get("Retry-After") ||
+        0
+    );
+    error.rateLimit = payload?.error?.details || null;
     throw error;
   }
-  return payload.test;
+  return {
+    ...payload.test,
+    created: payload.created === true
+  };
 }
 
 async function confirmServerNotificationTest(test) {
@@ -7999,8 +9487,11 @@ async function confirmServerNotificationTest(test) {
     error.code = payload?.error?.code || "NOTIFICATION_TEST_CONFIRM_FAILED";
     throw error;
   }
-  await refreshOwnerAlerts();
-  return payload.test;
+  const refreshed = await refreshOwnerAlerts();
+  return {
+    test: payload.test,
+    refreshed
+  };
 }
 
 async function failServerNotificationTest(test, reasonCode) {
@@ -8045,7 +9536,9 @@ async function updateServerNotificationTest(test, action, body) {
 
 function notificationTestErrorMessage(error) {
   if (error?.code === "NOTIFICATION_TEST_RATE_LIMITED") {
-    return "通知テストが続いています。少し時間をおいてお試しください。";
+    return notificationTestRateLimitMessage(
+      notificationTestRateLimitDetails(error)
+    );
   }
   const message =
     error instanceof Error

@@ -117,6 +117,16 @@ export class NotificationTestService {
     return this.options.repository.getForOwner(input);
   }
 
+  public getOpenForOwner(input: {
+    readonly teamId: string;
+    readonly actorUserId: string;
+  }): Promise<NotificationTestRecord | null> {
+    return this.options.repository.getOpenForOwner({
+      ...input,
+      now: this.now()
+    });
+  }
+
   public cleanupExpired(): Promise<number> {
     return this.options.repository.expireOpen(this.now());
   }

@@ -14,6 +14,10 @@ const cssSource = readFileSync(
   new URL("../css/style.css", import.meta.url),
   "utf8",
 );
+const alarmAudioSource = readFileSync(
+  new URL("../js/alarm-audio.js", import.meta.url),
+  "utf8",
+);
 
 test("alert views live only in the authenticated notification centers", () => {
   assert.doesNotMatch(htmlSource, /id="ownerAlertList"/);
@@ -60,6 +64,10 @@ test("local alarm stop is the only alarm modal action", () => {
   )?.[0];
   assert.ok(localStopFunction, "local alarm stop handler should be present");
   assert.match(localStopFunction, /closeAlarmNotification\(\)/);
+  assert.match(
+    localStopFunction,
+    /rememberNotifiedAlert\(alertId,\s*"STOPPED"\)/,
+  );
   assert.doesNotMatch(
     localStopFunction,
     /acknowledgeAlert|resolveAlert|fetch\(/,
@@ -111,8 +119,11 @@ test("sound-off alerts update the bell and badge without opening the alarm", () 
   assert.match(updateFunction, /renderEmergencyNotifications/);
   assert.match(updateFunction, /renderNotificationBadge/);
   assert.match(updateFunction, /if \(alarmSoundEnabled\)/);
-  assert.match(updateFunction, /showAlarmNotification/);
-  assert.match(updateFunction, /rememberNotifiedAlert\(nextAlert\.id\)/);
+  assert.match(updateFunction, /coordinateAlertPresentation/);
+  assert.match(
+    updateFunction,
+    /rememberNotifiedAlert\(nextAlert\.id, "SILENT"\)/,
+  );
   assert.match(
     updateFunction,
     /currentAlarmAlertContext\?\.audience === audience && !current/,
@@ -180,10 +191,40 @@ test("SSE reconnects with list refresh, fallback polling, and alert-id deduplica
   assert.match(appSource, /ALERT_FALLBACK_INTERVAL_MS/);
   assert.match(appSource, /stopAlertFallbackPolling/);
   assert.match(appSource, /refreshAlertsForAudience/);
-  assert.match(appSource, /rememberNotifiedAlert\(nextAlert\.id\)/);
-  assert.match(appSource, /window\.sessionStorage\.setItem/);
+  assert.match(appSource, /claimPresentation\(alert\.id\)/);
+  assert.doesNotMatch(appSource, /window\.sessionStorage\.setItem/);
   assert.match(appSource, /stream-error/);
   assert.match(appSource, /handleAlertSessionEnded/);
+});
+
+test("one browser coordinates alert playback across tabs", () => {
+  assert.match(
+    htmlSource,
+    /js\/alert-tab-coordination\.js\?v=1/,
+  );
+  assert.match(appSource, /CallNowAlertTabCoordination/);
+  assert.match(appSource, /alertTabCoordinator\.claimPresentation/);
+  assert.match(appSource, /pendingAlertPresentationIds/);
+  assert.match(appSource, /handleExternalAlertPresentation/);
+  assert.match(appSource, /ANOTHER_TAB_OWNS_PRESENTATION/);
+  assert.match(appSource, /ANOTHER_TAB_HANDLED_ALERT/);
+  assert.match(appSource, /window\.localStorage/);
+  assert.match(appSource, /window\.navigator\?\.locks/);
+  assert.match(appSource, /new BroadcastChannel\(name\)/);
+  assert.doesNotMatch(
+    appSource,
+    /sessionStorage\.setItem\([^)]*callNowNotifiedAlertIds/,
+  );
+});
+
+test("startup eligibility keeps old tests quiet and unseen real alerts eligible", () => {
+  assert.match(appSource, /ALERT_PAGE_STARTED_AT/);
+  assert.match(
+    appSource,
+    /alertTabCoordinationPolicy\.shouldPresentAlert/,
+  );
+  assert.match(appSource, /LEGACY_NOTIFIED_ALERT_IDS_KEY/);
+  assert.match(appSource, /handledAlertIds\(\)/);
 });
 
 test("notification details are data-minimized without shared response state", () => {
@@ -257,7 +298,74 @@ test("notification tests create server TEST alerts instead of opening a local-on
   assert.match(htmlSource, /テスト通知/);
 });
 
+test("notification test progress survives card redraws and prevents duplicate delivery", () => {
+  assert.match(
+    htmlSource,
+    /js\/notification-test-execution\.js\?v=1/,
+  );
+  assert.match(
+    appSource,
+    /notificationTestExecutionController\.getView\(\)/,
+  );
+  assert.match(
+    appSource,
+    /button\.disabled\s*=\s*!activeSubscription \|\| contractExpired \|\| view\.blocked/,
+  );
+  assert.match(appSource, /notificationTestButtonText\(executionView\)/);
+  assert.match(
+    appSource,
+    /if \(requestDelivery && serverTest\.created\)/,
+  );
+  assert.match(
+    appSource,
+    /受付済みのテストを確認しています。新しいテストメールは送信していません。/,
+  );
+  assert.doesNotMatch(appSource, /dataset\.originalText/);
+  assert.match(
+    appSource,
+    /\/notification-tests\/current/,
+  );
+  assert.match(
+    appSource,
+    /new BroadcastChannel\(\s*"call-now-notification-tests"/,
+  );
+
+  const contractStatusFunction = appSource.match(
+    /function updateContractStatusUI\(\) \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(contractStatusFunction, "contract status renderer should be present");
+  assert.match(
+    contractStatusFunction,
+    /renderNotificationTestExecutionState\(\)/,
+  );
+  assert.doesNotMatch(contractStatusFunction, /querySelectorAll\(\s*"\.test-button"/);
+});
+
+test("notification tests distinguish rate limits and audio outcomes", () => {
+  assert.match(appSource, /NOTIFICATION_TEST_RATE_LIMITED/);
+  assert.match(appSource, /retryAfterSeconds/);
+  assert.match(appSource, /formatNotificationTestRetryAt/);
+  assert.match(
+    appSource,
+    /テスト回数の上限に達しました。\$\{retryDescription\}/,
+  );
+  assert.match(appSource, /details\.limit \|\| 5/);
+  assert.match(appSource, /PLAYBACK_REQUESTED/);
+  assert.match(appSource, /PLAYBACK_BLOCKED/);
+  assert.match(appSource, /SOUND_DISABLED/);
+  assert.match(
+    appSource,
+    /実際に音が聞こえることは、この端末で確認してください。/,
+  );
+  assert.match(
+    alarmAudioSource,
+    /Safariが通知音の自動再生を許可していません。「通知音を鳴らす」を押してください。/,
+  );
+});
+
 test("owner and participant screens provide persistent sound controls", () => {
+  assert.match(htmlSource, /js\/alarm-audio\.js\?v=5/);
+  assert.match(htmlSource, /js\/alarm-html-audio\.js\?v=7/);
   assert.match(htmlSource, /id="ownerEnableAudioButton"/);
   assert.match(htmlSource, /id="notificationMemberEnableAudioButton"/);
   assert.match(htmlSource, /id="ownerSoundToggleButton"/);
@@ -268,6 +376,19 @@ test("owner and participant screens provide persistent sound controls", () => {
   assert.match(appSource, /ALERT_SOUND_SETTING_KEY/);
   assert.match(appSource, /window\.localStorage\.setItem/);
   assert.match(appSource, /window\.addEventListener\(\s*"storage"/);
+  assert.match(appSource, /alarmAudioVerificationState === "READY"/);
+  assert.match(appSource, /alarmPlaybackState === "PLAYING"/);
+  assert.match(appSource, /verifyUserGesturePlayback/);
+  assert.match(appSource, /Alarm audio confirmation completed/);
+  assert.match(appSource, /Alarm audio playback failed/);
+  assert.match(alarmAudioSource, /NotAllowedError/);
+  assert.match(alarmAudioSource, /AbortError/);
+  assert.match(alarmAudioSource, /NotSupportedError/);
+  assert.match(alarmAudioSource, /AudioPlaybackTimeoutError/);
+  assert.doesNotMatch(
+    appSource,
+    /Alarm audio playback failed"\s*,\s*error/,
+  );
   assert.match(appSource, /通知音はOFFです。緊急通知はベルから確認できます。/);
   assert.match(appSource, /if \(!alarmSoundEnabled\)/);
   assert.match(appSource, /closeAlarmNotification\(\)/);
@@ -275,4 +396,75 @@ test("owner and participant screens provide persistent sound controls", () => {
     appSource,
     /localStorage\.setItem\([^)]*(?:token|password|cookie)/iu,
   );
+});
+
+test("alarm modal reports rendering separately from audibility", () => {
+  assert.match(
+    appSource,
+    /通知モーダルを表示しました。通知音はまだ開始していません。/,
+  );
+  assert.match(
+    appSource,
+    /通知音を再生しています。「この端末の通知音を停止」を押すまで繰り返します。/,
+  );
+  assert.match(appSource, /setAlarmModalSoundStatus/);
+  assert.match(appSource, /showAlarmAudioFallback\(failure/);
+  assert.match(appSource, /tone\.stop\(\)/);
+  assert.match(cssSource, /alarm-sound-status\[data-state="playing"\]/);
+});
+
+test("alarm reaches PLAYING once and keeps the status stable across repeats", () => {
+  const patternFunction = appSource.match(
+    /async function playAlarmPattern\(generation\) \{[\s\S]*?\n\}\n\n\nasync function startAlarmSound/,
+  )?.[0];
+  assert.ok(patternFunction, "alarm pattern player should be present");
+  assert.doesNotMatch(patternFunction, /"STARTING"/);
+  assert.doesNotMatch(
+    patternFunction,
+    /通知音の再生を開始しています。/,
+  );
+  assert.match(patternFunction, /"PATTERN_COMPLETED"/);
+  assert.match(
+    patternFunction,
+    /previousPlaybackState !== "PLAYING"/,
+  );
+  assert.match(
+    patternFunction,
+    /通知音を再生しています。「この端末の通知音を停止」を押すまで繰り返します。/,
+  );
+});
+
+test("visible alarm is opened and painted before sound is requested", () => {
+  const showFunction = appSource.match(
+    /function showAlarmNotification\([\s\S]*?\n\}\n\n\nfunction closeAlarmNotification/,
+  )?.[0];
+  assert.ok(showFunction, "alarm modal renderer should be present");
+  const openPosition = showFunction.indexOf('"MODAL_OPEN"');
+  const startPosition = showFunction.indexOf(
+    "startAlarmAfterModalPresentation",
+  );
+  assert.ok(openPosition >= 0);
+  assert.ok(startPosition > openPosition);
+  assert.match(appSource, /waitForModalPaintBoundary/);
+  assert.match(appSource, /"MODAL_PAINT_FRAME"/);
+  assert.match(appSource, /"AUDIO_START_REQUESTED"/);
+  assert.match(appSource, /"FIRST_AUDIO_PATTERN_SCHEDULED"/);
+});
+
+test("local stop invalidates every pending alarm repeat", () => {
+  assert.match(appSource, /alarmPlaybackGeneration \+= 1/);
+  assert.match(
+    appSource,
+    /generation !== alarmPlaybackGeneration/,
+  );
+  assert.match(
+    appSource,
+    /void playAlarmPattern\(generation\)/,
+  );
+  assert.match(
+    appSource,
+    /window\.clearTimeout\(\s*alarmRepeatTimer\s*\)/,
+  );
+  assert.match(appSource, /alarmActiveNodes\.forEach/);
+  assert.match(appSource, /tone\.stop\(\)/);
 });

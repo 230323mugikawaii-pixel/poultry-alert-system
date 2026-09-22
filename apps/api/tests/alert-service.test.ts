@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   AlertAcknowledgementResult,
   AlertIngestionResult,
@@ -12,6 +12,69 @@ import type {
 import { AlertService } from "../src/modules/alerts/alert-service.js";
 
 describe("AlertService", () => {
+  it("wakes only the committed team's readers, once per new Alert, and unsubscribes", async () => {
+    const repository = new MemoryAlertRepository();
+    const service = new AlertService({ repository });
+    const input = {
+      teamId: randomUUID(),
+      sourceMailConnectionId: randomUUID(),
+      sourceEventId: "wake-event",
+      matchedKeyword: "停電",
+      detectedAt: new Date()
+    };
+    const owner = vi.fn(),
+      member = vi.fn(),
+      other = vi.fn();
+    const offOwner = service.subscribeToIngestion(input.teamId, owner);
+    const offMember = service.subscribeToIngestion(input.teamId, member);
+    service.subscribeToIngestion(randomUUID(), other);
+    const pending = service.ingest(input);
+    expect(owner).not.toHaveBeenCalled();
+    await pending;
+    expect(owner).toHaveBeenCalledExactlyOnceWith();
+    expect(member).toHaveBeenCalledExactlyOnceWith();
+    expect(other).not.toHaveBeenCalled();
+    await service.ingest(input);
+    expect(owner).toHaveBeenCalledTimes(1);
+    offOwner();
+    offMember();
+    const newListener = vi.fn();
+    service.subscribeToIngestion(input.teamId, newListener);
+    offMember(); // repeated cleanup must not remove a newer subscription set
+    await service.ingest({ ...input, sourceEventId: "wake-event-2" });
+    expect(owner).toHaveBeenCalledTimes(1);
+    expect(member).toHaveBeenCalledTimes(1);
+    expect(newListener).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not wake on rollback and a broken reader cannot fail a committed ingest", async () => {
+    const repository = new MemoryAlertRepository();
+    const service = new AlertService({ repository });
+    const input = {
+      teamId: randomUUID(),
+      sourceMailConnectionId: randomUUID(),
+      sourceEventId: "commit-event",
+      matchedKeyword: "停電",
+      detectedAt: new Date()
+    };
+    const wake = vi.fn();
+    service.subscribeToIngestion(input.teamId, () => {
+      throw new Error("closed");
+    });
+    service.subscribeToIngestion(input.teamId, wake);
+    const original = repository.ingest.bind(repository);
+    repository.ingest = async () => {
+      throw new Error("rollback");
+    };
+    await expect(service.ingest(input)).rejects.toThrow("rollback");
+    expect(wake).not.toHaveBeenCalled();
+    repository.ingest = original;
+    await expect(service.ingest(input)).resolves.toMatchObject({
+      created: true
+    });
+    expect(wake).toHaveBeenCalledTimes(1);
+  });
+
   it("normalizes a short matched phrase and preserves one source event", async () => {
     const repository = new MemoryAlertRepository();
     const now = new Date("2026-08-28T09:00:00.000Z");
@@ -131,6 +194,7 @@ describe("AlertService", () => {
 
 class MemoryAlertRepository implements AlertRepository {
   private alert: AlertRecord | null = null;
+  private sourceEventId: string | null = null;
   public lastOwnerDeletionItems: readonly NotificationCenterDeletionItem[] = [];
 
   public async ingest(input: {
@@ -142,7 +206,8 @@ class MemoryAlertRepository implements AlertRepository {
     readonly now: Date;
     readonly kind: "REAL" | "TEST";
   }): Promise<AlertIngestionResult> {
-    if (this.alert) return { alert: this.alert, created: false };
+    if (this.alert && this.sourceEventId === input.sourceEventId)
+      return { alert: this.alert, created: false };
     const created: AlertRecord = {
       id: randomUUID(),
       teamId: input.teamId,
@@ -162,6 +227,7 @@ class MemoryAlertRepository implements AlertRepository {
       recipientCount: 1
     };
     this.alert = created;
+    this.sourceEventId = input.sourceEventId;
     return { alert: created, created: true };
   }
 

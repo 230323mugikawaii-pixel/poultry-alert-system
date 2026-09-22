@@ -1189,6 +1189,7 @@ async function activatePurchasedMonitoringChoices(
         providerCursor: null,
         providerSubscriptionExpiresAt: null,
         providerSubscriptionRenewedAt: null,
+        monitoringStartedAt: null,
         syncLeaseToken: null,
         syncLeaseExpiresAt: null,
         lastErrorCode: null,

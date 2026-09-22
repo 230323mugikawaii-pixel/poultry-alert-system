@@ -64,7 +64,8 @@ describe("frontend onboarding order", () => {
     const paymentFlow = script.slice(paymentStart, paymentEnd);
 
     expect(paymentFlow).toContain("/api/v1/owner-onboarding/demo-purchase");
-    expect(paymentFlow).toContain("await fetchMailConnections()");
+    expect(paymentFlow).toContain("await refreshMailConnections({");
+    expect(paymentFlow).toContain('reason: "purchase-complete"');
     expect(paymentFlow).toContain("openApp()");
     expect(paymentFlow).not.toContain("bootstrapInitialTeamContext()");
     expect(paymentFlow).not.toContain('openGoogleScreen("manage")');

@@ -721,6 +721,28 @@ textarea[aria-invalid="true"] {
   color: var(--color-danger);
 }
 
+.mail-monitoring-state.checking,
+.contract-provider-status.checking {
+  color: #52606d;
+  background: #edf2f7;
+}
+
+.mail-monitoring-state.unavailable,
+.contract-provider-status.unavailable {
+  color: #9b2c2c;
+  background: #fff5f5;
+}
+
+.mail-connection-refresh-notice {
+  margin: 0 0 12px;
+  color: #52606d;
+  font-weight: 700;
+}
+
+.mail-connection-refresh-notice.error {
+  color: var(--color-danger);
+}
+
 .mail-connection-item .mail-account-actions {
   flex: 0 0 auto;
 }
@@ -2199,6 +2221,18 @@ body.app-dialog-open {
   font-weight: 900;
 }
 
+.alarm-sound-status[data-state="starting"] {
+  color: #8a5a00;
+}
+
+.alarm-sound-status[data-state="playing"] {
+  color: #176a3a;
+}
+
+.alarm-sound-status[data-state="off"] {
+  color: var(--subtext);
+}
+
 .alarm-restart-button {
   width: 100%;
   margin-top: 18px;
@@ -3270,6 +3304,7 @@ h3 {
 
 .setup-progress {
   justify-content: flex-start;
+  flex-wrap: wrap;
   gap: var(--space-2);
   margin: var(--space-4) 0 var(--space-6);
   color: var(--color-text-muted);
@@ -3277,6 +3312,9 @@ h3 {
 }
 
 .setup-progress span {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
   min-height: 34px;
   display: inline-flex;
   align-items: center;

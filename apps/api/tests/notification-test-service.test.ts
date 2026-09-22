@@ -167,6 +167,12 @@ class MemoryNotificationTestRepository implements NotificationTestRepository {
     return Promise.resolve(this.record);
   }
 
+  public getOpenForOwner() {
+    return Promise.resolve(
+      ["PENDING", "DETECTED"].includes(this.record.status) ? this.record : null
+    );
+  }
+
   public expireOpen() {
     return Promise.resolve(0);
   }
