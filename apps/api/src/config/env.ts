@@ -63,6 +63,10 @@ const EnvironmentSchema = Type.Object({
     maximum: 30
   }),
   GMAIL_PUSH_MONITORING_ENABLED: Type.Boolean(),
+  GMAIL_PUSH_JOB_MODE: Type.Union([
+    Type.Literal("off"),
+    Type.Literal("durable")
+  ]),
   MAIL_LEDGER_MODE: Type.Union([
     Type.Literal("off"),
     Type.Literal("legacy"),
@@ -180,6 +184,7 @@ export function loadEnvironment(
     GMAIL_PUSH_MONITORING_ENABLED:
       source.GMAIL_PUSH_MONITORING_ENABLED === "true",
     MAIL_LEDGER_MODE: source.MAIL_LEDGER_MODE ?? "off",
+    GMAIL_PUSH_JOB_MODE: source.GMAIL_PUSH_JOB_MODE ?? "off",
     GMAIL_PUBSUB_TOPIC_NAME: source.GMAIL_PUBSUB_TOPIC_NAME ?? "",
     GMAIL_PUBSUB_PUSH_AUDIENCE: source.GMAIL_PUBSUB_PUSH_AUDIENCE ?? "",
     GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL:
@@ -362,6 +367,14 @@ export function loadEnvironment(
   }
 
   validateGmailPushConfiguration(candidate);
+  if (
+    candidate.GMAIL_PUSH_JOB_MODE === "durable" &&
+    (!candidate.GMAIL_PUSH_MONITORING_ENABLED ||
+      candidate.MAIL_LEDGER_MODE !== "legacy-outbox")
+  )
+    throw new Error(
+      "Durable Gmail jobs require enabled Gmail monitoring and legacy-outbox ledger mode"
+    );
 
   let microsoftRedirectUri: URL;
   try {

@@ -113,7 +113,7 @@ postgres("PR03a real PostgreSQL Outbox dispatcher", () => {
     const migrations = (await readdir(root))
       .filter((x) => /^\d/.test(x))
       .sort();
-    expect(migrations).toHaveLength(26); // PR03a needs no migration.
+    expect(migrations).toContain("20260923000200_reliability_outbox");
     for (const migration of migrations)
       await pool.query(
         await readFile(new URL(`${migration}/migration.sql`, root), "utf8")

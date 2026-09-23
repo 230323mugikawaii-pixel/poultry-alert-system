@@ -22,7 +22,7 @@ export function assertTestDatabase(value: string): void {
     const url = new URL(value);
     valid =
       ["localhost", "127.0.0.1", "postgres"].includes(url.hostname) &&
-      /^\/callnow_(?:ledger_test|test|pr01_migration_test_[a-f0-9]+|pr03a_test_[a-f0-9]+)$/.test(
+      /^\/callnow_(?:ledger_test|test|pr01_migration_test_[a-f0-9]+|pr03[ab]_test_[a-f0-9]+)$/.test(
         url.pathname
       );
   } catch {
@@ -103,6 +103,7 @@ export async function ledgerHarness(
     readonly message?: Partial<GmailMessage>;
     readonly beforeFetch?: () => Promise<void>;
     readonly afterAlert?: () => Promise<void>;
+    readonly monitoringRepository?: GmailMonitoringRepository;
   } = {}
 ) {
   const row = await database.mailConnection.findUniqueOrThrow({
@@ -236,7 +237,7 @@ export async function ledgerHarness(
     };
   }
   const service = new GmailMonitoringService({
-    repository: monitoring,
+    repository: options.monitoringRepository ?? monitoring,
     api,
     googleProvider,
     tokenEncryption: {
@@ -251,6 +252,7 @@ export async function ledgerHarness(
     ...reliability
   });
   return {
+    service,
     run: () => service.syncConnectionById(row.id, "200"),
     calls,
     ledger,

@@ -864,6 +864,39 @@ model ReliabilityOutbox {
   @@map("reliability_outbox")
 }
 
+enum ReliabilityJobKind {
+  SYNC
+}
+
+enum ReliabilityJobStatus {
+  READY
+  RUNNING
+  RETRY_WAIT
+  BLOCKED
+  DONE
+}
+
+model ReliabilityJob {
+  id              String               @id @default(uuid()) @db.Uuid
+  kind            ReliabilityJobKind
+  status          ReliabilityJobStatus @default(READY)
+  dedupeKey       String               @unique @db.Char(64)
+  payload         Json                 @db.JsonB
+  availableAt     DateTime             @default(now()) @db.Timestamptz(3)
+  attempts        Int                  @default(0)
+  leaseToken      String?              @db.Uuid
+  leaseGeneration BigInt               @default(0)
+  leaseUntil      DateTime?            @db.Timestamptz(3)
+  lastErrorCode   String?              @db.VarChar(100)
+  createdAt       DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime             @updatedAt @db.Timestamptz(3)
+  finishedAt      DateTime?            @db.Timestamptz(3)
+
+  @@index([kind, status, availableAt])
+  @@index([status, leaseUntil])
+  @@map("reliability_jobs")
+}
+
 model UserNotification {
   id         String               @id @default(uuid()) @db.Uuid
   userId     String               @db.Uuid

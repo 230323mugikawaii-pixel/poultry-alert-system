@@ -12,7 +12,7 @@ import {
 const postgres =
   process.env.RUN_PR02B_POSTGRES_TESTS === "true" ? describe : describe.skip;
 postgres("PR02b migration round trip", () => {
-  it("up/down/up preserves synthetic prior data/schema and the managed DB has 26/26 migrations", async () => {
+  it("up/down/up preserves synthetic prior data/schema and all managed migrations are applied", async () => {
     const value = process.env.DATABASE_URL ?? "";
     assertTestDatabase(value);
     const admin = new Pool({ connectionString: value });
@@ -30,9 +30,8 @@ postgres("PR02b migration round trip", () => {
         .filter((x) => /^\d/.test(x))
         .sort();
       const migration = "20260923000200_reliability_outbox";
-      expect(migrations).toHaveLength(26);
-      expect(migrations.at(-1)).toBe(migration);
-      for (const item of migrations.slice(0, -1)) {
+      expect(migrations.indexOf(migration)).toBe(25);
+      for (const item of migrations.slice(0, 25)) {
         await pool.query(
           await readFile(new URL(`${item}/migration.sql`, root), "utf8")
         );

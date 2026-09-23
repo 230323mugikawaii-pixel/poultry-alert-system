@@ -22,6 +22,7 @@ import { createMailConnectionRoutes } from "./modules/mail/mail-connection-route
 import type { GmailMonitoringService } from "./modules/mail/gmail/gmail-monitoring-service.js";
 import type { PubSubPushAuthenticator } from "./modules/mail/gmail/gmail-pubsub-authenticator.js";
 import { createGmailPubSubRoutes } from "./modules/mail/gmail/gmail-pubsub-routes.js";
+import type { GmailJobIntake } from "./modules/mail/reliability/prisma-gmail-job-queue.js";
 import type { InvitationService } from "./modules/invitations/invitation-service.js";
 import type { NotificationMemberService } from "./modules/notification-members/notification-member-service.js";
 import { createNotificationMemberRoutes } from "./modules/notification-members/notification-member-routes.js";
@@ -36,6 +37,7 @@ import { createUserCommunicationRoutes } from "./modules/user-communications/use
 import { createSystemRoutes } from "./routes/system.js";
 
 export interface BuildAppOptions {
+  readonly gmailJobIntake?: GmailJobIntake;
   readonly environment: AppEnvironment;
   readonly logger?: boolean;
   readonly authService?: AuthService;
@@ -194,11 +196,19 @@ export async function buildApp(
     );
   }
   if (options.gmailMonitoringService && options.gmailPubSubAuthenticator) {
+    if (
+      options.environment.GMAIL_PUSH_JOB_MODE === "durable" &&
+      !options.gmailJobIntake
+    )
+      throw new Error("Durable Gmail job intake is required");
     await app.register(
       createGmailPubSubRoutes(
         options.gmailPubSubAuthenticator,
         options.gmailMonitoringService,
-        options.environment.GMAIL_PUBSUB_MAX_BODY_BYTES
+        options.environment.GMAIL_PUBSUB_MAX_BODY_BYTES,
+        options.environment.GMAIL_PUSH_JOB_MODE === "durable"
+          ? options.gmailJobIntake
+          : undefined
       )
     );
   }

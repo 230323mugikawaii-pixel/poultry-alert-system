@@ -54,3 +54,6 @@ jobs:
       - run: pnpm test:postgres:dispatcher
         env:
           PR01_TEST_ISOLATION_ACK: disposable-postgres
+      - run: pnpm test:postgres:jobs
+        env:
+          PR01_TEST_ISOLATION_ACK: disposable-postgres

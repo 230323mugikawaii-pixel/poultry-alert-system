@@ -65,6 +65,7 @@ const environment: AppEnvironment = {
     "https://api.test.call-now.example/api/v1/auth/gmail/callback",
   GMAIL_OAUTH_STATE_TTL_MINUTES: 10,
   GMAIL_PUSH_MONITORING_ENABLED: false,
+  GMAIL_PUSH_JOB_MODE: "off",
   MAIL_LEDGER_MODE: "off",
   GMAIL_PUBSUB_TOPIC_NAME: "",
   GMAIL_PUBSUB_PUSH_AUDIENCE: "",

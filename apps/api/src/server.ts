@@ -1,5 +1,6 @@
 import { config as loadDotenv } from "dotenv";
 import { mailReliabilityOptions } from "./modules/mail/reliability/mail-reliability-options.js";
+import { PrismaGmailJobQueue } from "./modules/mail/reliability/prisma-gmail-job-queue.js";
 import { buildApp } from "./app.js";
 import { loadEnvironment } from "./config/env.js";
 import { createDatabaseClient } from "./db/client.js";
@@ -255,6 +256,14 @@ const userCommunicationService = new UserCommunicationService(
 );
 const app = await buildApp({
   environment,
+  ...(environment.GMAIL_PUSH_JOB_MODE === "durable"
+    ? {
+        gmailJobIntake: new PrismaGmailJobQueue(
+          database,
+          environment.GMAIL_PUBSUB_TOPIC_NAME
+        )
+      }
+    : {}),
   authService,
   primaryAuthService,
   mailConnectionService,
