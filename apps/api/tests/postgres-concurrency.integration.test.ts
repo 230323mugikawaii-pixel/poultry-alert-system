@@ -1,6 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi
+} from "vitest";
 import { createDatabaseClient, type DatabaseClient } from "../src/db/client.js";
+import { Prisma } from "../src/generated/prisma/client.js";
 import { AppError } from "../src/lib/app-error.js";
 import { AlertService } from "../src/modules/alerts/alert-service.js";
 import { PrismaAlertRepository } from "../src/modules/alerts/prisma-alert-repository.js";
@@ -41,6 +50,10 @@ import { SecurityThrottleService } from "../src/modules/security/security-thrott
 import { TeamService } from "../src/modules/teams/team-service.js";
 import { PrismaUserCommunicationRepository } from "../src/modules/user-communications/prisma-user-communication-repository.js";
 import { UserCommunicationService } from "../src/modules/user-communications/user-communication-service.js";
+import {
+  fixtureNow,
+  seedLedgerFixture
+} from "./fixtures/mail-ledger-harness.js";
 
 const databaseUrl = process.env.DATABASE_URL ?? "";
 const postgresDescribe =
@@ -95,6 +108,242 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
 
   afterAll(async () => {
     await database?.$disconnect();
+  });
+
+  it.each(["REAL", "TEST"] as const)(
+    "PR02a: %s ingest in a caller-owned transaction has identical contents and rolls back all three records",
+    async (kind) => {
+      const { team, connection, owner } = await seedLedgerFixture(database);
+      const repository = new PrismaAlertRepository(database);
+      const input = {
+        teamId: team.id,
+        sourceMailConnectionId: connection.id,
+        sourceEventId: "pr02a-identical-content",
+        kind,
+        matchedKeyword: "停電",
+        detectedAt: fixtureNow,
+        now: fixtureNow,
+        ...(kind === "TEST"
+          ? { actorUserId: owner.id, notificationTestId: randomUUID() }
+          : {})
+      };
+      // Compare every persisted business field, excluding generated IDs and
+      // database timestamps (which legitimately differ between transactions).
+      const snapshot = async (
+        tx: Prisma.TransactionClient,
+        alertId: string
+      ) => ({
+        alert: await tx.alert.findUniqueOrThrow({
+          where: { id: alertId },
+          select: {
+            teamId: true,
+            sourceMailConnectionId: true,
+            sourceEventId: true,
+            kind: true,
+            status: true,
+            detectedAt: true,
+            matchedKeyword: true,
+            acknowledgedAt: true,
+            acknowledgedByUserId: true,
+            acknowledgedByNotificationMemberId: true,
+            resolvedAt: true
+          }
+        }),
+        recipients: await tx.alertRecipient.findMany({
+          where: { alertId },
+          orderBy: { kind: "asc" },
+          select: {
+            kind: true,
+            userId: true,
+            notificationMemberId: true,
+            channel: true,
+            status: true,
+            acknowledgedAt: true,
+            readAt: true,
+            dismissedAt: true
+          }
+        }),
+        audit: await tx.auditEvent.findMany({
+          where: { targetId: alertId },
+          select: {
+            teamId: true,
+            actorUserId: true,
+            action: true,
+            targetType: true,
+            requestId: true,
+            metadata: true
+          }
+        })
+      });
+      let expected: Awaited<ReturnType<typeof snapshot>> | undefined;
+      const rollback = new Error("synthetic caller rollback");
+      await expect(
+        database.$transaction(
+          async (tx) => {
+            const created = await repository.ingestWithinTransaction(tx, input);
+            expect(created).toMatchObject({
+              created: true,
+              alert: {
+                kind,
+                status: "ACTIVE",
+                sourceProvider: "GOOGLE",
+                recipientCount: 2,
+                matchedKeyword: "停電",
+                detectedAt: fixtureNow,
+                readAt: null
+              }
+            });
+            expected = await snapshot(tx, created.alert.id);
+            expect(expected.recipients).toHaveLength(2);
+            expect(expected.audit).toHaveLength(1);
+            // A separate connection cannot see any nested/early commit.
+            expect(await database.alert.count()).toBe(0);
+            expect(await database.alertRecipient.count()).toBe(0);
+            expect(await database.auditEvent.count()).toBe(0);
+            throw rollback;
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        )
+      ).rejects.toBe(rollback);
+      expect(await database.alert.count()).toBe(0);
+      expect(await database.alertRecipient.count()).toBe(0);
+      expect(await database.auditEvent.count()).toBe(0);
+
+      const created = await repository.ingest(input);
+      expect(created.created).toBe(true);
+      expect(await snapshot(database, created.alert.id)).toEqual(expected);
+      // Calling the extracted body again must reuse that exact committed Alert.
+      await expect(
+        database.$transaction(
+          (tx) => repository.ingestWithinTransaction(tx, input),
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        )
+      ).resolves.toEqual({ ...created, created: false });
+      expect(await snapshot(database, created.alert.id)).toEqual(expected);
+    }
+  );
+
+  it("PR02a: duplicate ingest preserves existing acknowledgement, recipient read/dismissal and audit rows", async () => {
+    const { team, connection, owner } = await seedLedgerFixture(database);
+    const repository = new PrismaAlertRepository(database);
+    const input = {
+      teamId: team.id,
+      sourceMailConnectionId: connection.id,
+      sourceEventId: "pr02a-existing-alert",
+      kind: "REAL" as const,
+      matchedKeyword: "停電",
+      detectedAt: fixtureNow,
+      now: fixtureNow
+    };
+    const result = await repository.ingest(input);
+    await repository.acknowledgeByOwner({
+      teamId: team.id,
+      alertId: result.alert.id,
+      userId: owner.id,
+      now: fixtureNow
+    });
+    await repository.markReadByOwner({
+      teamId: team.id,
+      alertId: result.alert.id,
+      userId: owner.id,
+      now: fixtureNow
+    });
+    await repository.dismissOwnerNotifications({
+      teamId: team.id,
+      userId: owner.id,
+      items: [{ type: "ALERT", id: result.alert.id }],
+      requestId: null,
+      now: fixtureNow
+    });
+    const snapshot = async () => ({
+      alert: await database.alert.findUniqueOrThrow({
+        where: { id: result.alert.id }
+      }),
+      recipients: await database.alertRecipient.findMany({
+        orderBy: { id: "asc" }
+      }),
+      audit: await database.auditEvent.findMany({ orderBy: { id: "asc" } })
+    });
+    const before = await snapshot();
+    await expect(
+      database.$transaction(
+        (tx) => repository.ingestWithinTransaction(tx, input),
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+      )
+    ).resolves.toMatchObject({
+      created: false,
+      alert: {
+        id: result.alert.id,
+        status: "ACKNOWLEDGED",
+        acknowledgedAt: fixtureNow
+      }
+    });
+    await expect(repository.ingest(input)).resolves.toMatchObject({
+      created: false
+    });
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it("PR02a: existing service wakes SSE only after the real commit, never on duplicate or rollback", async () => {
+    const { team, connection } = await seedLedgerFixture(database);
+    const repository = new PrismaAlertRepository(database);
+    const service = new AlertService({ repository, now: () => fixtureNow });
+    const counts = () =>
+      Promise.all([
+        database.alert.count(),
+        database.alertRecipient.count(),
+        database.auditEvent.count()
+      ]);
+    const observations: Array<ReturnType<typeof counts>> = [];
+    const wake = vi.fn(() => {
+      observations.push(counts());
+    });
+    const off = service.subscribeToIngestion(team.id, wake);
+    const original = repository.ingestWithinTransaction.bind(repository);
+    const body = vi.spyOn(repository, "ingestWithinTransaction");
+    const input = {
+      teamId: team.id,
+      sourceMailConnectionId: connection.id,
+      sourceEventId: "pr02a-after-commit",
+      matchedKeyword: "停電",
+      detectedAt: fixtureNow
+    };
+    try {
+      body.mockImplementationOnce(async (tx, value) => {
+        const result = await original(tx, value);
+        expect(wake).not.toHaveBeenCalled();
+        expect(await counts()).toEqual([0, 0, 0]);
+        return result;
+      });
+      const created = await service.ingest(input);
+      expect(created.created).toBe(true);
+      expect(wake).toHaveBeenCalledTimes(1);
+      expect(await Promise.all(observations)).toEqual([[1, 2, 1]]);
+      await expect(service.ingest(input)).resolves.toEqual({
+        ...created,
+        created: false
+      });
+      expect(wake).toHaveBeenCalledTimes(1);
+
+      const rollback = new Error("synthetic failure after audit before commit");
+      body.mockImplementationOnce(async (tx, value) => {
+        await original(tx, value);
+        expect(await tx.alert.count()).toBe(2);
+        expect(await tx.alertRecipient.count()).toBe(4);
+        expect(await tx.auditEvent.count()).toBe(2);
+        expect(wake).toHaveBeenCalledTimes(1);
+        throw rollback;
+      });
+      await expect(
+        service.ingest({ ...input, sourceEventId: "pr02a-rollback" })
+      ).rejects.toBe(rollback);
+      expect(wake).toHaveBeenCalledTimes(1);
+      expect(await counts()).toEqual([1, 2, 1]);
+    } finally {
+      off();
+      body.mockRestore();
+      await Promise.all(observations);
+    }
   });
 
   it("persists a Google identity and creates a one-use Phase 1 session", async () => {

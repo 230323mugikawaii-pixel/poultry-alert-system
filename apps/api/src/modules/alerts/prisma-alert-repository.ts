@@ -22,29 +22,38 @@ const alertInclude = {
 } satisfies Prisma.AlertInclude;
 
 type AlertWithSource = Prisma.AlertGetPayload<{ include: typeof alertInclude }>;
+type AlertIngestionInput = Parameters<AlertRepository["ingest"]>[0];
 
 export class PrismaAlertRepository implements AlertRepository {
   public constructor(private readonly database: DatabaseClient) {}
 
-  public ingest(input: {
-    readonly teamId: string;
-    readonly sourceMailConnectionId: string;
-    readonly sourceEventId: string;
-    readonly kind: "REAL" | "TEST";
-    readonly matchedKeyword: string;
-    readonly detectedAt: Date;
-    readonly actorUserId?: string;
-    readonly notificationTestId?: string;
-    readonly now: Date;
-  }): Promise<AlertIngestionResult> {
+  public ingest(input: AlertIngestionInput): Promise<AlertIngestionResult> {
     return retrySerializableTransaction(
       () =>
         this.database.$transaction(
-          async (transaction) => {
-            const connections = await transaction.$queryRaw<
-              Array<{ id: string }>
-            >(
-              Prisma.sql`
+          (transaction) => this.ingestWithinTransaction(transaction, input),
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
+      () =>
+        new AppError(
+          "ALERT_INGESTION_CONFLICT",
+          "検知イベントの登録が競合しました。もう一度お試しください。",
+          409
+        )
+    );
+  }
+
+  /**
+   * DB-only body: the caller owns the SERIALIZABLE transaction and its retries.
+   * No nested transaction or SSE wakeup here; notify only after the outer commit.
+   * Input has the same validation/normalization contract as repository.ingest.
+   */
+  public async ingestWithinTransaction(
+    transaction: Prisma.TransactionClient,
+    input: AlertIngestionInput
+  ): Promise<AlertIngestionResult> {
+    const connections = await transaction.$queryRaw<Array<{ id: string }>>(
+      Prisma.sql`
                 SELECT mail_connection.id
                 FROM mail_connections AS mail_connection
                 JOIN teams AS team ON team.id = mail_connection."teamId"
@@ -60,111 +69,96 @@ export class PrismaAlertRepository implements AlertRepository {
                   AND subscription.status = 'ACTIVE'
                 FOR UPDATE OF mail_connection
               `
-            );
-            if (connections.length !== 1) {
-              throw new AppError(
-                "MAIL_CONNECTION_NOT_ACTIVE",
-                "有効なメール監視接続が見つかりません。",
-                409
-              );
-            }
-
-            const existing = await transaction.alert.findUnique({
-              where: {
-                sourceMailConnectionId_sourceEventId: {
-                  sourceMailConnectionId: input.sourceMailConnectionId,
-                  sourceEventId: input.sourceEventId
-                }
-              },
-              include: alertInclude
-            });
-            if (existing) {
-              return { alert: mapAlert(existing, null), created: false };
-            }
-
-            const [owners, members] = await Promise.all([
-              transaction.teamMembership.findMany({
-                where: {
-                  teamId: input.teamId,
-                  role: "OWNER",
-                  status: "ACTIVE"
-                },
-                select: { userId: true }
-              }),
-              transaction.notificationMember.findMany({
-                where: {
-                  teamId: input.teamId,
-                  status: "ACTIVE",
-                  deletedAt: null
-                },
-                select: { id: true }
-              })
-            ]);
-            if (owners.length !== 1) {
-              throw new AppError(
-                "TEAM_OWNER_UNAVAILABLE",
-                "通知先を準備できませんでした。",
-                409
-              );
-            }
-
-            const created = await transaction.alert.create({
-              data: {
-                teamId: input.teamId,
-                sourceMailConnectionId: input.sourceMailConnectionId,
-                sourceEventId: input.sourceEventId,
-                kind: input.kind,
-                matchedKeyword: input.matchedKeyword,
-                detectedAt: input.detectedAt,
-                recipients: {
-                  create: [
-                    {
-                      kind: "OWNER",
-                      userId: owners[0]!.userId,
-                      channel: "IN_APP"
-                    },
-                    ...members.map(({ id }) => ({
-                      kind: "NOTIFICATION_MEMBER" as const,
-                      notificationMemberId: id,
-                      channel: "IN_APP" as const
-                    }))
-                  ]
-                }
-              },
-              include: alertInclude
-            });
-            await transaction.auditEvent.create({
-              data: {
-                teamId: input.teamId,
-                ...(input.actorUserId
-                  ? { actorUserId: input.actorUserId }
-                  : {}),
-                action:
-                  input.kind === "TEST"
-                    ? "TEST_ALERT_CREATED"
-                    : "ALERT_CREATED",
-                targetType: "Alert",
-                targetId: created.id,
-                metadata: {
-                  sourceMailConnectionId: input.sourceMailConnectionId,
-                  ...(input.notificationTestId
-                    ? { notificationTestId: input.notificationTestId }
-                    : {}),
-                  recipientCount: created._count.recipients
-                }
-              }
-            });
-            return { alert: mapAlert(created, null), created: true };
-          },
-          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-        ),
-      () =>
-        new AppError(
-          "ALERT_INGESTION_CONFLICT",
-          "検知イベントの登録が競合しました。もう一度お試しください。",
-          409
-        )
     );
+    if (connections.length !== 1) {
+      throw new AppError(
+        "MAIL_CONNECTION_NOT_ACTIVE",
+        "有効なメール監視接続が見つかりません。",
+        409
+      );
+    }
+
+    const existing = await transaction.alert.findUnique({
+      where: {
+        sourceMailConnectionId_sourceEventId: {
+          sourceMailConnectionId: input.sourceMailConnectionId,
+          sourceEventId: input.sourceEventId
+        }
+      },
+      include: alertInclude
+    });
+    if (existing) {
+      return { alert: mapAlert(existing, null), created: false };
+    }
+
+    const [owners, members] = await Promise.all([
+      transaction.teamMembership.findMany({
+        where: {
+          teamId: input.teamId,
+          role: "OWNER",
+          status: "ACTIVE"
+        },
+        select: { userId: true }
+      }),
+      transaction.notificationMember.findMany({
+        where: {
+          teamId: input.teamId,
+          status: "ACTIVE",
+          deletedAt: null
+        },
+        select: { id: true }
+      })
+    ]);
+    if (owners.length !== 1) {
+      throw new AppError(
+        "TEAM_OWNER_UNAVAILABLE",
+        "通知先を準備できませんでした。",
+        409
+      );
+    }
+
+    const created = await transaction.alert.create({
+      data: {
+        teamId: input.teamId,
+        sourceMailConnectionId: input.sourceMailConnectionId,
+        sourceEventId: input.sourceEventId,
+        kind: input.kind,
+        matchedKeyword: input.matchedKeyword,
+        detectedAt: input.detectedAt,
+        recipients: {
+          create: [
+            {
+              kind: "OWNER",
+              userId: owners[0]!.userId,
+              channel: "IN_APP"
+            },
+            ...members.map(({ id }) => ({
+              kind: "NOTIFICATION_MEMBER" as const,
+              notificationMemberId: id,
+              channel: "IN_APP" as const
+            }))
+          ]
+        }
+      },
+      include: alertInclude
+    });
+    await transaction.auditEvent.create({
+      data: {
+        teamId: input.teamId,
+        ...(input.actorUserId ? { actorUserId: input.actorUserId } : {}),
+        action: input.kind === "TEST" ? "TEST_ALERT_CREATED" : "ALERT_CREATED",
+        targetType: "Alert",
+        targetId: created.id,
+        metadata: {
+          sourceMailConnectionId: input.sourceMailConnectionId,
+          ...(input.notificationTestId
+            ? { notificationTestId: input.notificationTestId }
+            : {}),
+          recipientCount: created._count.recipients
+        }
+      }
+    });
+    return { alert: mapAlert(created, null), created: true };
   }
 
   public async listForOwner(input: {
