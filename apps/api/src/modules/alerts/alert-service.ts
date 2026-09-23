@@ -25,16 +25,22 @@ export class AlertService {
     this.now = options.now ?? (() => new Date());
   }
 
-  public ingest(input: {
-    readonly teamId: string;
-    readonly sourceMailConnectionId: string;
-    readonly sourceEventId: string;
-    readonly kind?: AlertKind;
-    readonly matchedKeyword: string;
-    readonly detectedAt: Date;
-    readonly actorUserId?: string;
-    readonly notificationTestId?: string;
-  }): Promise<AlertIngestionResult> {
+  public ingest(
+    input: {
+      readonly teamId: string;
+      readonly sourceMailConnectionId: string;
+      readonly sourceEventId: string;
+      readonly kind?: AlertKind;
+      readonly matchedKeyword: string;
+      readonly detectedAt: Date;
+      readonly actorUserId?: string;
+      readonly notificationTestId?: string;
+    },
+    // Internal composition boundary: persist must resolve only AFTER its outer
+    // transaction commits. Validation and post-commit SSE remain shared.
+    persist: AlertRepository["ingest"] = (value) =>
+      this.options.repository.ingest(value)
+  ): Promise<AlertIngestionResult> {
     const sourceEventId = input.sourceEventId.trim();
     const matchedKeyword = normalizeMatchedKeyword(input.matchedKeyword);
     if (
@@ -58,30 +64,28 @@ export class AlertService {
         400
       );
     }
-    return this.options.repository
-      .ingest({
-        ...input,
-        kind: input.kind ?? "REAL",
-        sourceEventId,
-        matchedKeyword,
-        now: this.now()
-      })
-      .then((result) => {
-        // Wake local SSE readers only after the Alert/recipients transaction commits.
-        // This is a data-free hint, not delivery: readers reauthenticate and reload.
-        // Other API instances and missed hints retain the existing polling fallback.
-        if (result.created) {
-          for (const listener of this.ingestionListeners.get(input.teamId) ??
-            []) {
-            try {
-              listener();
-            } catch {
-              // A disconnected reader must never turn a committed ingest into failure.
-            }
+    return persist({
+      ...input,
+      kind: input.kind ?? "REAL",
+      sourceEventId,
+      matchedKeyword,
+      now: this.now()
+    }).then((result) => {
+      // Wake local SSE readers only after the Alert/recipients transaction commits.
+      // This is a data-free hint, not delivery: readers reauthenticate and reload.
+      // Other API instances and missed hints retain the existing polling fallback.
+      if (result.created) {
+        for (const listener of this.ingestionListeners.get(input.teamId) ??
+          []) {
+          try {
+            listener();
+          } catch {
+            // A disconnected reader must never turn a committed ingest into failure.
           }
         }
-        return result;
-      });
+      }
+      return result;
+    });
   }
 
   public subscribeToIngestion(

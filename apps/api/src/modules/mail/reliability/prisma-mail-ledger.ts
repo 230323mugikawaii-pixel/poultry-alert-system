@@ -2,7 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseClient } from "../../../db/client.js";
 import type {
   MailEvaluation,
-  MailMessageLedger
+  MailMessageLedger,
+  Prisma
 } from "../../../generated/prisma/client.js";
 import {
   assertSameIdentity,
@@ -14,6 +15,15 @@ export interface LedgerEntry {
   readonly message: MailMessageLedger;
   readonly evaluation: MailEvaluation;
 }
+
+type EvaluationOutcome =
+  | { state: "MATCHED"; alertId: string; keyword: string }
+  | { state: "NOT_MATCHED" }
+  | {
+      state: "EXCLUDED";
+      code: "OUTSIDE_MONITORING_WINDOW" | "NOT_INCOMING_INBOX";
+    }
+  | { state: "UNDETERMINED"; code: "MESSAGE_GET_404" };
 
 const pendingStates = ["DISCOVERED", "FETCH_PENDING", "EVALUATING"] as const;
 export function isSettled(entry: LedgerEntry): boolean {
@@ -140,74 +150,76 @@ export class PrismaMailLedger {
 
   public async finish(
     entry: LedgerEntry,
-    outcome:
-      | { state: "MATCHED"; alertId: string; keyword: string }
-      | { state: "NOT_MATCHED" }
-      | {
-          state: "EXCLUDED";
-          code: "OUTSIDE_MONITORING_WINDOW" | "NOT_INCOMING_INBOX";
-        }
-      | { state: "UNDETERMINED"; code: "MESSAGE_GET_404" },
+    outcome: EvaluationOutcome,
     now: Date
   ): Promise<void> {
-    await this.database.$transaction(async (tx) => {
-      // Serialize decisions for this message. No provider I/O in this transaction.
-      await tx.$queryRaw`SELECT id FROM mail_message_ledger WHERE id = ${entry.message.id}::uuid FOR UPDATE`;
-      const current = await tx.mailEvaluation.findUniqueOrThrow({
-        where: { id: entry.evaluation.id }
+    await this.database.$transaction((tx) =>
+      this.finishWithinTransaction(tx, entry, outcome, now)
+    );
+  }
+
+  public async finishWithinTransaction(
+    tx: Prisma.TransactionClient,
+    entry: LedgerEntry,
+    outcome: EvaluationOutcome,
+    now: Date
+  ): Promise<void> {
+    // Serialize decisions for this message. No provider I/O in this transaction.
+    await tx.$queryRaw`SELECT id FROM mail_message_ledger WHERE id = ${entry.message.id}::uuid FOR UPDATE`;
+    const current = await tx.mailEvaluation.findUniqueOrThrow({
+      where: { id: entry.evaluation.id }
+    });
+    if (
+      isSettled({ message: entry.message, evaluation: current }) &&
+      (outcome.state !== "MATCHED" || current.state === "MATCHED")
+    ) {
+      const linked = await tx.mailMessageLedger.findUniqueOrThrow({
+        where: { id: entry.message.id }
+      });
+      if (outcome.state === "MATCHED" && linked.alertId !== outcome.alertId) {
+        throw new Error("LEDGER_CONCURRENT_DECISION_CONFLICT");
+      }
+      return;
+    }
+    if (outcome.state === "MATCHED") {
+      const alert = await tx.alert.findUniqueOrThrow({
+        where: { id: outcome.alertId }
       });
       if (
-        isSettled({ message: entry.message, evaluation: current }) &&
-        (outcome.state !== "MATCHED" || current.state === "MATCHED")
-      ) {
-        const linked = await tx.mailMessageLedger.findUniqueOrThrow({
-          where: { id: entry.message.id }
-        });
-        if (outcome.state === "MATCHED" && linked.alertId !== outcome.alertId) {
-          throw new Error("LEDGER_CONCURRENT_DECISION_CONFLICT");
-        }
-        return;
-      }
-      if (outcome.state === "MATCHED") {
-        const alert = await tx.alert.findUniqueOrThrow({
-          where: { id: outcome.alertId }
-        });
-        if (
-          alert.teamId !== entry.message.teamId ||
-          alert.sourceMailConnectionId !== current.connectionId ||
-          alert.sourceEventId !== entry.message.providerMessageId ||
-          alert.kind !== "REAL" ||
-          alert.matchedKeyword !== outcome.keyword
-        )
-          throw new Error("LEDGER_ALERT_SCOPE_MISMATCH");
-        await tx.mailMessageLedger.update({
-          where: { id: entry.message.id },
-          data: { alertId: alert.id }
-        });
-      } else {
-        // A concurrent successful ingest wins over a late 404 or exclusion.
-        const alert = await tx.alert.findUnique({
-          where: {
-            sourceMailConnectionId_sourceEventId: {
-              sourceMailConnectionId: current.connectionId,
-              sourceEventId: entry.message.providerMessageId
-            }
+        alert.teamId !== entry.message.teamId ||
+        alert.sourceMailConnectionId !== current.connectionId ||
+        alert.sourceEventId !== entry.message.providerMessageId ||
+        alert.kind !== "REAL" ||
+        alert.matchedKeyword !== outcome.keyword
+      )
+        throw new Error("LEDGER_ALERT_SCOPE_MISMATCH");
+      await tx.mailMessageLedger.update({
+        where: { id: entry.message.id },
+        data: { alertId: alert.id }
+      });
+    } else {
+      // A concurrent successful ingest wins over a late 404 or exclusion.
+      const alert = await tx.alert.findUnique({
+        where: {
+          sourceMailConnectionId_sourceEventId: {
+            sourceMailConnectionId: current.connectionId,
+            sourceEventId: entry.message.providerMessageId
           }
-        });
-        if (alert) throw new Error("LEDGER_ALERT_REQUIRES_LINK");
-      }
-      await tx.mailEvaluation.update({
-        where: { id: current.id },
-        data: {
-          state: outcome.state,
-          matchedKeyword: outcome.state === "MATCHED" ? outcome.keyword : null,
-          exclusionCode: outcome.state === "EXCLUDED" ? outcome.code : null,
-          lastErrorCode: outcome.state === "UNDETERMINED" ? outcome.code : null,
-          unresolvedSince: outcome.state === "UNDETERMINED" ? now : null,
-          decisionAt: outcome.state === "UNDETERMINED" ? null : now,
-          revision: { increment: 1 }
         }
       });
+      if (alert) throw new Error("LEDGER_ALERT_REQUIRES_LINK");
+    }
+    await tx.mailEvaluation.update({
+      where: { id: current.id },
+      data: {
+        state: outcome.state,
+        matchedKeyword: outcome.state === "MATCHED" ? outcome.keyword : null,
+        exclusionCode: outcome.state === "EXCLUDED" ? outcome.code : null,
+        lastErrorCode: outcome.state === "UNDETERMINED" ? outcome.code : null,
+        unresolvedSince: outcome.state === "UNDETERMINED" ? now : null,
+        decisionAt: outcome.state === "UNDETERMINED" ? null : now,
+        revision: { increment: 1 }
+      }
     });
   }
 

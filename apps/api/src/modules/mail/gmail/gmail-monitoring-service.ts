@@ -19,6 +19,7 @@ import {
   type LedgerEntry,
   type PrismaMailLedger
 } from "../reliability/prisma-mail-ledger.js";
+import type { PrismaAtomicMailIngestion } from "../reliability/prisma-atomic-mail-ingestion.js";
 
 const SYNC_LEASE_MILLISECONDS = 2 * 60 * 1_000;
 const MAX_HISTORY_PAGES = 100;
@@ -68,8 +69,12 @@ export class GmailMonitoringService {
       readonly now?: () => Date;
       readonly logger?: GmailMonitoringLogger;
       readonly mailLedger?: PrismaMailLedger;
+      readonly atomicMailIngestion?: PrismaAtomicMailIngestion;
     }
   ) {
+    if (options.atomicMailIngestion && !options.mailLedger) {
+      throw new Error("atomic_mail_ingestion_requires_ledger");
+    }
     if (options.googleProvider.provider !== "GOOGLE") {
       throw new Error("gmail_monitoring_requires_google_provider");
     }
@@ -419,6 +424,16 @@ export class GmailMonitoringService {
       if (ledger && entry) {
         const existing = await ledger.existingAlert(entry);
         if (existing) {
+          if (this.options.atomicMailIngestion) {
+            await this.ingestMatched(
+              connection,
+              messageId,
+              existing.matchedKeyword,
+              now,
+              entry
+            );
+            return;
+          }
           await ledger.finish(
             entry,
             {
@@ -510,16 +525,39 @@ export class GmailMonitoringService {
         await ledger.finish(entry, { state: "NOT_MATCHED" }, now);
       return;
     }
-    const result = await this.options.alertService.ingest({
-      teamId: connection.teamId,
-      sourceMailConnectionId: connection.id,
-      sourceEventId: message.id,
-      kind: "REAL",
+    await this.ingestMatched(
+      connection,
+      message.id,
       matchedKeyword,
-      detectedAt: now
-    });
-    if (ledger && entry)
-      await ledger.finish(
+      now,
+      entry
+    );
+    this.logger.info("gmail_message_matched");
+  }
+
+  private async ingestMatched(
+    connection: GmailMonitoringConnection,
+    messageId: string,
+    matchedKeyword: string,
+    now: Date,
+    entry: LedgerEntry | undefined
+  ): Promise<void> {
+    const atomic = this.options.atomicMailIngestion;
+    const result = await this.options.alertService.ingest(
+      {
+        teamId: connection.teamId,
+        sourceMailConnectionId: connection.id,
+        sourceEventId: messageId,
+        kind: "REAL",
+        matchedKeyword,
+        detectedAt: now
+      },
+      atomic && entry
+        ? (input) => atomic.ingestMatched(entry, input)
+        : undefined
+    );
+    if (!atomic && this.options.mailLedger && entry)
+      await this.options.mailLedger.finish(
         entry,
         {
           state: "MATCHED",
@@ -528,7 +566,6 @@ export class GmailMonitoringService {
         },
         now
       );
-    this.logger.info("gmail_message_matched");
   }
 
   private async getAccessToken(

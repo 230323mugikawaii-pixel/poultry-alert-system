@@ -14,7 +14,7 @@ const postgres =
 const migrationName = "20260923000100_mail_message_ledger";
 
 postgres("PR01 PostgreSQL 17 migration round trip", () => {
-  it("up/down/up preserves all pre-existing synthetic data and schema; normal deploy has 25/25 migrations", async () => {
+  it("PR01 up/down/up preserves all pre-existing synthetic data and schema; normal deploy has all migrations", async () => {
     const databaseUrl = process.env.DATABASE_URL ?? "";
     assertTestDatabase(databaseUrl);
     const admin = new Pool({ connectionString: databaseUrl });
@@ -33,11 +33,11 @@ postgres("PR01 PostgreSQL 17 migration round trip", () => {
       const migrations = (await readdir(root))
         .filter((entry) => /^\d/.test(entry))
         .sort();
-      expect(migrations).toHaveLength(25);
-      expect(migrations.at(-1)).toBe(migrationName);
+      const migrationIndex = migrations.indexOf(migrationName);
+      expect(migrationIndex).toBe(24);
       // SQL-only fixture construction, intentionally without _prisma_migrations.
       // This is NOT a claimed Prisma rollback or a fabricated applied history.
-      for (const migration of migrations.slice(0, -1)) {
+      for (const migration of migrations.slice(0, migrationIndex)) {
         await pool.query(
           await readFile(new URL(`${migration}/migration.sql`, root), "utf8")
         );

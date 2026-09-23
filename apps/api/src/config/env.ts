@@ -63,7 +63,11 @@ const EnvironmentSchema = Type.Object({
     maximum: 30
   }),
   GMAIL_PUSH_MONITORING_ENABLED: Type.Boolean(),
-  MAIL_LEDGER_MODE: Type.Union([Type.Literal("off"), Type.Literal("legacy")]),
+  MAIL_LEDGER_MODE: Type.Union([
+    Type.Literal("off"),
+    Type.Literal("legacy"),
+    Type.Literal("legacy-outbox")
+  ]),
   GMAIL_PUBSUB_TOPIC_NAME: Type.String(),
   GMAIL_PUBSUB_PUSH_AUDIENCE: Type.String(),
   GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL: Type.String(),

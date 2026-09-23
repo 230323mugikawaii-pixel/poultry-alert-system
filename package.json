@@ -26,6 +26,7 @@
     "test:notification-test-execution": "node --test tests/notification-test-execution.test.mjs",
     "test:postgres": "pnpm --filter @call-now/api test:postgres",
     "test:postgres:ledger": "pnpm --filter @call-now/api test:postgres:ledger",
+    "test:postgres:outbox": "pnpm --filter @call-now/api test:postgres:outbox",
     "test:coverage": "pnpm --filter @call-now/api test:coverage",
     "typecheck": "pnpm --filter @call-now/api typecheck",
     "verify": "pnpm test:keywords && pnpm test:monitoring-keywords && pnpm test:notification-test-execution && pnpm test:alarm-audio && pnpm test:alert-tab-coordination && pnpm test:frontend-auth && pnpm test:frontend-onboarding && pnpm test:frontend-alerts && pnpm test:frontend-communications && pnpm test:frontend-contract-settings && pnpm test:frontend-notification-members && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"

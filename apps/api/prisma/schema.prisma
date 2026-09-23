@@ -324,6 +324,7 @@ model Session {
 }
 
 model Team {
+  reliabilityOutbox ReliabilityOutbox[]
   mailLedgerMessages MailMessageLedger[]
   id              String           @id @default(uuid()) @db.Uuid
   publicCode      String           @unique @db.Char(6)
@@ -677,6 +678,7 @@ model MailConnection {
 }
 
 model Alert {
+  reliabilityOutbox ReliabilityOutbox[]
   mailLedgerMessage MailMessageLedger?
   id                                 String              @id @default(uuid()) @db.Uuid
   teamId                             String              @db.Uuid
@@ -700,6 +702,7 @@ model Alert {
   notificationTest                   NotificationTest?
 
   @@unique([sourceMailConnectionId, sourceEventId])
+  @@unique([id, teamId])
   @@index([teamId, status, detectedAt])
   @@map("alerts")
 }
@@ -792,6 +795,7 @@ model NotificationTest {
 }
 
 model AlertRecipient {
+  reliabilityOutbox ReliabilityOutbox[]
   id                   String               @id @default(uuid()) @db.Uuid
   alertId              String               @db.Uuid
   kind                 AlertRecipientKind
@@ -809,6 +813,7 @@ model AlertRecipient {
   notificationMember   NotificationMember?  @relation(fields: [notificationMemberId], references: [id], onDelete: Cascade)
 
   @@unique([alertId, userId, channel])
+  @@unique([id, alertId])
   @@unique([alertId, notificationMemberId, channel])
   @@index([userId, status, createdAt])
   @@index([notificationMemberId, status, createdAt])
@@ -817,6 +822,46 @@ model AlertRecipient {
   @@index([userId, dismissedAt, readAt, createdAt])
   @@index([notificationMemberId, dismissedAt, readAt, createdAt], map: "alert_recipients_member_dismissed_read_created_idx")
   @@map("alert_recipients")
+}
+
+// PR02b is write-only. Operator/status events and dispatch logic are deferred.
+enum ReliabilityOutboxKind {
+  ALERT_AVAILABLE
+}
+
+enum ReliabilityOutboxStatus {
+  PENDING
+  RUNNING
+  RETRY_WAIT
+  BLOCKED
+  DISPATCHED
+}
+
+model ReliabilityOutbox {
+  id              String                  @id @default(uuid()) @db.Uuid
+  eventKey        String                  @unique @db.Char(64)
+  kind            ReliabilityOutboxKind
+  status          ReliabilityOutboxStatus @default(PENDING)
+  teamId          String?                 @db.Uuid
+  alertId         String?                 @db.Uuid
+  recipientId     String?                 @db.Uuid
+  payload         Json                    @db.JsonB
+  availableAt     DateTime                @default(now()) @db.Timestamptz(3)
+  attempts        Int                     @default(0)
+  leaseToken      String?                 @db.Uuid
+  leaseGeneration BigInt                  @default(0)
+  leaseUntil      DateTime?               @db.Timestamptz(3)
+  lastErrorCode   String?                 @db.VarChar(100)
+  createdAt       DateTime                @default(now()) @db.Timestamptz(3)
+  dispatchedAt    DateTime?               @db.Timestamptz(3)
+  team            Team?                   @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  alert           Alert?                  @relation(fields: [alertId, teamId], references: [id, teamId], onDelete: Restrict)
+  recipient       AlertRecipient?         @relation(fields: [recipientId, alertId], references: [id, alertId], onDelete: Restrict)
+
+  @@index([status, availableAt])
+  @@index([status, leaseUntil])
+  @@index([alertId])
+  @@map("reliability_outbox")
 }
 
 model UserNotification {

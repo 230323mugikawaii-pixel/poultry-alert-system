@@ -81,11 +81,14 @@ describe("PR01 canonical message identity", () => {
       messageKey({ ...base, ...change } as MessageIdentity)
     ).toThrow();
   });
-  it("flag defaults off, permits only off/legacy", () => {
+  it("flag defaults off, explicitly permits legacy observation or legacy-outbox composition", () => {
     expect(loadEnvironment({}).MAIL_LEDGER_MODE).toBe("off");
     expect(
       loadEnvironment({ MAIL_LEDGER_MODE: "legacy" }).MAIL_LEDGER_MODE
     ).toBe("legacy");
+    expect(
+      loadEnvironment({ MAIL_LEDGER_MODE: "legacy-outbox" }).MAIL_LEDGER_MODE
+    ).toBe("legacy-outbox");
     expect(() => loadEnvironment({ MAIL_LEDGER_MODE: "live" })).toThrow();
   });
 });

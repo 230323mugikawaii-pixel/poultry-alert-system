@@ -11,6 +11,7 @@ import { GmailMonitoringService } from "../../src/modules/mail/gmail/gmail-monit
 import type { GmailMonitoringRepository } from "../../src/modules/mail/gmail/gmail-monitoring-repository.js";
 import type { MailProviderAdapter } from "../../src/modules/mail/mail-provider.js";
 import { PrismaMailLedger } from "../../src/modules/mail/reliability/prisma-mail-ledger.js";
+import { mailReliabilityOptions } from "../../src/modules/mail/reliability/mail-reliability-options.js";
 
 export const fixtureNow = new Date("2026-09-23T00:00:00.000Z");
 export const syntheticBody = "SYNTHETIC_BODY_MUST_NOT_BE_PERSISTED 停電";
@@ -93,7 +94,8 @@ export async function ledgerHarness(
   database: DatabaseClient,
   connectionId: string,
   options: {
-    readonly mode?: "off" | "legacy";
+    readonly mode?: "off" | "legacy" | "legacy-outbox";
+    readonly reliabilityDatabase?: DatabaseClient;
     readonly messageId?: string;
     readonly message404?: boolean;
     readonly history404?: boolean;
@@ -218,7 +220,21 @@ export async function ledgerHarness(
     }),
     classifyProviderError: () => "TRANSIENT"
   } as unknown as MailProviderAdapter;
-  const ledger = new PrismaMailLedger(database);
+  const reliability = mailReliabilityOptions(
+    options.reliabilityDatabase ?? database,
+    options.mode ?? "legacy"
+  );
+  const ledger = reliability.mailLedger ?? new PrismaMailLedger(database);
+  if (reliability.atomicMailIngestion) {
+    const atomic = reliability.atomicMailIngestion;
+    const original = atomic.ingestMatched.bind(atomic);
+    atomic.ingestMatched = async (entry, input) => {
+      const result = await original(entry, input);
+      if (result.created) calls.alertsCreated += 1;
+      await options.afterAlert?.();
+      return result;
+    };
+  }
   const service = new GmailMonitoringService({
     repository: monitoring,
     api,
@@ -232,7 +248,7 @@ export async function ledgerHarness(
     renewBeforeHours: 48,
     historyRecoveryLookbackHours: 72,
     now: () => fixtureNow,
-    ...(options.mode === "off" ? {} : { mailLedger: ledger })
+    ...reliability
   });
   return {
     run: () => service.syncConnectionById(row.id, "200"),

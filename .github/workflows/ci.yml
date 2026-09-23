@@ -47,4 +47,7 @@ jobs:
       - run: pnpm test:postgres:ledger
         env:
           PR01_TEST_ISOLATION_ACK: disposable-postgres
+      - run: pnpm test:postgres:outbox
+        env:
+          PR01_TEST_ISOLATION_ACK: disposable-postgres
       - run: pnpm verify

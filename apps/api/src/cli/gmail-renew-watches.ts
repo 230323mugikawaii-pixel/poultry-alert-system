@@ -6,7 +6,7 @@ import { PrismaAlertRepository } from "../modules/alerts/prisma-alert-repository
 import { GoogleGmailApiClient } from "../modules/mail/gmail/gmail-api-client.js";
 import { GmailMonitoringService } from "../modules/mail/gmail/gmail-monitoring-service.js";
 import { PrismaGmailMonitoringRepository } from "../modules/mail/gmail/prisma-gmail-monitoring-repository.js";
-import { PrismaMailLedger } from "../modules/mail/reliability/prisma-mail-ledger.js";
+import { mailReliabilityOptions } from "../modules/mail/reliability/mail-reliability-options.js";
 import { GoogleMailProvider } from "../modules/mail/providers/google-mail-provider.js";
 import { createTokenEncryptionProvider } from "../modules/mail/token-encryption.js";
 
@@ -30,9 +30,7 @@ try {
   });
   const service = new GmailMonitoringService({
     repository: new PrismaGmailMonitoringRepository(database),
-    ...(environment.MAIL_LEDGER_MODE === "legacy"
-      ? { mailLedger: new PrismaMailLedger(database) }
-      : {}),
+    ...mailReliabilityOptions(database, environment.MAIL_LEDGER_MODE),
     api: new GoogleGmailApiClient(),
     googleProvider,
     tokenEncryption: createTokenEncryptionProvider({
