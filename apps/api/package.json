@@ -12,11 +12,13 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "mail:gmail:renew-watches": "tsx src/cli/gmail-renew-watches.ts",
+    "outbox:dispatch": "tsx src/cli/outbox-dispatch.ts",
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:postgres": "RUN_POSTGRES_TESTS=true vitest run tests/postgres-concurrency.integration.test.ts --maxWorkers=1",
     "test:postgres:ledger": "RUN_PR01_POSTGRES_TESTS=true vitest run tests/mail-ledger.postgres.integration.test.ts tests/mail-ledger-migration.postgres.integration.test.ts --maxWorkers=1",
     "test:postgres:outbox": "RUN_PR02B_POSTGRES_TESTS=true vitest run tests/mail-outbox.postgres.integration.test.ts tests/mail-outbox-migration.postgres.integration.test.ts --maxWorkers=1",
+    "test:postgres:dispatcher": "RUN_PR03A_POSTGRES_TESTS=true vitest run tests/outbox-dispatcher.postgres.integration.test.ts --maxWorkers=1",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
   },

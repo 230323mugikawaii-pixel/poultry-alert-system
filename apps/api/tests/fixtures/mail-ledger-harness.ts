@@ -22,7 +22,7 @@ export function assertTestDatabase(value: string): void {
     const url = new URL(value);
     valid =
       ["localhost", "127.0.0.1", "postgres"].includes(url.hostname) &&
-      /^\/callnow_(?:ledger_test|test|pr01_migration_test_[a-f0-9]+)$/.test(
+      /^\/callnow_(?:ledger_test|test|pr01_migration_test_[a-f0-9]+|pr03a_test_[a-f0-9]+)$/.test(
         url.pathname
       );
   } catch {
