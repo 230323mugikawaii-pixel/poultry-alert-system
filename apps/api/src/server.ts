@@ -1,4 +1,5 @@
 import { config as loadDotenv } from "dotenv";
+import { PrismaMailLedger } from "./modules/mail/reliability/prisma-mail-ledger.js";
 import { buildApp } from "./app.js";
 import { loadEnvironment } from "./config/env.js";
 import { createDatabaseClient } from "./db/client.js";
@@ -235,6 +236,9 @@ const gmailMonitoringService = environment.GMAIL_PUSH_MONITORING_ENABLED
       googleProvider: googleMailProvider,
       tokenEncryption,
       alertService,
+      ...(environment.MAIL_LEDGER_MODE === "legacy"
+        ? { mailLedger: new PrismaMailLedger(database) }
+        : {}),
       topicName: environment.GMAIL_PUBSUB_TOPIC_NAME,
       renewBeforeHours: environment.GMAIL_WATCH_RENEW_BEFORE_HOURS,
       historyRecoveryLookbackHours:

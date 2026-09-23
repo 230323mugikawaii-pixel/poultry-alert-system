@@ -14,6 +14,11 @@ import type {
   GmailMonitoringRepository
 } from "./gmail-monitoring-repository.js";
 import { maximumDecimalString } from "./prisma-gmail-monitoring-repository.js";
+import {
+  isSettled,
+  type LedgerEntry,
+  type PrismaMailLedger
+} from "../reliability/prisma-mail-ledger.js";
 
 const SYNC_LEASE_MILLISECONDS = 2 * 60 * 1_000;
 const MAX_HISTORY_PAGES = 100;
@@ -62,6 +67,7 @@ export class GmailMonitoringService {
       readonly historyRecoveryLookbackHours: number;
       readonly now?: () => Date;
       readonly logger?: GmailMonitoringLogger;
+      readonly mailLedger?: PrismaMailLedger;
     }
   ) {
     if (options.googleProvider.provider !== "GOOGLE") {
@@ -397,30 +403,114 @@ export class GmailMonitoringService {
     now: Date,
     minimumInternalDate?: Date
   ): Promise<void> {
+    const ledger = this.options.mailLedger;
+    const entry = ledger
+      ? await ledger.discover({
+          teamId: connection.teamId,
+          provider: "GOOGLE",
+          mailboxId: connection.authorizationId,
+          connectionId: connection.id,
+          providerMessageId: messageId,
+          keywords: connection.keywords,
+          now
+        })
+      : undefined;
+    try {
+      if (ledger && entry) {
+        const existing = await ledger.existingAlert(entry);
+        if (existing) {
+          await ledger.finish(
+            entry,
+            {
+              state: "MATCHED",
+              alertId: existing.id,
+              keyword: existing.matchedKeyword
+            },
+            now
+          );
+          return;
+        }
+        if (isSettled(entry)) return;
+        await ledger.markFetching(entry);
+      }
+      await this.fetchAndEvaluateMessage(
+        connection,
+        accessToken,
+        messageId,
+        now,
+        minimumInternalDate,
+        entry
+      );
+    } catch (error) {
+      if (ledger && entry) await ledger.pendingFailure(entry, now);
+      throw error;
+    }
+  }
+
+  private async fetchAndEvaluateMessage(
+    connection: GmailMonitoringConnection,
+    accessToken: string,
+    messageId: string,
+    now: Date,
+    minimumInternalDate: Date | undefined,
+    entry: LedgerEntry | undefined
+  ): Promise<void> {
+    const ledger = this.options.mailLedger;
     let message: GmailMessage;
     try {
       message = await this.options.api.getMessage(accessToken, messageId);
     } catch (error) {
-      if (error instanceof GmailApiRequestError && error.status === 404) return;
+      if (error instanceof GmailApiRequestError && error.status === 404) {
+        if (ledger && entry) {
+          await ledger.finish(
+            entry,
+            { state: "UNDETERMINED", code: "MESSAGE_GET_404" },
+            now
+          );
+          this.logger.warn("gmail_message_fetch_undetermined");
+        }
+        return;
+      }
       throw error;
+    }
+    if (ledger && entry) {
+      if (message.id !== messageId)
+        throw new Error("LEDGER_MESSAGE_ID_MISMATCH");
+      await ledger.markEvaluating(entry, message.internalDate);
     }
     if (
       minimumInternalDate &&
       !isAtOrAfter(message.internalDate, minimumInternalDate)
     ) {
       this.logger.info("gmail_message_outside_monitoring_window");
+      if (ledger && entry)
+        await ledger.finish(
+          entry,
+          { state: "EXCLUDED", code: "OUTSIDE_MONITORING_WINDOW" },
+          now
+        );
       return;
     }
-    if (!isIncomingInboxMessage(message)) return;
+    if (!isIncomingInboxMessage(message)) {
+      if (ledger && entry)
+        await ledger.finish(
+          entry,
+          { state: "EXCLUDED", code: "NOT_INCOMING_INBOX" },
+          now
+        );
+      return;
+    }
     const matchedKeyword = findFirstMatchingKeyword(
-      connection.keywords,
+      entry?.evaluation.keywordsSnapshot ?? connection.keywords,
       extractGmailMatchContent(message)
     );
     if (!matchedKeyword) {
       this.logger.info("gmail_message_no_match");
+      if (ledger && entry)
+        await ledger.finish(entry, { state: "NOT_MATCHED" }, now);
       return;
     }
-    await this.options.alertService.ingest({
+    const result = await this.options.alertService.ingest({
       teamId: connection.teamId,
       sourceMailConnectionId: connection.id,
       sourceEventId: message.id,
@@ -428,6 +518,16 @@ export class GmailMonitoringService {
       matchedKeyword,
       detectedAt: now
     });
+    if (ledger && entry)
+      await ledger.finish(
+        entry,
+        {
+          state: "MATCHED",
+          alertId: result.alert.id,
+          keyword: result.alert.matchedKeyword
+        },
+        now
+      );
     this.logger.info("gmail_message_matched");
   }
 

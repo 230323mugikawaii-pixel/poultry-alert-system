@@ -44,4 +44,7 @@ jobs:
       - run: pnpm db:migrate:deploy
       - run: pnpm db:check-drift
       - run: pnpm test:postgres
+      - run: pnpm test:postgres:ledger
+        env:
+          PR01_TEST_ISOLATION_ACK: disposable-postgres
       - run: pnpm verify
