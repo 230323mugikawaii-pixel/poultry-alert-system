@@ -1,4 +1,5 @@
 import type { OutboxQueue, OutboxOutcome } from "./prisma-outbox-queue.js";
+import type { MobileDeliveryPlanner } from "../../device-push/mobile-delivery-planner.js";
 import type {
   OutboxTransport,
   OutboxTransportResult
@@ -29,6 +30,8 @@ export class OutboxDispatcher {
     private readonly transport: OutboxTransport,
     private readonly options: {
       readonly mode?: "off" | "fake";
+      readonly mobileDeliveryMode?: "off" | "shadow";
+      readonly mobilePlanner?: MobileDeliveryPlanner;
       readonly leaseMs?: number;
       readonly timeoutMs?: number;
       readonly maximumAttempts?: number;
@@ -56,11 +59,27 @@ export class OutboxDispatcher {
   ): Promise<DispatchStep> {
     if ((this.options.mode ?? "off") === "off") return "OFF";
     if (signal.aborted) return "STOPPED";
+    if (
+      this.options.mobileDeliveryMode === "shadow" &&
+      !this.options.mobilePlanner
+    )
+      throw new Error("MOBILE_PLANNER_REQUIRED");
     if (this.transport.mode !== "fake")
       throw new Error("OUTBOX_REAL_TRANSPORT_FORBIDDEN");
     const claim = await this.queue.claimOne(this.leaseMs);
     if (!claim) return "IDLE";
     if (signal.aborted) return "STOPPED"; // Leave recoverable lease, never fake success.
+    if (this.options.mobileDeliveryMode === "shadow") {
+      if (claim.attempts > this.maximumAttempts)
+        return (await this.queue.finish(claim, {
+          status: "BLOCKED",
+          code: "RETRY_EXHAUSTED"
+        }))
+          ? "BLOCKED"
+          : "LEASE_LOST";
+      // No FakeTransport/PushTransport call: record-only mobile planning is atomic in its own DB TX.
+      return this.options.mobilePlanner!.plan(claim, signal);
+    }
     const input = await this.queue.prepare(claim);
     let outcome: OutboxOutcome;
     if (!input) outcome = { status: "BLOCKED", code: "RECIPIENT_INELIGIBLE" };
