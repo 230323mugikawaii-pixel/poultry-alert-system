@@ -1,4 +1,5 @@
 import type { GmailMonitoringService } from "../gmail/gmail-monitoring-service.js";
+import type { MonitoringStateReference } from "./monitoring-state-reference.js";
 import {
   parseGmailJobPayload,
   type PrismaGmailJobQueue,
@@ -13,7 +14,8 @@ export class GmailJobWorker {
       "syncConnectionById"
     >,
     private readonly mode: "off" | "durable" = "off",
-    private readonly leaseMs = 120_000
+    private readonly leaseMs = 120_000,
+    private readonly monitoringReference?: MonitoringStateReference
   ) {}
 
   public async runOnce(
@@ -38,6 +40,12 @@ export class GmailJobWorker {
         for (const target of payload.targets) {
           if (signal.aborted) return "STOPPED";
           if (!(await this.queue.owns(claim))) return "LEASE_LOST";
+          // PR04 shadow is advisory only; unavailable reads must not gate LEGACY.
+          try {
+            await this.monitoringReference?.(target);
+          } catch {
+            /* No routing change. */
+          }
           const state = await this.queue.targetState(target, payload.historyId);
           if (state === "UNAVAILABLE") {
             failure = "GMAIL_JOB_TARGET_UNAVAILABLE";
