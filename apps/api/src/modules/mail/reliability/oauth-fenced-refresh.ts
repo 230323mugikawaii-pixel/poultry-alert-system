@@ -106,6 +106,12 @@ class OAuthFencedRefresh {
               row.refreshLeaseUntil.getTime() - row.dbNow.getTime()
             )
           };
+        if (
+          !row.encryptedRefreshToken ||
+          !row.encryptionProvider ||
+          !row.encryptionKeyVersion
+        )
+          return { kind: "UNAVAILABLE" };
         const token = randomUUID();
         const [claim] = await tx.$queryRaw<
           Array<{ refreshLeaseGeneration: bigint }>
@@ -125,9 +131,9 @@ class OAuthFencedRefresh {
             generation: claim.refreshLeaseGeneration,
             version: row.credentialVersion,
             refresh: {
-              ciphertext: row.encryptedRefreshToken!,
-              provider: row.encryptionProvider!,
-              keyVersion: row.encryptionKeyVersion!
+              ciphertext: row.encryptedRefreshToken,
+              provider: row.encryptionProvider,
+              keyVersion: row.encryptionKeyVersion
             }
           }
         };
@@ -294,14 +300,7 @@ function validateScope(scope: OAuthScope) {
     throw safeError("SCOPE_INVALID");
 }
 function usable(row: Row | undefined): row is Row {
-  return Boolean(
-    row &&
-    row.status === "ACTIVE" &&
-    !row.revokedAt &&
-    row.encryptedRefreshToken &&
-    row.encryptionProvider &&
-    row.encryptionKeyVersion
-  );
+  return Boolean(row && row.status === "ACTIVE" && !row.revokedAt);
 }
 function cachedToken(row: Row, minimumTtlMs = 300000): Cached | null {
   return row.encryptedAccessToken &&

@@ -42,13 +42,13 @@
 
 | 実行 | 結果 |
 |---|---|
-| `pnpm test:postgres:oauth` | **25/25 PASS**、2ファイル、12.36秒 |
+| `pnpm test:postgres:oauth` | **26/26 PASS**、2ファイル、12.90秒 |
 | `pnpm test:postgres` | **30/30 PASS** |
 | `pnpm test:postgres:ledger` | **17/17 PASS** |
 | `pnpm test:postgres:outbox` | **19/19 PASS** |
 | `pnpm test:postgres:dispatcher` | **14/14 PASS** |
 | `pnpm test:postgres:jobs` | **22/22 PASS** |
-| `pnpm verify` | **PASS**。Frontend128件、API283件（新規unit3件含む）、format/lint/typecheck/build。PG専用127件のskipは上記で全件別実行 |
+| `pnpm verify` | **PASS**。Frontend128件、API283件（新規unit3件含む）、format/lint/typecheck/build。PG専用128件のskipは上記で全件別実行 |
 | Prisma validate / generate / db:check-drift | **PASS / PASS / driftなし** |
 | dependency audit（production依存） | **既知の脆弱性0件** |
 | `git diff --check` | **PASS** |
@@ -59,7 +59,7 @@
 - **100 concurrent acquisitions**: Fake refresh呼出1回、1件TOKEN、99件BUSY。lease generation1、確定後credentialVersion1、lease解放。provider実行中に別DB sessionで同じ行のFOR UPDATE NOWAITが成功し、TX外実行を確認。
 - **TX2 version mismatch**: 合成した新資格情報version7を保存後、古い結果が返ってもDB行不変。最新保存tokenを返す。最新cacheがない場合はSTALEで終わり、再refreshしない。
 - **expired lease**: DBで自然経過を待ち、別サービスinstanceがgeneration2で回収。古いinstanceは更新・新lease解放ともできず、現instanceだけ確定。回収者がいなくても期限切れ結果は確定できない。
-- **cache TTL / forceRefresh**: >5分はFake呼出0、forceRefreshは1。5分ちょうど/299秒/期限切れは再利用しない。アプリ時計を2099年へずらしてもDB時刻基準は変わらない。
+- **cache TTL / forceRefresh**: >5分はFake呼出0、forceRefreshは1。5分ちょうど/299秒/期限切れは再利用しない。アプリ時計を2099年へずらしてもDB時刻基準は変わらない。ACTIVEの有効cacheはrefresh credentialがなくても返せるが、その状態のforceRefreshはUNAVAILABLE（provider呼出0）。
 - **10s timeout**: 実時間（テスト時計ではない）でtimeout、AbortSignal確認、部分credential書込0、lease解放、次の取得が成功。元Promiseの遅延成功後もDB行不変。
 - **rotation/encryption**: refresh/accessの暗号化保存、回転なしなら旧refresh/鍵情報保持。access側別鍵versionでも再取得可能。2個目の暗号化だけ失敗しても部分書込なし。暗号化/復号中にも別sessionの行lockが取得できる。
 - **unavailable/scope/errors**: REAUTH_REQUIRED/REVOKED/ERROR、別user/provider/IDはprovider呼出0。途中revocationを古い成功で復活させない。provider/crypto/DBの生エラーは出さない。キャッシュ復号中の世代交代はSTALE。

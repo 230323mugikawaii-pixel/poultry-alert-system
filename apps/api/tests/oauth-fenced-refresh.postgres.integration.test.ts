@@ -198,6 +198,25 @@ postgres("PR05a fenced refresh (real PostgreSQL, fake provider only)", () => {
     expect((await service(provider).acquire(f.scope)).kind).toBe("TOKEN");
     expect(provider.refresh).toHaveBeenCalledTimes(1);
   });
+  it("valid ACTIVE cache needs no refresh credential; forced refresh without one is unavailable", async () => {
+    const f = await seed(),
+      value = accessValue();
+    await cache(f.scope, value);
+    await env.db.mailAuthorization.update({
+      where: { id: f.scope.authorizationId },
+      data: {
+        encryptedRefreshToken: null,
+        encryptionProvider: null,
+        encryptionKeyVersion: null
+      }
+    });
+    const provider = { refresh: vi.fn(reply) },
+      s = service(provider);
+    expect(tokenMatches(await s.acquire(f.scope), value)).toBe(true);
+    expect(await s.acquire(f.scope, true)).toEqual({ kind: "UNAVAILABLE" });
+    expect(provider.refresh).not.toHaveBeenCalled();
+    expect((await row(f.scope)).refreshLeaseGeneration).toBe(0n);
+  });
 
   it("TX2 version mismatch affects zero rows and returns latest stored credential, not old response", async () => {
     const f = await seed(),
