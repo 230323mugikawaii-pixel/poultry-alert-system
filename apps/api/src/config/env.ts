@@ -63,6 +63,10 @@ const EnvironmentSchema = Type.Object({
     maximum: 30
   }),
   GMAIL_PUSH_MONITORING_ENABLED: Type.Boolean(),
+  OAUTH_FENCED_REFRESH_MODE: Type.Union([
+    Type.Literal("off"),
+    Type.Literal("shadow")
+  ]),
   GMAIL_PUSH_JOB_MODE: Type.Union([
     Type.Literal("off"),
     Type.Literal("durable")
@@ -184,6 +188,7 @@ export function loadEnvironment(
     GMAIL_PUSH_MONITORING_ENABLED:
       source.GMAIL_PUSH_MONITORING_ENABLED === "true",
     MAIL_LEDGER_MODE: source.MAIL_LEDGER_MODE ?? "off",
+    OAUTH_FENCED_REFRESH_MODE: source.OAUTH_FENCED_REFRESH_MODE ?? "off",
     GMAIL_PUSH_JOB_MODE: source.GMAIL_PUSH_JOB_MODE ?? "off",
     GMAIL_PUBSUB_TOPIC_NAME: source.GMAIL_PUBSUB_TOPIC_NAME ?? "",
     GMAIL_PUBSUB_PUSH_AUDIENCE: source.GMAIL_PUBSUB_PUSH_AUDIENCE ?? "",
