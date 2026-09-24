@@ -63,6 +63,10 @@ const EnvironmentSchema = Type.Object({
     maximum: 30
   }),
   GMAIL_PUSH_MONITORING_ENABLED: Type.Boolean(),
+  MOBILE_PUSH_DELIVERY_MODE: Type.Union([
+    Type.Literal("off"),
+    Type.Literal("shadow")
+  ]),
   MOBILE_PUSH_REGISTRY_MODE: Type.Union([
     Type.Literal("off"),
     Type.Literal("shadow")
@@ -188,6 +192,7 @@ export function loadEnvironment(
     GMAIL_PUSH_MONITORING_ENABLED:
       source.GMAIL_PUSH_MONITORING_ENABLED === "true",
     MAIL_LEDGER_MODE: source.MAIL_LEDGER_MODE ?? "off",
+    MOBILE_PUSH_DELIVERY_MODE: source.MOBILE_PUSH_DELIVERY_MODE ?? "off",
     MOBILE_PUSH_REGISTRY_MODE: source.MOBILE_PUSH_REGISTRY_MODE ?? "off",
     GMAIL_PUSH_JOB_MODE: source.GMAIL_PUSH_JOB_MODE ?? "off",
     GMAIL_PUBSUB_TOPIC_NAME: source.GMAIL_PUBSUB_TOPIC_NAME ?? "",

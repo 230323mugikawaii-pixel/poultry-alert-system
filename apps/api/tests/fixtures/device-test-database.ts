@@ -30,7 +30,7 @@ export async function createDeviceTestDatabase(priorOnly = false) {
     .sort();
   try {
     for (const m of migrations.filter(
-      (m) => !priorOnly || m !== deviceMigration
+      (m) => !priorOnly || m < deviceMigration
     )) {
       await pool.query(
         await readFile(new URL(`${m}/migration.sql`, migrationRoot), "utf8")
