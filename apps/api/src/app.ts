@@ -35,8 +35,11 @@ import { createTeamRoutes } from "./modules/teams/team-routes.js";
 import type { UserCommunicationService } from "./modules/user-communications/user-communication-service.js";
 import { createUserCommunicationRoutes } from "./modules/user-communications/user-communication-routes.js";
 import { createSystemRoutes } from "./routes/system.js";
+import { createDevicePushRoutes } from "./modules/device-push/device-push-routes.js";
+import type { DevicePushRegistry } from "./modules/device-push/device-push-registry.js";
 
 export interface BuildAppOptions {
+  readonly devicePushRegistryFactory?: () => DevicePushRegistry;
   readonly gmailJobIntake?: GmailJobIntake;
   readonly environment: AppEnvironment;
   readonly logger?: boolean;
@@ -75,6 +78,8 @@ export async function buildApp(
                 "query.code",
                 "query.state",
                 "body.token",
+                "body.deviceToken",
+                "req.body.deviceToken",
                 "body.password",
                 "body.magicLink",
                 "body.joinToken",
@@ -186,6 +191,26 @@ export async function buildApp(
   });
 
   await app.register(createSystemRoutes(options.readinessCheck));
+
+  if (options.environment.MOBILE_PUSH_REGISTRY_MODE === "shadow") {
+    if (
+      !options.devicePushRegistryFactory ||
+      !options.authService ||
+      !options.notificationMemberService ||
+      !options.teamService
+    ) {
+      throw new Error("PUSH_REGISTRY_DEPENDENCIES_REQUIRED");
+    }
+    await app.register(
+      createDevicePushRoutes(
+        options.devicePushRegistryFactory(),
+        options.authService,
+        options.notificationMemberService,
+        options.teamService,
+        options.environment
+      )
+    );
+  }
 
   if (
     Boolean(options.gmailMonitoringService) !==
