@@ -14,6 +14,7 @@
     "mail:gmail:renew-watches": "tsx src/cli/gmail-renew-watches.ts",
     "outbox:dispatch": "tsx src/cli/outbox-dispatch.ts",
     "push:deliveries": "tsx src/cli/push-deliveries.ts",
+    "push:apns-smoke": "tsx src/cli/apns-smoke.ts",
     "mail:gmail:process-jobs": "tsx src/cli/gmail-process-jobs.ts",
     "start": "node dist/server.js",
     "test": "vitest run",
