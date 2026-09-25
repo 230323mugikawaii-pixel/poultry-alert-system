@@ -10,6 +10,7 @@ import {
   mobilePushDeliveryMode,
   PrismaMobileDeliveryPlanner
 } from "../modules/device-push/mobile-delivery-planner.js";
+import { apnsPlannerConfiguration } from "../modules/device-push/apns-config.js";
 
 // Intentionally no implicit .env loading, no API startup and no real transport.
 // Off exits before creating a DB client. Opt in with an explicitly supplied DB.
@@ -25,6 +26,10 @@ async function main() {
   if (process.env.APP_ENV === "production")
     throw new Error("FAKE_PRODUCTION_FORBIDDEN");
   if (!process.env.DATABASE_URL) throw new Error("OUTBOX_DATABASE_REQUIRED");
+  const mobileConfiguration =
+    mobileDeliveryMode === "apns"
+      ? apnsPlannerConfiguration(process.env)
+      : "validated";
   const database = createDatabaseClient(process.env.DATABASE_URL);
   const controller = new AbortController();
   const stop = () => controller.abort();
@@ -36,12 +41,12 @@ async function main() {
     {
       mode,
       mobileDeliveryMode,
-      ...(mobileDeliveryMode === "shadow"
-        ? // PR07b validates only the built-in Fake configuration. No APNs credentials/endpoints.
+      ...(mobileDeliveryMode !== "off"
+        ? // Shadow validates the built-in Fake; apns validates credentials but NEVER sends here.
           {
             mobilePlanner: new PrismaMobileDeliveryPlanner(
               database,
-              "validated"
+              mobileConfiguration
             )
           }
         : {})
@@ -49,15 +54,17 @@ async function main() {
   );
   try {
     process.stdout.write(
-      mobileDeliveryMode === "shadow"
-        ? "Outbox mobile SHADOW planner; Fake configuration validated, NO send or acceptance.\n"
-        : "Outbox FAKE worker; DISPATCHED is simulation completion, NOT delivery.\n"
+      mobileDeliveryMode === "apns"
+        ? `Outbox APNs planner; configuration ${mobileConfiguration}, NO send or acceptance.\n`
+        : mobileDeliveryMode === "shadow"
+          ? "Outbox mobile SHADOW planner; Fake configuration validated, NO send or acceptance.\n"
+          : "Outbox FAKE worker; DISPATCHED is simulation completion, NOT delivery.\n"
     );
     do {
       try {
         const result = await worker.runOnce(controller.signal);
         process.stdout.write(
-          `Outbox ${mobileDeliveryMode === "shadow" ? "mobile intent" : "fake"} step: ${result}\n`
+          `Outbox ${mobileDeliveryMode !== "off" ? "mobile intent" : "fake"} step: ${result}\n`
         );
       } catch {
         // No raw DB/provider exception: it may contain secrets or connection details.

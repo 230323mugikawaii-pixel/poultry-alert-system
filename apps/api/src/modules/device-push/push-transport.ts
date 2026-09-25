@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
-// No plaintext device token, URL, credentials or message body crosses this boundary.
-// 07c must resolve credentials separately; this PR only accepts a Fake transport.
+// No plaintext token, URL, credentials or message body crosses this boundary.
+// APNs alone receives the version-bound ciphertext and a final eligibility recheck.
 export interface PushTransportInput {
   readonly deliveryId: string;
   readonly idempotencyKey: string;
@@ -10,6 +10,8 @@ export interface PushTransportInput {
   readonly endpointKey: string;
   readonly endpointVersion: number;
   readonly attemptId: string;
+  readonly encryptedToken?: string;
+  readonly confirmCurrent?: () => Promise<boolean>;
 }
 export type PushTransportResult =
   | { readonly kind: "ACCEPTED"; readonly providerRequestId: string }
@@ -17,10 +19,11 @@ export type PushTransportResult =
       readonly kind: "RETRY";
       readonly retryAfterMs: number;
       readonly code: string;
+      readonly stop?: true;
     }
-  | { readonly kind: "PERMANENT"; readonly code: string };
+  | { readonly kind: "PERMANENT"; readonly code: string; readonly stop?: true };
 export interface PushTransport {
-  readonly mode: "fake";
+  readonly mode: "fake" | "apns";
   send(
     input: PushTransportInput,
     signal: AbortSignal

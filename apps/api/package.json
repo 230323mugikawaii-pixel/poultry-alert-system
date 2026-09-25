@@ -21,6 +21,7 @@
     "test:postgres:device": "RUN_PR06_POSTGRES_TESTS=true vitest run tests/device-push.postgres.integration.test.ts tests/device-push-migration.postgres.integration.test.ts --maxWorkers=1",
     "test:postgres:delivery": "RUN_PR07A_POSTGRES_TESTS=true vitest run tests/notification-delivery.postgres.integration.test.ts tests/notification-delivery-migration.postgres.integration.test.ts --maxWorkers=1",
     "test:postgres:apns-worker": "RUN_PR07B_POSTGRES_TESTS=true vitest run tests/push-delivery-worker.postgres.integration.test.ts --maxWorkers=1",
+    "test:postgres:apns": "RUN_PR07C_POSTGRES_TESTS=true vitest run tests/apns-http2.postgres.integration.test.ts --maxWorkers=1",
     "test:postgres:ledger": "RUN_PR01_POSTGRES_TESTS=true vitest run tests/mail-ledger.postgres.integration.test.ts tests/mail-ledger-migration.postgres.integration.test.ts --maxWorkers=1",
     "test:postgres:outbox": "RUN_PR02B_POSTGRES_TESTS=true vitest run tests/mail-outbox.postgres.integration.test.ts tests/mail-outbox-migration.postgres.integration.test.ts --maxWorkers=1",
     "test:postgres:dispatcher": "RUN_PR03A_POSTGRES_TESTS=true vitest run tests/outbox-dispatcher.postgres.integration.test.ts --maxWorkers=1",

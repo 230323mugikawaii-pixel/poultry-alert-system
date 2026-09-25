@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseClient } from "../../db/client.js";
 import { retrySerializableTransaction } from "../../db/transaction-retry.js";
+import { Prisma } from "../../generated/prisma/client.js";
 import {
   pushIdempotencyKey,
   type PushTransportInput
@@ -23,20 +24,32 @@ export type PushFailureCode =
   | "TRANSPORT_RESULT_INVALID"
   | "RETRY_EXHAUSTED"
   | "TARGET_OR_RECIPIENT_INELIGIBLE";
+export type ApnsFailureCode =
+  | "APNS_CONFIG"
+  | "APNS_CONNECTION"
+  | "APNS_TOKEN_REFRESH"
+  | "APNS_BAD_DEVICE_TOKEN"
+  | "APNS_TOKEN_NOT_FOR_TOPIC"
+  | "APNS_TARGET_STALE"
+  | "APNS_FORBIDDEN"
+  | "APNS_PAYLOAD_TOO_LARGE";
 export type PushDeliveryOutcome =
   | { readonly state: "PROVIDER_ACCEPTED"; readonly providerRequestId: string }
   | {
       readonly state: "RETRY_WAIT";
-      readonly code: PushFailureCode;
+      readonly code: PushFailureCode | ApnsFailureCode;
       readonly delayMs: number;
     }
   | {
       readonly state: "PERMANENT_FAILURE" | "CANCELLED";
-      readonly code: PushFailureCode;
+      readonly code: PushFailureCode | ApnsFailureCode;
     };
 export interface PushDeliveryQueue {
   claimOne(leaseMs: number): Promise<PushDeliveryClaim | null>;
-  prepare(claim: PushDeliveryClaim): Promise<PushTransportInput | null>;
+  prepare(
+    claim: PushDeliveryClaim,
+    mode?: "fake" | "apns"
+  ): Promise<PushTransportInput | null>;
   finish(
     claim: PushDeliveryClaim,
     outcome: PushDeliveryOutcome
@@ -76,10 +89,11 @@ export class PrismaPushDeliveryQueue implements PushDeliveryQueue {
   }
 
   public async prepare(
-    claim: PushDeliveryClaim
+    claim: PushDeliveryClaim,
+    mode: "fake" | "apns" = "fake"
   ): Promise<PushTransportInput | null> {
     return safeDatabase(async () => {
-      // Recheck current ownership/version immediately before sending. No ciphertext/token reads.
+      // Only APNs fetches version-bound ciphertext, in the SAME eligibility SELECT.
       // A rotation AFTER this check can race with external I/O; fence the result/version, never roll back a newer registration.
       const rows = await this.database.$queryRaw<
         {
@@ -89,9 +103,11 @@ export class PrismaPushDeliveryQueue implements PushDeliveryQueue {
           recipientId: string;
           targetKey: string;
           targetVersion: number;
+          encryptedToken?: string;
         }[]
       >`
         SELECT d.id,d."outboxId",o."alertId",o."recipientId",d."targetKey",d."targetVersion"
+          ${mode === "apns" ? Prisma.sql`,p."encryptedToken"` : Prisma.empty}
         FROM notification_deliveries d
         JOIN reliability_outbox o ON o.id=d."outboxId" AND o.status='DISPATCHED'
         JOIN alerts a ON a.id=o."alertId" AND a."teamId"=o."teamId"
@@ -124,7 +140,14 @@ export class PrismaPushDeliveryQueue implements PushDeliveryQueue {
             recipientId: row.recipientId,
             endpointKey: row.targetKey,
             endpointVersion: row.targetVersion,
-            attemptId: claim.leaseToken
+            attemptId: claim.leaseToken,
+            ...(mode === "apns"
+              ? {
+                  encryptedToken: row.encryptedToken,
+                  confirmCurrent: async () =>
+                    Boolean(await this.prepare(claim, "fake"))
+                }
+              : {})
           }
         : null;
     });
