@@ -37,14 +37,20 @@ async function main() {
       mode,
       mobileDeliveryMode,
       ...(mobileDeliveryMode === "shadow"
-        ? { mobilePlanner: new PrismaMobileDeliveryPlanner(database) }
+        ? // PR07b validates only the built-in Fake configuration. No APNs credentials/endpoints.
+          {
+            mobilePlanner: new PrismaMobileDeliveryPlanner(
+              database,
+              "validated"
+            )
+          }
         : {})
     }
   );
   try {
     process.stdout.write(
       mobileDeliveryMode === "shadow"
-        ? "Outbox mobile SHADOW planner; configuration missing, NO send or acceptance.\n"
+        ? "Outbox mobile SHADOW planner; Fake configuration validated, NO send or acceptance.\n"
         : "Outbox FAKE worker; DISPATCHED is simulation completion, NOT delivery.\n"
     );
     do {
