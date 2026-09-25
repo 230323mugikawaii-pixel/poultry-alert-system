@@ -19,7 +19,7 @@ export interface MobileDeliveryPlanner {
 }
 
 // Only a trusted, synchronous configuration snapshot; never a network callback.
-// PR07a CLI always uses "missing": APNs configuration validation belongs to 07b.
+// PR07b CLI validates only the Fake configuration; real APNs validation is deferred.
 export type MobileConfiguration = "missing" | "validated";
 class LostLease extends Error {}
 class Stopped extends Error {}
