@@ -6,9 +6,10 @@ import type { OutboxClaim } from "../mail/reliability/prisma-outbox-queue.js";
 
 export function mobilePushDeliveryMode(
   value: string | undefined
-): "off" | "shadow" {
+): "off" | "shadow" | "apns" {
   if (value === undefined || value === "off") return "off";
   if (value === "shadow") return "shadow";
+  if (value === "apns") return "apns";
   throw new Error("MOBILE_PUSH_DELIVERY_MODE_INVALID");
 }
 

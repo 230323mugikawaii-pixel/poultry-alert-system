@@ -20,10 +20,12 @@ import {
   type PushTransportResult
 } from "../../src/modules/device-push/push-transport.js";
 
-export async function createPushWorkerDatabase() {
+export async function createPushWorkerDatabase(
+  prefix: "pr07b" | "pr07c" = "pr07b"
+) {
   const value = process.env.DATABASE_URL ?? "";
   assertTestDatabase(value);
-  const name = `callnow_pr07b_test_${randomUUID().replaceAll("-", "")}`;
+  const name = `callnow_${prefix}_test_${randomUUID().replaceAll("-", "")}`;
   const admin = new Pool({ connectionString: value });
   await admin.query(`CREATE DATABASE "${name}"`);
   const url = new URL(value);

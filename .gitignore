@@ -8,3 +8,4 @@ apps/api/src/generated/prisma/
 !.env.example
 *.log
 .DS_Store
+*.p8

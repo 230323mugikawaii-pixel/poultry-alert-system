@@ -30,7 +30,7 @@ export class OutboxDispatcher {
     private readonly transport: OutboxTransport,
     private readonly options: {
       readonly mode?: "off" | "fake";
-      readonly mobileDeliveryMode?: "off" | "shadow";
+      readonly mobileDeliveryMode?: "off" | "shadow" | "apns";
       readonly mobilePlanner?: MobileDeliveryPlanner;
       readonly leaseMs?: number;
       readonly timeoutMs?: number;
@@ -60,7 +60,8 @@ export class OutboxDispatcher {
     if ((this.options.mode ?? "off") === "off") return "OFF";
     if (signal.aborted) return "STOPPED";
     if (
-      this.options.mobileDeliveryMode === "shadow" &&
+      (this.options.mobileDeliveryMode === "shadow" ||
+        this.options.mobileDeliveryMode === "apns") &&
       !this.options.mobilePlanner
     )
       throw new Error("MOBILE_PLANNER_REQUIRED");
@@ -69,7 +70,10 @@ export class OutboxDispatcher {
     const claim = await this.queue.claimOne(this.leaseMs);
     if (!claim) return "IDLE";
     if (signal.aborted) return "STOPPED"; // Leave recoverable lease, never fake success.
-    if (this.options.mobileDeliveryMode === "shadow") {
+    if (
+      this.options.mobileDeliveryMode === "shadow" ||
+      this.options.mobileDeliveryMode === "apns"
+    ) {
       if (claim.attempts > this.maximumAttempts)
         return (await this.queue.finish(claim, {
           status: "BLOCKED",

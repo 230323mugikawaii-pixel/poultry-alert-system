@@ -65,7 +65,8 @@ const EnvironmentSchema = Type.Object({
   GMAIL_PUSH_MONITORING_ENABLED: Type.Boolean(),
   MOBILE_PUSH_DELIVERY_MODE: Type.Union([
     Type.Literal("off"),
-    Type.Literal("shadow")
+    Type.Literal("shadow"),
+    Type.Literal("apns")
   ]),
   MOBILE_PUSH_REGISTRY_MODE: Type.Union([
     Type.Literal("off"),

@@ -31,6 +31,7 @@
     "test:postgres:device": "pnpm --filter @call-now/api test:postgres:device",
     "test:postgres:delivery": "pnpm --filter @call-now/api test:postgres:delivery",
     "test:postgres:apns-worker": "pnpm --filter @call-now/api test:postgres:apns-worker",
+    "test:postgres:apns": "pnpm --filter @call-now/api test:postgres:apns",
     "test:postgres:ledger": "pnpm --filter @call-now/api test:postgres:ledger",
     "test:postgres:outbox": "pnpm --filter @call-now/api test:postgres:outbox",
     "test:postgres:dispatcher": "pnpm --filter @call-now/api test:postgres:dispatcher",
