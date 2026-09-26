@@ -1,0 +1,72 @@
+name: CallNow
+options:
+  bundleIdPrefix: com.callnow
+  deploymentTarget:
+    iOS: "17.0"
+configs:
+  Debug: debug
+  Release: release
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    # Team is deliberately left unset here — select it per-developer in
+    # Xcode's Signing & Capabilities tab. Do not hardcode a Team ID.
+  configs:
+    Debug:
+      CALLNOW_API_BASE_URL: "http://127.0.0.1:8080"
+      CALLNOW_PUBLIC_ORIGIN: "http://127.0.0.1:5500"
+    Release:
+      # Placeholder only: no production domain exists yet. Deliberately an
+      # unreachable value so a Release build never silently talks to a real
+      # server (see docs/ios/step-01-shell-implementation-results.md).
+      CALLNOW_API_BASE_URL: "https://api.callnow.example.invalid"
+      CALLNOW_PUBLIC_ORIGIN: "https://callnow.example.invalid"
+targets:
+  CallNow:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.callnow.app
+        PRODUCT_NAME: CallNow
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: CallNow
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UIBackgroundModes:
+          - remote-notification
+        CALLNOW_API_BASE_URL: "$(CALLNOW_API_BASE_URL)"
+        CALLNOW_PUBLIC_ORIGIN: "$(CALLNOW_PUBLIC_ORIGIN)"
+    entitlements:
+      path: Generated/CallNow.entitlements
+      properties:
+        aps-environment: development
+  CallNowTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/CallNowTests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: CallNow
+schemes:
+  CallNow:
+    build:
+      targets:
+        CallNow: all
+        CallNowTests: [test]
+    test:
+      targets:
+        - CallNowTests
+    run:
+      config: Debug
+    archive:
+      config: Release
