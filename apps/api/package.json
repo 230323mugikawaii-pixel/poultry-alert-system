@@ -21,6 +21,7 @@
     "test:postgres:outbox": "RUN_PR02B_POSTGRES_TESTS=true vitest run tests/mail-outbox.postgres.integration.test.ts tests/mail-outbox-migration.postgres.integration.test.ts --maxWorkers=1",
     "test:postgres:dispatcher": "RUN_PR03A_POSTGRES_TESTS=true vitest run tests/outbox-dispatcher.postgres.integration.test.ts --maxWorkers=1",
     "test:postgres:jobs": "RUN_PR03B_POSTGRES_TESTS=true vitest run tests/gmail-jobs.postgres.integration.test.ts tests/gmail-jobs-migration.postgres.integration.test.ts --maxWorkers=1",
+    "test:postgres:monitoring": "RUN_PR04_POSTGRES_TESTS=true vitest run tests/monitoring-state.postgres.integration.test.ts tests/monitoring-state-migration.postgres.integration.test.ts --maxWorkers=1",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
   },

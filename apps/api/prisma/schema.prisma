@@ -644,6 +644,8 @@ model OnboardingMailChoice {
 }
 
 model MailConnection {
+  monitoringState  MonitoringState?
+  monitoringEpochs MonitoringEpoch[]
   mailLedgerMessages MailMessageLedger[]
   mailEvaluations MailEvaluation[]
   id                   String                @id @default(uuid()) @db.Uuid
@@ -862,6 +864,62 @@ model ReliabilityOutbox {
   @@index([status, leaseUntil])
   @@index([alertId])
   @@map("reliability_outbox")
+}
+
+enum MonitorDesired {
+  RUNNING
+  PAUSED
+  DISCONNECTED
+}
+
+enum MonitorObserved {
+  UNKNOWN
+  HEALTHY
+  DEGRADED
+  AUTH_REQUIRED
+  RECOVERING
+}
+
+enum IngestionOwner {
+  LEGACY
+  LIVE
+}
+
+model MonitoringState {
+  connectionId      String          @id @db.Uuid
+  desired           MonitorDesired @default(PAUSED)
+  observed          MonitorObserved @default(UNKNOWN)
+  ingestionOwner    IngestionOwner  @default(LEGACY)
+  shadowEnabled     Boolean         @default(false)
+  generation        BigInt          @default(0)
+  coverageKnownFrom DateTime?       @db.Timestamptz(3)
+  recoveryFrom      DateTime?       @db.Timestamptz(3)
+  checkedAt         DateTime?       @db.Timestamptz(3)
+  lastErrorCode     String?         @db.VarChar(100)
+  updatedAt         DateTime        @updatedAt @db.Timestamptz(3)
+  connection        MailConnection  @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+
+  @@index([desired, observed])
+  @@map("monitoring_states")
+}
+
+model MonitoringEpoch {
+  id               String         @id @default(uuid()) @db.Uuid
+  connectionId     String         @db.Uuid
+  revision         Int
+  startedAt        DateTime       @db.Timestamptz(3)
+  endedAt          DateTime?      @db.Timestamptz(3)
+  boundaryCursor   String?        @db.Text
+  keywordsSnapshot String[]       @default([])
+  matcherVersion   String         @db.VarChar(64)
+  closeReason      String?        @db.VarChar(64)
+  createdAt        DateTime       @default(now()) @db.Timestamptz(3)
+  connection       MailConnection @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+
+  // Evaluation linkage belongs to the later routing cutover, not PR04 shadow.
+  @@unique([connectionId, revision])
+  @@index([connectionId, startedAt, endedAt])
+  @@map("monitoring_epochs")
 }
 
 enum ReliabilityJobKind {

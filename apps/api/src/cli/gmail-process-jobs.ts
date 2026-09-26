@@ -11,6 +11,7 @@ import { createTokenEncryptionProvider } from "../modules/mail/token-encryption.
 import { mailReliabilityOptions } from "../modules/mail/reliability/mail-reliability-options.js";
 import { PrismaGmailJobQueue } from "../modules/mail/reliability/prisma-gmail-job-queue.js";
 import { GmailJobWorker } from "../modules/mail/reliability/gmail-job-worker.js";
+import { monitoringStateReference } from "../modules/mail/reliability/monitoring-state-reference.js";
 
 // Independent opt-in worker, no implicit .env or Outbox dispatcher startup.
 async function main() {
@@ -53,7 +54,18 @@ async function main() {
     const worker = new GmailJobWorker(
       new PrismaGmailJobQueue(database, env.GMAIL_PUBSUB_TOPIC_NAME),
       service,
-      env.GMAIL_PUSH_JOB_MODE
+      env.GMAIL_PUSH_JOB_MODE,
+      undefined,
+      monitoringStateReference(
+        database,
+        env.MONITORING_STATE_MODE,
+        (result) => {
+          // Only state enums/generation, no addresses, identifiers, payloads or errors.
+          process.stdout.write(
+            `Monitoring shadow reference: ${JSON.stringify(result)}\n`
+          );
+        }
+      )
     );
     do {
       try {
