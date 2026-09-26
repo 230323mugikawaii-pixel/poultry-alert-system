@@ -578,6 +578,12 @@ model NotificationTarget {
 }
 
 model MailAuthorization {
+  encryptedAccessToken   String?   @db.Text
+  accessTokenExpiresAt   DateTime? @db.Timestamptz(3)
+  credentialVersion      Int       @default(0)
+  refreshLeaseToken      String?   @db.Uuid
+  refreshLeaseUntil      DateTime? @db.Timestamptz(3)
+  refreshLeaseGeneration BigInt    @default(0)
   mailLedgerMessages MailMessageLedger[]
   id                    String                   @id @default(uuid()) @db.Uuid
   userId                String                   @db.Uuid

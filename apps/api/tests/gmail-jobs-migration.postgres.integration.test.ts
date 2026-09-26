@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { Pool } from "pg";
 import { describe, expect, it } from "vitest";
-import { createDatabaseClient } from "../src/db/client.js";
+import { createLegacySchemaClient as createDatabaseClient } from "./fixtures/legacy-schema-client.js";
 import { PrismaGmailJobQueue } from "../src/modules/mail/reliability/prisma-gmail-job-queue.js";
 import { assertTestDatabase } from "./fixtures/mail-ledger-harness.js";
 import {

@@ -61,14 +61,16 @@ export async function seedLedgerFixture(database: DatabaseClient) {
       }
     }
   });
-  const authorization = await database.mailAuthorization.create({
-    data: {
-      userId: owner.id,
-      provider: "GOOGLE",
-      providerSubject: suffix,
-      email: `${suffix}@example.invalid`
-    }
-  });
+  // This seed also runs against pre-05a schemas. A newly generated Prisma create
+  // would explicitly insert the new defaulted columns even with output omit.
+  // Use only the longstanding columns; PostgreSQL supplies each schema's defaults.
+  const [authorization] = await database.$queryRaw<
+    Array<{ id: string; email: string; providerSubject: string }>
+  >`
+    INSERT INTO mail_authorizations (id,"userId",provider,"providerSubject",email,"updatedAt")
+    VALUES (${randomUUID()}::uuid,${owner.id}::uuid,'GOOGLE',${suffix},${`${suffix}@example.invalid`},clock_timestamp())
+    RETURNING id,email,"providerSubject"`;
+  if (!authorization) throw new Error("Synthetic authorization seed failed");
   const connection = await database.mailConnection.create({
     data: {
       teamId: team.id,

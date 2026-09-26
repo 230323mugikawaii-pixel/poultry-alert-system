@@ -22,6 +22,7 @@
     "test:postgres:dispatcher": "RUN_PR03A_POSTGRES_TESTS=true vitest run tests/outbox-dispatcher.postgres.integration.test.ts --maxWorkers=1",
     "test:postgres:jobs": "RUN_PR03B_POSTGRES_TESTS=true vitest run tests/gmail-jobs.postgres.integration.test.ts tests/gmail-jobs-migration.postgres.integration.test.ts --maxWorkers=1",
     "test:coverage": "vitest run --coverage",
+    "test:postgres:oauth": "RUN_PR05A_POSTGRES_TESTS=true vitest run tests/oauth-fenced-refresh.postgres.integration.test.ts tests/oauth-fencing-migration.postgres.integration.test.ts --maxWorkers=1",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
