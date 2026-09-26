@@ -196,6 +196,7 @@ enum OwnerTransferStatus {
 }
 
 model User {
+  pushRegistrations       DevicePushRegistration[]
   id                      String                 @id @default(uuid()) @db.Uuid
   email                   String                 @unique @db.VarChar(320)
   displayName             String?                @db.VarChar(120)
@@ -324,6 +325,7 @@ model Session {
 }
 
 model Team {
+  pushRegistrations DevicePushRegistration[]
   reliabilityOutbox ReliabilityOutbox[]
   mailLedgerMessages MailMessageLedger[]
   id              String           @id @default(uuid()) @db.Uuid
@@ -350,6 +352,7 @@ model Team {
 }
 
 model NotificationMember {
+  pushRegistrations DevicePushRegistration[]
   id                String                      @id @default(uuid()) @db.Uuid
   teamId            String                      @db.Uuid
   callNowId         String                      @unique @db.VarChar(16)
@@ -575,6 +578,48 @@ model NotificationTarget {
   @@unique([membershipId, channel, endpointHash])
   @@index([membershipId, status])
   @@map("notification_targets")
+}
+
+enum PushPrincipalKind {
+  OWNER
+  MEMBER
+}
+
+enum PushPlatform {
+  APNS
+}
+
+enum PushRegistrationStatus {
+  ACTIVE
+  REVOKED
+}
+
+// Separate from the User-only Device and WEB_PUSH/EMAIL NotificationTarget.
+// No delivery/dispatcher relation until the later APNs integration PR.
+model DevicePushRegistration {
+  targetKey            String                 @id @default(uuid()) @db.Uuid
+  teamId               String                 @db.Uuid
+  principalKind        PushPrincipalKind
+  principalId          String                 @db.Uuid
+  ownerUserId          String?                @db.Uuid
+  notificationMemberId String?                @db.Uuid
+  installationId       String                 @db.Uuid
+  platform             PushPlatform           @default(APNS)
+  encryptedToken       String?                @db.Text
+  tokenHash            String?                @db.Char(64)
+  tokenVersion         Int                    @default(1)
+  status               PushRegistrationStatus @default(ACTIVE)
+  createdAt            DateTime               @default(now()) @db.Timestamptz(3)
+  lastSeenAt           DateTime               @default(now()) @db.Timestamptz(3)
+  rotatedAt            DateTime?              @db.Timestamptz(3)
+  team                 Team                   @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  owner                User?                  @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  member               NotificationMember?    @relation(fields: [notificationMemberId], references: [id], onDelete: Restrict)
+
+  @@unique([teamId, principalKind, principalId, platform, installationId], map: "push_registration_installation_key")
+  @@unique([platform, tokenHash], map: "push_registration_token_key")
+  @@index([teamId, principalKind, principalId, status])
+  @@map("device_push_registrations")
 }
 
 model MailAuthorization {
