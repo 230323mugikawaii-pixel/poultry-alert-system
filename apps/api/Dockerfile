@@ -51,6 +51,7 @@ ENV NODE_ENV=production
 
 COPY --from=migration-dependencies /prod/migrations apps/migrations
 COPY apps/api/prisma apps/api/prisma
+COPY infra/cloudrun/staging/guard.mjs infra/cloudrun/staging/prisma-runner.mjs /app/infra/cloudrun/staging/
 
 USER node
 
@@ -63,6 +64,7 @@ ENV NODE_ENV=production
 COPY --from=production-dependencies /prod/api/node_modules /app/apps/api/node_modules
 COPY --from=production-dependencies /prod/api/package.json /app/apps/api/package.json
 COPY --from=build /app/apps/api/dist /app/apps/api/dist
+COPY infra/cloudrun/staging/guard.mjs infra/cloudrun/staging/bootstrap.mjs /app/infra/cloudrun/staging/
 
 EXPOSE 8080
 

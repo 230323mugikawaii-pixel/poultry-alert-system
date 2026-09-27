@@ -8,3 +8,6 @@
 **/coverage
 apps/api/src/generated
 work
+**/*.p8
+**/*.p12
+**/*.mobileprovision

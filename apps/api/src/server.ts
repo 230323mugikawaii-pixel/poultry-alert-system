@@ -79,13 +79,16 @@ const authService = new AuthService({
   sessionAbsoluteDays: environment.SESSION_ABSOLUTE_DAYS,
   maxActiveSessions: environment.MAX_ACTIVE_SESSIONS
 });
-const primaryAuthProviders: PrimaryAuthProviderAdapter[] = [
-  new GoogleOAuthClient({
-    clientId: environment.GOOGLE_OAUTH_CLIENT_ID,
-    clientSecret: environment.GOOGLE_OAUTH_CLIENT_SECRET,
-    redirectUri: environment.GOOGLE_OAUTH_REDIRECT_URI
-  })
-];
+const primaryAuthProviders: PrimaryAuthProviderAdapter[] = [];
+if (environment.GOOGLE_OAUTH_CLIENT_ID) {
+  primaryAuthProviders.push(
+    new GoogleOAuthClient({
+      clientId: environment.GOOGLE_OAUTH_CLIENT_ID,
+      clientSecret: environment.GOOGLE_OAUTH_CLIENT_SECRET,
+      redirectUri: environment.GOOGLE_OAUTH_REDIRECT_URI
+    })
+  );
+}
 if (
   environment.MICROSOFT_LOGIN_OAUTH_CLIENT_ID &&
   environment.MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET &&

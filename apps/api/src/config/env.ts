@@ -31,9 +31,9 @@ const EnvironmentSchema = Type.Object({
   COOKIE_NAME: Type.String({ minLength: 1, default: "callnow_session" }),
   DATABASE_URL: Type.String({ minLength: 1 }),
   AUTH_TOKEN_PEPPER: Type.String({ minLength: 32 }),
-  GOOGLE_OAUTH_CLIENT_ID: Type.String({ minLength: 1 }),
-  GOOGLE_OAUTH_CLIENT_SECRET: Type.String({ minLength: 1 }),
-  GOOGLE_OAUTH_REDIRECT_URI: Type.String({ minLength: 1 }),
+  GOOGLE_OAUTH_CLIENT_ID: Type.String(),
+  GOOGLE_OAUTH_CLIENT_SECRET: Type.String(),
+  GOOGLE_OAUTH_REDIRECT_URI: Type.String(),
   GOOGLE_OAUTH_STATE_TTL_MINUTES: Type.Integer({
     minimum: 5,
     maximum: 30
@@ -55,9 +55,9 @@ const EnvironmentSchema = Type.Object({
     minimum: 5,
     maximum: 30
   }),
-  GMAIL_OAUTH_CLIENT_ID: Type.String({ minLength: 1 }),
-  GMAIL_OAUTH_CLIENT_SECRET: Type.String({ minLength: 1 }),
-  GMAIL_OAUTH_REDIRECT_URI: Type.String({ minLength: 1 }),
+  GMAIL_OAUTH_CLIENT_ID: Type.String(),
+  GMAIL_OAUTH_CLIENT_SECRET: Type.String(),
+  GMAIL_OAUTH_REDIRECT_URI: Type.String(),
   GMAIL_OAUTH_STATE_TTL_MINUTES: Type.Integer({
     minimum: 5,
     maximum: 30
@@ -96,9 +96,9 @@ const EnvironmentSchema = Type.Object({
     minimum: 16_384,
     maximum: 1_048_576
   }),
-  MICROSOFT_OAUTH_CLIENT_ID: Type.String({ minLength: 1 }),
-  MICROSOFT_OAUTH_CLIENT_SECRET: Type.String({ minLength: 1 }),
-  MICROSOFT_OAUTH_REDIRECT_URI: Type.String({ minLength: 1 }),
+  MICROSOFT_OAUTH_CLIENT_ID: Type.String(),
+  MICROSOFT_OAUTH_CLIENT_SECRET: Type.String(),
+  MICROSOFT_OAUTH_REDIRECT_URI: Type.String(),
   MICROSOFT_OAUTH_TENANT: Type.String({ minLength: 1 }),
   MICROSOFT_OAUTH_STATE_TTL_MINUTES: Type.Integer({
     minimum: 5,
@@ -287,26 +287,40 @@ export function loadEnvironment(
     throw new Error("AUTH_TOKEN_PEPPER must be replaced in production");
   }
 
-  let googleRedirectUri: URL;
-  try {
-    googleRedirectUri = new URL(candidate.GOOGLE_OAUTH_REDIRECT_URI);
-  } catch {
-    throw new Error("GOOGLE_OAUTH_REDIRECT_URI must be a valid URL");
+  // Staging infrastructure may precede separate OAuth client registration.
+  // Opt out only with three explicitly empty values. Partial configuration and
+  // development placeholders retain their validation; production stays required.
+  const googleDisabled = stagingProviderDisabled(candidate, "GOOGLE");
+  const gmailDisabled = stagingProviderDisabled(candidate, "GMAIL");
+  const microsoftDisabled = stagingProviderDisabled(candidate, "MICROSOFT");
+  if (gmailDisabled && candidate.GMAIL_PUSH_MONITORING_ENABLED) {
+    throw new Error("Gmail monitoring requires configured Gmail OAuth");
   }
 
-  if (
-    candidate.APP_ENV === "production" &&
-    googleRedirectUri.protocol !== "https:"
-  ) {
-    throw new Error("GOOGLE_OAUTH_REDIRECT_URI must use HTTPS in production");
-  }
+  if (!googleDisabled) {
+    let googleRedirectUri: URL;
+    try {
+      googleRedirectUri = new URL(candidate.GOOGLE_OAUTH_REDIRECT_URI);
+    } catch {
+      throw new Error("GOOGLE_OAUTH_REDIRECT_URI must be a valid URL");
+    }
 
-  if (
-    candidate.APP_ENV === "production" &&
-    (candidate.GOOGLE_OAUTH_CLIENT_ID.startsWith("development-") ||
-      candidate.GOOGLE_OAUTH_CLIENT_SECRET.startsWith("development-"))
-  ) {
-    throw new Error("Google OAuth credentials must be replaced in production");
+    if (
+      candidate.APP_ENV === "production" &&
+      googleRedirectUri.protocol !== "https:"
+    ) {
+      throw new Error("GOOGLE_OAUTH_REDIRECT_URI must use HTTPS in production");
+    }
+
+    if (
+      candidate.APP_ENV === "production" &&
+      (candidate.GOOGLE_OAUTH_CLIENT_ID.startsWith("development-") ||
+        candidate.GOOGLE_OAUTH_CLIENT_SECRET.startsWith("development-"))
+    ) {
+      throw new Error(
+        "Google OAuth credentials must be replaced in production"
+      );
+    }
   }
 
   validateOptionalPrimaryProvider(
@@ -351,30 +365,32 @@ export function loadEnvironment(
     }
   }
 
-  let gmailRedirectUri: URL;
-  try {
-    gmailRedirectUri = new URL(candidate.GMAIL_OAUTH_REDIRECT_URI);
-  } catch {
-    throw new Error("GMAIL_OAUTH_REDIRECT_URI must be a valid URL");
-  }
+  if (!gmailDisabled) {
+    let gmailRedirectUri: URL;
+    try {
+      gmailRedirectUri = new URL(candidate.GMAIL_OAUTH_REDIRECT_URI);
+    } catch {
+      throw new Error("GMAIL_OAUTH_REDIRECT_URI must be a valid URL");
+    }
 
-  if (
-    (candidate.APP_ENV === "production" || candidate.APP_ENV === "staging") &&
-    gmailRedirectUri.protocol !== "https:"
-  ) {
-    throw new Error(
-      "GMAIL_OAUTH_REDIRECT_URI must use HTTPS outside development"
-    );
-  }
+    if (
+      (candidate.APP_ENV === "production" || candidate.APP_ENV === "staging") &&
+      gmailRedirectUri.protocol !== "https:"
+    ) {
+      throw new Error(
+        "GMAIL_OAUTH_REDIRECT_URI must use HTTPS outside development"
+      );
+    }
 
-  if (
-    (candidate.APP_ENV === "production" || candidate.APP_ENV === "staging") &&
-    (candidate.GMAIL_OAUTH_CLIENT_ID.startsWith("development-") ||
-      candidate.GMAIL_OAUTH_CLIENT_SECRET.startsWith("development-"))
-  ) {
-    throw new Error(
-      "Gmail OAuth credentials must be replaced outside development"
-    );
+    if (
+      (candidate.APP_ENV === "production" || candidate.APP_ENV === "staging") &&
+      (candidate.GMAIL_OAUTH_CLIENT_ID.startsWith("development-") ||
+        candidate.GMAIL_OAUTH_CLIENT_SECRET.startsWith("development-"))
+    ) {
+      throw new Error(
+        "Gmail OAuth credentials must be replaced outside development"
+      );
+    }
   }
 
   validateGmailPushConfiguration(candidate);
@@ -387,30 +403,32 @@ export function loadEnvironment(
       "Durable Gmail jobs require enabled Gmail monitoring and legacy-outbox ledger mode"
     );
 
-  let microsoftRedirectUri: URL;
-  try {
-    microsoftRedirectUri = new URL(candidate.MICROSOFT_OAUTH_REDIRECT_URI);
-  } catch {
-    throw new Error("MICROSOFT_OAUTH_REDIRECT_URI must be a valid URL");
-  }
+  if (!microsoftDisabled) {
+    let microsoftRedirectUri: URL;
+    try {
+      microsoftRedirectUri = new URL(candidate.MICROSOFT_OAUTH_REDIRECT_URI);
+    } catch {
+      throw new Error("MICROSOFT_OAUTH_REDIRECT_URI must be a valid URL");
+    }
 
-  if (
-    (candidate.APP_ENV === "production" || candidate.APP_ENV === "staging") &&
-    microsoftRedirectUri.protocol !== "https:"
-  ) {
-    throw new Error(
-      "MICROSOFT_OAUTH_REDIRECT_URI must use HTTPS outside development"
-    );
-  }
+    if (
+      (candidate.APP_ENV === "production" || candidate.APP_ENV === "staging") &&
+      microsoftRedirectUri.protocol !== "https:"
+    ) {
+      throw new Error(
+        "MICROSOFT_OAUTH_REDIRECT_URI must use HTTPS outside development"
+      );
+    }
 
-  if (
-    (candidate.APP_ENV === "production" || candidate.APP_ENV === "staging") &&
-    (candidate.MICROSOFT_OAUTH_CLIENT_ID.startsWith("development-") ||
-      candidate.MICROSOFT_OAUTH_CLIENT_SECRET.startsWith("development-"))
-  ) {
-    throw new Error(
-      "Microsoft OAuth credentials must be replaced outside development"
-    );
+    if (
+      (candidate.APP_ENV === "production" || candidate.APP_ENV === "staging") &&
+      (candidate.MICROSOFT_OAUTH_CLIENT_ID.startsWith("development-") ||
+        candidate.MICROSOFT_OAUTH_CLIENT_SECRET.startsWith("development-"))
+    ) {
+      throw new Error(
+        "Microsoft OAuth credentials must be replaced outside development"
+      );
+    }
   }
 
   if (!isAllowedMicrosoftTenant(candidate.MICROSOFT_OAUTH_TENANT)) {
@@ -428,6 +446,22 @@ export function loadEnvironment(
   }
 
   return candidate;
+}
+
+function stagingProviderDisabled(
+  environment: AppEnvironment,
+  provider: "GOOGLE" | "GMAIL" | "MICROSOFT"
+): boolean {
+  const values = [
+    environment[`${provider}_OAUTH_CLIENT_ID`],
+    environment[`${provider}_OAUTH_CLIENT_SECRET`],
+    environment[`${provider}_OAUTH_REDIRECT_URI`]
+  ];
+  if (environment.APP_ENV === "staging" && values.every((v) => v === ""))
+    return true;
+  if (values.some((v) => v.trim() === ""))
+    throw new Error(`${provider} OAuth configuration is incomplete`);
+  return false;
 }
 
 function validateGmailPushConfiguration(environment: AppEnvironment): void {

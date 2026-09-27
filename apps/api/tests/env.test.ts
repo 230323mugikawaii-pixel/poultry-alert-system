@@ -2,6 +2,72 @@ import { describe, expect, it } from "vitest";
 import { loadEnvironment } from "../src/config/env.js";
 
 describe("loadEnvironment", () => {
+  const disabledStagingOAuth = {
+    APP_ENV: "staging",
+    PUBLIC_ORIGIN: "https://staging.call-now.example",
+    AUTH_TOKEN_PEPPER:
+      "staging-test-only-pepper-at-least-thirty-two-characters",
+    GOOGLE_OAUTH_CLIENT_ID: "",
+    GOOGLE_OAUTH_CLIENT_SECRET: "",
+    GOOGLE_OAUTH_REDIRECT_URI: "",
+    GMAIL_OAUTH_CLIENT_ID: "",
+    GMAIL_OAUTH_CLIENT_SECRET: "",
+    GMAIL_OAUTH_REDIRECT_URI: "",
+    MICROSOFT_OAUTH_CLIENT_ID: "",
+    MICROSOFT_OAUTH_CLIENT_SECRET: "",
+    MICROSOFT_OAUTH_REDIRECT_URI: "",
+    MAIL_TOKEN_ENCRYPTION_PROVIDER: "gcp-kms",
+    MAIL_KMS_KEY_NAME:
+      "projects/staging-test/locations/asia-northeast1/keyRings/staging/cryptoKeys/mail"
+  };
+
+  it("allows explicitly absent staging OAuth providers without fake credentials", () => {
+    expect(loadEnvironment(disabledStagingOAuth)).toMatchObject({
+      APP_ENV: "staging",
+      GOOGLE_OAUTH_CLIENT_ID: "",
+      GMAIL_OAUTH_CLIENT_ID: "",
+      MICROSOFT_OAUTH_CLIENT_ID: "",
+      GMAIL_PUSH_MONITORING_ENABLED: false,
+      MOBILE_PUSH_DELIVERY_MODE: "off"
+    });
+  });
+
+  it.each(["GOOGLE", "GMAIL", "MICROSOFT"])(
+    "rejects partially configured %s staging OAuth",
+    (provider) => {
+      expect(() =>
+        loadEnvironment({
+          ...disabledStagingOAuth,
+          [`${provider}_OAUTH_CLIENT_ID`]: "test-client"
+        })
+      ).toThrow(`${provider} OAuth configuration is incomplete`);
+    }
+  );
+
+  it("does not allow absent required OAuth in production or development", () => {
+    for (const APP_ENV of ["production", "development"])
+      expect(() =>
+        loadEnvironment({ ...disabledStagingOAuth, APP_ENV })
+      ).toThrow("GOOGLE OAuth configuration is incomplete");
+  });
+
+  it("rejects Gmail monitoring without staging OAuth and still requires KMS", () => {
+    expect(() =>
+      loadEnvironment({
+        ...disabledStagingOAuth,
+        GMAIL_PUSH_MONITORING_ENABLED: "true"
+      })
+    ).toThrow("Gmail monitoring requires configured Gmail OAuth");
+    expect(() =>
+      loadEnvironment({
+        ...disabledStagingOAuth,
+        MAIL_TOKEN_ENCRYPTION_PROVIDER: "local"
+      })
+    ).toThrow(
+      "Mail refresh tokens must use Google Cloud KMS outside development"
+    );
+  });
+
   it("applies safe local defaults", () => {
     expect(loadEnvironment({})).toMatchObject({
       APP_ENV: "development",
