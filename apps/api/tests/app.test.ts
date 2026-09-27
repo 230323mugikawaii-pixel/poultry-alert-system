@@ -76,7 +76,7 @@ afterEach(async () => {
 });
 
 describe("system routes", () => {
-  it.each(["/healthz", "/readyz"])(
+  it.each(["/healthz", "/readyz", "/health", "/ready"])(
     "returns healthy status for %s",
     async (url) => {
       const app = await buildApp({ environment, logger: false });
@@ -150,6 +150,12 @@ describe("system routes", () => {
       reason: "dependency_unavailable"
     });
     expect(alive.statusCode).toBe(200);
+    const readyAlias = await app.inject({ method: "GET", url: "/ready" });
+    const aliveAlias = await app.inject({ method: "GET", url: "/health" });
+    expect(readyAlias.statusCode).toBe(503);
+    expect(readyAlias.json()).toEqual(ready.json());
+    expect(aliveAlias.statusCode).toBe(200);
+    expect(aliveAlias.json()).toEqual(alive.json());
   });
 
   it("keeps system probes available and returns a stable rate-limit error elsewhere", async () => {
