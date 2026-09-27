@@ -1,5 +1,10 @@
 # iOSアプリ土台 — 通知権限・デバイストークン登録のみ
 
+> 過去のshell実装の記録です。下記の「ASWebAuthenticationSessionとURLSessionで
+> SafariのCookieを共有できる」という判断は未実証であり、現在は採用していません。
+> ユーザー承認の上でPKCEによるネイティブ引き渡しへ置換しました。
+> 現在の仕様・検証結果は [step-02](step-02-native-client-implementation-results.md) を参照してください。
+
 実施日: 2026-09-26(実装)。ビルド・テスト検証: 2026-09-26(ユーザーのMac上、Codex経由)。
 ブランチ: `phase4/ios-shell-20260926`。基点: `main` `b39c6ea4c472e7a12cbb991781d7f9760c70c821`
 (既存の phase1〜phase3 の各ブランチとは独立)。

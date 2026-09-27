@@ -1,17 +1,32 @@
 import Foundation
 
-/// Mirrors GET /api/v1/teams/current (apps/api/src/modules/teams/team-routes.ts).
-/// Only the fields this shell needs are declared; JSONDecoder ignores the
-/// rest of the response (seats, subscription, keywords, ...) without error.
-struct CurrentTeamResponse: Decodable {
-    let team: TeamSummary
-}
-
+struct CurrentTeamResponse: Decodable { let team: TeamSummary }
 struct TeamSummary: Decodable, Equatable {
+  let id: String
+  let role: String?
+}
+struct MemberResponse: Decodable {
+  struct Member: Decodable {
     let id: String
-    /// "OWNER" or "MEMBER". Google/Microsoft OAuth login (this shell's only
-    /// login path) always resolves to an OWNER account — notification
-    /// members log in separately with a Call Now ID/password, which this
-    /// shell does not implement.
-    let role: String
+    let displayName: String
+    let status: String
+  }
+  let member: Member
+  let team: TeamSummary
+}
+struct Principal: Equatable {
+  enum Kind: String { case owner, member }
+  let kind: Kind
+  let id: String
+  let teamId: String?
+  let displayName: String
+  var scope: String { "\(kind.rawValue):\(id):\(teamId ?? "unconfigured")" }
+  var alertsPath: String? {
+    if kind == .member { return "/api/v1/notification-members/alerts" }
+    return teamId.map { "/api/v1/teams/\($0)/alerts" }
+  }
+  var devicesPath: String? {
+    if kind == .member { return "/api/v1/notification-members/push-devices" }
+    return teamId.map { "/api/v1/teams/\($0)/push-devices" }
+  }
 }

@@ -1,81 +1,80 @@
 import Foundation
 
-/// Talks to the existing Call Now API. Deliberately does not read, store, or
-/// attach the session cookie itself — it reuses the shared cookie storage
-/// (URLSession.shared / HTTPCookieStorage.shared) that AuthSession's
-/// non-ephemeral ASWebAuthenticationSession already populated, exactly like
-/// a browser tab would. httpOnly only blocks JavaScript's `document.cookie`;
-/// it does not stop native URLSession requests from attaching the cookie.
-final class APIClient {
-    private let session: URLSession
-    private let decoder: JSONDecoder
-    private let encoder: JSONEncoder
-
-    init(session: URLSession = .shared) {
-        self.session = session
-        self.decoder = JSONDecoder()
-        self.encoder = JSONEncoder()
-    }
-
-    /// GETs never need an Origin header — the existing routes only enforce
-    /// it on mutating requests (see requireSameOrigin call sites in
-    /// auth-routes.ts / primary-auth-routes.ts / device-push-routes.ts).
-    func get<Response: Decodable>(_ path: String) async throws -> Response {
-        try await send(path: path, method: "GET", body: Optional<EmptyBody>.none)
-    }
-
-    /// Mutating requests (POST/PUT/DELETE) must carry an `Origin` header
-    /// matching the API's configured PUBLIC_ORIGIN exactly, or the server
-    /// rejects them with 403 ORIGIN_NOT_ALLOWED. A native client never sets
-    /// this automatically the way a browser does for cross-origin fetches,
-    /// so it is added explicitly here.
-    func post<Body: Encodable, Response: Decodable>(_ path: String, body: Body) async throws -> Response {
-        try await send(path: path, method: "POST", body: body)
-    }
-
-    private func send<Body: Encodable, Response: Decodable>(
-        path: String,
-        method: String,
-        body: Body?
-    ) async throws -> Response {
-        guard let url = URL(string: AppEnvironment.apiBaseURL.absoluteString + path) else {
-            throw APIError.invalidURL
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if method != "GET" {
-            request.setValue(AppEnvironment.publicOrigin, forHTTPHeaderField: "Origin")
-        }
-        if let body {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try encoder.encode(body)
-        }
-
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch {
-            throw APIError.transport
-        }
-        guard let http = response as? HTTPURLResponse else {
-            throw APIError.transport
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            throw APIError.server(status: http.statusCode)
-        }
-        if Response.self == EmptyResponse.self {
-            // swiftlint:disable:next force_cast
-            return EmptyResponse() as! Response
-        }
-        do {
-            return try decoder.decode(Response.self, from: data)
-        } catch {
-            throw APIError.decoding
-        }
-    }
+protocol APIRequesting {
+  func perform(_ path: String, method: String, body: Data?) async throws -> Data
+  func clearSession()
 }
-
-private struct EmptyBody: Encodable {}
+extension APIRequesting {
+  func get<Response: Decodable>(_ path: String) async throws -> Response {
+    try JSONDecoder().decode(Response.self, from: await perform(path, method: "GET", body: nil))
+  }
+  func send<Body: Encodable, Response: Decodable>(
+    _ path: String, method: String = "POST", body: Body
+  ) async throws -> Response {
+    let data = try await perform(path, method: method, body: JSONEncoder().encode(body))
+    if Response.self == EmptyResponse.self { return EmptyResponse() as! Response }
+    return try JSONDecoder().decode(Response.self, from: data)
+  }
+}
+struct EmptyBody: Encodable {}
 struct EmptyResponse: Decodable {}
+
+/// An independent, memory-only cookie jar. No browser-cookie sharing or disk cache.
+/// Only the native code exchange/member login response supplies Set-Cookie.
+final class APIClient: NSObject, APIRequesting, URLSessionTaskDelegate {
+  private let baseURL: URL
+  private let origin: String
+  private let configuration: URLSessionConfiguration
+  private lazy var session = URLSession(
+    configuration: configuration, delegate: self, delegateQueue: nil)
+  init(
+    baseURL: URL = AppEnvironment.apiBaseURL, origin: String = AppEnvironment.publicOrigin,
+    configuration: URLSessionConfiguration = .ephemeral
+  ) {
+    self.baseURL = baseURL
+    self.origin = origin
+    self.configuration = configuration
+    configuration.urlCache = nil
+    configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+    configuration.timeoutIntervalForRequest = 15
+    configuration.timeoutIntervalForResource = 30
+    super.init()
+  }
+  func perform(_ path: String, method: String, body: Data?) async throws -> Data {
+    guard path.hasPrefix("/api/v1/"), !path.contains(".."),
+      let url = URL(string: path, relativeTo: baseURL)?.absoluteURL,
+      url.host == baseURL.host, url.port == baseURL.port,
+      AppEnvironment.isAllowedAPIURL(url)
+    else { throw APIError.invalidURL }
+    var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+    request.httpMethod = method
+    request.httpBody = body
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+    request.setValue(origin, forHTTPHeaderField: "Origin")
+    if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+    let data: Data
+    let response: URLResponse
+    do { (data, response) = try await session.data(for: request) } catch {
+      throw APIError.transport
+    }
+    guard let http = response as? HTTPURLResponse else { throw APIError.transport }
+    guard (200..<300).contains(http.statusCode) else {
+      throw APIError.server(status: http.statusCode)
+    }
+    return data
+  }
+  func clearSession() {
+    configuration.httpCookieStorage?.cookies?.forEach {
+      configuration.httpCookieStorage?.deleteCookie($0)
+    }
+  }
+  // Do not forward credentials through unexpected API redirects.
+  func urlSession(
+    _ session: URLSession, task: URLSessionTask,
+    willPerformHTTPRedirection response: HTTPURLResponse,
+    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
+  ) {
+    completionHandler(nil)
+  }
+}

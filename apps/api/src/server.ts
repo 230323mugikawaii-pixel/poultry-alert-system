@@ -16,6 +16,8 @@ import { GoogleOAuthClient } from "./modules/auth/google-oauth-client.js";
 import { MicrosoftLoginOAuthClient } from "./modules/auth/microsoft-login-oauth-client.js";
 import type { PrimaryAuthProviderAdapter } from "./modules/auth/primary-auth-provider.js";
 import { PrimaryAuthService } from "./modules/auth/primary-auth-service.js";
+import { NativeAuthService } from "./modules/auth/native-auth-service.js";
+import { PrismaNativeGrantRepository } from "./modules/auth/prisma-native-grant-repository.js";
 import { PrismaAuthRepository } from "./modules/auth/prisma-auth-repository.js";
 import { MailConnectionService } from "./modules/mail/mail-connection-service.js";
 import { GoogleGmailApiClient } from "./modules/mail/gmail/gmail-api-client.js";
@@ -257,6 +259,13 @@ const userCommunicationService = new UserCommunicationService(
 );
 const app = await buildApp({
   environment,
+  nativeAuthFactory: () =>
+    new NativeAuthService({
+      repository: new PrismaNativeGrantRepository(database),
+      primary: primaryAuthService,
+      auth: authService,
+      pepper: environment.AUTH_TOKEN_PEPPER
+    }),
   devicePushRegistryFactory: () =>
     new DevicePushRegistry(
       database,

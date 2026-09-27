@@ -39,6 +39,8 @@ targets:
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
         UILaunchScreen: {}
+        CFBundleURLTypes:
+          - CFBundleURLSchemes: [com.callnow.app]
         UIBackgroundModes:
           - remote-notification
         CALLNOW_API_BASE_URL: "$(CALLNOW_API_BASE_URL)"
@@ -57,15 +59,27 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: CallNow
+  CallNowUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: Tests/CallNowUITests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: CallNow
 schemes:
   CallNow:
     build:
       targets:
         CallNow: all
         CallNowTests: [test]
+        CallNowUITests: [test]
     test:
       targets:
         - CallNowTests
+        - CallNowUITests
     run:
       config: Debug
     archive:
