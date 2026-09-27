@@ -35,7 +35,7 @@ AppleのWeb認証仕様にはPKCEの `code_challenge` / `code_verifier` が定�
 
 - App内からアカウント削除を開始・完了できるAPIと画面
 - Apple Credentialを設定したstaging環境での実OAuth E2E
-- Microsoft login専用App registrationを設定したstaging環境での実OAuth E2E
+- ~~Microsoft login専用App registrationを設定したstaging環境での実OAuth E2E~~ → 2026-09-27、Entra側のApp registration(`call-now-staging`、シングルテナント)とSecret Managerへの投入は完了。デプロイ配線の残作業は [staging-oauth-deploy-handoff.md](./staging-oauth-deploy-handoff.md) を参照
 - Provider追加・解除とApple非公開メールを含むSafari実機回帰確認
 
 アカウント削除ではUser、Session、ExternalIdentity、Team所有権、契約、監視credential、監査保持要件を整理し、単純な行削除でデータ整合性を壊さないこと。
