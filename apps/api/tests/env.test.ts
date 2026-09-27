@@ -147,6 +147,77 @@ describe("loadEnvironment", () => {
     );
   });
 
+  const deployedLogin = {
+    APP_ENV: "staging",
+    PUBLIC_ORIGIN:
+      "https://call-now-staging-api-404996456750.asia-northeast1.run.app",
+    GOOGLE_OAUTH_CLIENT_ID: "synthetic-google-login-client-id",
+    GOOGLE_OAUTH_CLIENT_SECRET: "synthetic-google-login-secret",
+    GOOGLE_OAUTH_REDIRECT_URI:
+      "https://call-now-staging-api-404996456750.asia-northeast1.run.app/api/v1/auth/google/callback",
+    MICROSOFT_LOGIN_OAUTH_CLIENT_ID: "3f5a7e56-c7cb-46a0-9477-ca90b696d3d8",
+    MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET: "synthetic-microsoft-login-secret",
+    MICROSOFT_LOGIN_OAUTH_REDIRECT_URI:
+      "https://call-now-staging-api-404996456750.asia-northeast1.run.app/api/v1/auth/microsoft/callback",
+    MICROSOFT_LOGIN_OAUTH_TENANT: "6af9d90a-8ed4-420b-ad82-a80296dee18d",
+    GMAIL_OAUTH_CLIENT_ID: "synthetic-gmail-client-id",
+    GMAIL_OAUTH_CLIENT_SECRET: "synthetic-gmail-secret",
+    GMAIL_OAUTH_REDIRECT_URI:
+      "https://staging.example/api/v1/auth/gmail/callback",
+    MICROSOFT_OAUTH_CLIENT_ID: "synthetic-microsoft-mail-client-id",
+    MICROSOFT_OAUTH_CLIENT_SECRET: "synthetic-microsoft-mail-secret",
+    MICROSOFT_OAUTH_REDIRECT_URI:
+      "https://staging.example/api/v1/auth/mail/microsoft/callback",
+    MICROSOFT_OAUTH_TENANT: "common",
+    MAIL_TOKEN_ENCRYPTION_PROVIDER: "gcp-kms",
+    MAIL_KMS_KEY_NAME:
+      "projects/synthetic/locations/asia-northeast1/keyRings/test/cryptoKeys/test"
+  };
+
+  it("accepts the staging single-tenant login tuple independently of mail monitoring", () => {
+    expect(loadEnvironment(deployedLogin)).toMatchObject({
+      MICROSOFT_LOGIN_OAUTH_CLIENT_ID:
+        deployedLogin.MICROSOFT_LOGIN_OAUTH_CLIENT_ID,
+      MICROSOFT_LOGIN_OAUTH_TENANT: deployedLogin.MICROSOFT_LOGIN_OAUTH_TENANT,
+      MICROSOFT_LOGIN_OAUTH_REDIRECT_URI:
+        deployedLogin.MICROSOFT_LOGIN_OAUTH_REDIRECT_URI,
+      MICROSOFT_OAUTH_CLIENT_ID: deployedLogin.MICROSOFT_OAUTH_CLIENT_ID,
+      MICROSOFT_OAUTH_TENANT: "common"
+    });
+  });
+
+  it.each([
+    "MICROSOFT_LOGIN_OAUTH_CLIENT_ID",
+    "MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET",
+    "MICROSOFT_LOGIN_OAUTH_REDIRECT_URI"
+  ])("rejects a deployed login with missing %s", (key) => {
+    expect(() => loadEnvironment({ ...deployedLogin, [key]: "" })).toThrow(
+      "Microsoft login OAuth configuration is incomplete"
+    );
+  });
+
+  it.each(["", "not/a/tenant", "not-a-guid"])(
+    "rejects an invalid explicit deployed login tenant (%s)",
+    (tenant) => {
+      expect(() =>
+        loadEnvironment({
+          ...deployedLogin,
+          MICROSOFT_LOGIN_OAUTH_TENANT: tenant
+        })
+      ).toThrow("MICROSOFT_LOGIN_OAUTH_TENANT is invalid");
+    }
+  );
+
+  it("does not relax existing Microsoft login callback HTTPS validation", () => {
+    expect(() =>
+      loadEnvironment({
+        ...deployedLogin,
+        MICROSOFT_LOGIN_OAUTH_REDIRECT_URI:
+          "http://staging.example/api/v1/auth/microsoft/callback"
+      })
+    ).toThrow("Microsoft login OAuth redirect URI must use HTTPS");
+  });
+
   it("rejects invalid ports", () => {
     expect(() => loadEnvironment({ PORT: "70000" })).toThrow(
       "Invalid environment configuration"
