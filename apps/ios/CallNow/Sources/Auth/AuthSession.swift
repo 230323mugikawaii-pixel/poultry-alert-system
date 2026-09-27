@@ -1,146 +1,170 @@
 import AuthenticationServices
 import UIKit
 
-/// Drives login against the existing web OAuth endpoints
-/// (`GET /api/v1/auth/:provider/start` → Google/Microsoft → the server's own
-/// `/api/v1/auth/:provider/callback`, see primary-auth-routes.ts).
-///
-/// Design note (see docs/ios/step-01-shell-implementation-results.md for the
-/// full writeup): the backend's OAuth callback redirects to the *web
-/// frontend* origin (PUBLIC_ORIGIN) with a `?primaryAuth=success` query
-/// string. There is no custom URL scheme or Universal Link landing point for
-/// a native client to intercept via ASWebAuthenticationSession's
-/// `callbackURLScheme` — changing that would be a backend/web change, out of
-/// scope for this PR. Instead, this session:
-///  1. Starts a *non-ephemeral* ASWebAuthenticationSession, so the httpOnly
-///     session cookie Fastify sets on the callback lands in the same shared
-///     system cookie storage a Safari tab would use.
-///  2. Polls `GET /api/v1/auth/me` through APIClient, which uses
-///     URLSession.shared and therefore shares that cookie storage. httpOnly
-///     only blocks `document.cookie` access from JavaScript — it does not
-///     stop the cookie from being attached to an ordinary URLSession
-///     request against the same host.
-///  3. Once `/auth/me` succeeds, treats login as complete and cancels the
-///     web authentication session itself, since it will never receive a
-///     matching callback URL to close on its own.
+@MainActor protocol OAuthBrowsing {
+  func authenticate(url: URL) async throws -> URL
+  func cancel()
+}
 @MainActor
-final class AuthSession: NSObject, ObservableObject {
-    enum Provider: String {
-        case google
-        case microsoft
-    }
-
-    enum State: Equatable {
-        case signedOut
-        case signingIn
-        case signedIn(CurrentUser)
-        case failed(String)
-    }
-
-    @Published private(set) var state: State = .signedOut
-    private(set) var currentTeamId: String?
-
-    private let api: APIClient
-    private var webAuthSession: ASWebAuthenticationSession?
-    private var pollTask: Task<Void, Never>?
-
-    init(api: APIClient) {
-        self.api = api
-    }
-
-    func signIn(with provider: Provider) {
-        guard state != .signingIn else { return }
-        state = .signingIn
-
-        guard let startURL = URL(
-            string: AppEnvironment.apiBaseURL.absoluteString + "/api/v1/auth/\(provider.rawValue)/start"
-        ) else {
-            state = .failed("接続先の設定を確認してください。")
-            return
+final class OAuthBrowser: NSObject, OAuthBrowsing, ASWebAuthenticationPresentationContextProviding {
+  private var session: ASWebAuthenticationSession?
+  private var pending: CheckedContinuation<URL, Error>?
+  private var generation = UUID()
+  func authenticate(url: URL) async throws -> URL {
+    cancel()
+    let operation = UUID()
+    generation = operation
+    return try await withCheckedThrowingContinuation { continuation in
+      pending = continuation
+      let current = ASWebAuthenticationSession(url: url, callbackURLScheme: NativePKCE.callbackScheme) {
+        [weak self] callback, _ in
+        Task { @MainActor in
+          guard let self, self.generation == operation else { return }
+          if let callback {
+            self.finish(.success(callback))
+          } else {
+            self.finish(.failure(APIError.transport))
+          }
         }
-
-        // callbackURLScheme is a required initializer parameter but is never
-        // actually matched by this flow — see the class doc comment above.
-        // Completion is instead detected by polling below, and this session
-        // is cancelled once that succeeds.
-        let session = ASWebAuthenticationSession(
-            url: startURL,
-            callbackURLScheme: "com.callnow.app"
-        ) { [weak self] _, error in
-            Task { @MainActor in
-                self?.handleWebAuthenticationCompletion(error: error)
-            }
-        }
-        session.presentationContextProvider = self
-        session.prefersEphemeralWebBrowserSession = false
-        webAuthSession = session
-        session.start()
-
-        pollTask?.cancel()
-        pollTask = Task { [weak self] in
-            await self?.pollForCompletedLogin()
-        }
+      }
+      current.presentationContextProvider = self
+      current.prefersEphemeralWebBrowserSession = false
+      session = current
+      if !current.start() { finish(.failure(APIError.transport)) }
     }
-
-    func signOut() {
-        pollTask?.cancel()
-        webAuthSession?.cancel()
-        webAuthSession = nil
-        currentTeamId = nil
-        state = .signedOut
+  }
+  private func finish(_ result: Result<URL, Error>) {
+    let continuation = pending
+    pending = nil
+    session = nil
+    continuation?.resume(with: result)
+  }
+  func cancel() {
+    generation = UUID()
+    let old = session
+    finish(.failure(CancellationError()))
+    old?.cancel()
+  }
+  nonisolated func presentationAnchor(for session: ASWebAuthenticationSession)
+    -> ASPresentationAnchor
+  {
+    MainActor.assumeIsolated {
+      UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+        .first { $0.isKeyWindow } ?? ASPresentationAnchor()
     }
-
-    private func pollForCompletedLogin() async {
-        // The web callback completes almost immediately once the user
-        // approves on Google/Microsoft's side. Polling once a second for up
-        // to two minutes comfortably covers that without hammering the API;
-        // a 401 while the browser flow is still in progress is expected and
-        // is not surfaced as an error.
-        for _ in 0..<120 {
-            if Task.isCancelled { return }
-            if let user = try? await api.get("/api/v1/auth/me") as CurrentUserResponse {
-                await finishLogin(user: user.user)
-                return
-            }
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-        }
-        if state == .signingIn {
-            state = .failed("ログインがタイムアウトしました。もう一度お試しください。")
-        }
-    }
-
-    private func finishLogin(user: CurrentUser) async {
-        currentTeamId = (try? await api.get("/api/v1/teams/current") as CurrentTeamResponse)?.team.id
-        // A failed team lookup here isn't fatal to showing the user as
-        // signed in — push registration will simply report an error until
-        // retried (see PushRegistrationCenter.didReceiveDeviceToken).
-        state = .signedIn(user)
-        webAuthSession?.cancel()
-        webAuthSession = nil
-    }
-
-    private func handleWebAuthenticationCompletion(error: Error?) {
-        guard let error else { return }
-        let nsError = error as NSError
-        let isUserCancelled = nsError.domain == ASWebAuthenticationSessionError.errorDomain
-            && nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue
-        guard isUserCancelled, state == .signingIn else { return }
-        pollTask?.cancel()
-        state = .signedOut
-    }
+  }
 }
 
-extension AuthSession: ASWebAuthenticationPresentationContextProviding {
-    nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        // This delegate callback runs on the main thread in practice;
-        // MainActor.assumeIsolated lets us access main-actor-isolated UIKit
-        // state (UIApplication.shared) synchronously without making this
-        // protocol requirement itself `async`.
-        MainActor.assumeIsolated {
-            UIApplication.shared.connectedScenes
-                .compactMap { $0 as? UIWindowScene }
-                .flatMap { $0.windows }
-                .first { $0.isKeyWindow } ?? ASPresentationAnchor()
-        }
+@MainActor final class AuthSession: ObservableObject {
+  @Published private(set) var principal: Principal?
+  @Published private(set) var busy = false
+  @Published private(set) var message: String?
+  @Published private(set) var providers: [String] = []
+  let api: any APIRequesting
+  private let browser: any OAuthBrowsing
+  private let baseURL: URL
+  private var generation = UUID()
+  init(
+    api: any APIRequesting, browser: (any OAuthBrowsing)? = nil,
+    baseURL: URL = AppEnvironment.apiBaseURL
+  ) {
+    self.api = api
+    self.browser = browser ?? OAuthBrowser()
+    self.baseURL = baseURL
+  }
+  func loadProviders() async {
+    struct Reply: Decodable {
+      struct Provider: Decodable {
+        let provider: String
+        let status: String
+      }
+      let providers: [Provider]
     }
+    do {
+      let reply: Reply = try await api.get("/api/v1/auth/native/providers")
+      providers = reply.providers.filter { $0.status == "AVAILABLE" }.map {
+        $0.provider.lowercased()
+      }
+    } catch {
+      providers = []
+      message = "OWNERログインは未設定または接続できません。"
+    }
+  }
+  func signIn(provider: String) async {
+    guard !busy else { return }
+    busy = true
+    message = nil
+    api.clearSession()
+    generation = UUID()
+    let operation = generation
+    defer { if generation == operation { busy = false } }
+    do {
+      let pkce = try NativePKCE()
+      let callback = try await browser.authenticate(
+        url: pkce.startURL(base: baseURL, provider: provider))
+      guard generation == operation else { return }
+      let reply: CurrentUserResponse = try await api.send(
+        "/api/v1/auth/native/token",
+        body: NativePKCE.Exchange(code: pkce.code(from: callback), code_verifier: pkce.verifier))
+      let team: TeamSummary?
+      do {
+        team = try await (api.get("/api/v1/teams/current") as CurrentTeamResponse).team
+      } catch APIError.server(status: 404) { team = nil }
+      guard generation == operation else { return }
+      if let role = team?.role, role != "OWNER" { throw APIError.server(status: 403) }
+      principal = Principal(
+        kind: .owner, id: reply.user.id, teamId: team?.id,
+        displayName: reply.user.displayName ?? "OWNER")
+    } catch {
+      if generation == operation {
+        api.clearSession()
+        message = "ログインを完了できませんでした。設定・接続を確認してやり直してください。"
+      }
+    }
+  }
+  func signInMember(id: String, password: String) async {
+    guard !busy else { return }
+    struct Credentials: Encodable {
+      let callNowId: String
+      let password: String
+    }
+    busy = true
+    message = nil
+    api.clearSession()
+    generation = UUID()
+    let operation = generation
+    defer { if generation == operation { busy = false } }
+    do {
+      let reply: MemberResponse = try await api.send(
+        "/api/v1/notification-members/login", body: Credentials(callNowId: id, password: password))
+      guard generation == operation else { return }
+      guard reply.member.status == "ACTIVE" else { throw APIError.server(status: 401) }
+      principal = Principal(
+        kind: .member, id: reply.member.id, teamId: reply.team.id,
+        displayName: reply.member.displayName)
+    } catch {
+      if generation == operation {
+        api.clearSession()
+        message = "ログインできませんでした。ID・パスワードと接続を確認してください。"
+      }
+    }
+  }
+  func signOut() async {
+    guard let current = principal, !busy else { return }
+    busy = true
+    defer { busy = false }
+    do {
+      let _: EmptyResponse = try await api.send(
+        current.kind == .owner ? "/api/v1/auth/logout" : "/api/v1/notification-members/logout",
+        body: EmptyBody())
+    } catch APIError.server(status: 401) { /* Already expired. */  } catch {
+      message = "ログアウトを完了できません。接続を確認してください。"
+      return
+    }
+    generation = UUID()
+    browser.cancel()
+    api.clearSession()
+    principal = nil
+    message = nil
+  }
 }

@@ -35,6 +35,7 @@ import { MemoryTeamRepository } from "./helpers/memory-team.js";
 
 const environment: AppEnvironment = {
   APP_ENV: "test",
+  NATIVE_AUTH_MODE: "off",
   HOST: "127.0.0.1",
   PORT: 8080,
   TRUST_PROXY_HOPS: 0,

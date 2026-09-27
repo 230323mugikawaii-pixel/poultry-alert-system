@@ -28,6 +28,7 @@
     "test:monitoring-keywords": "node --test tests/monitoring-keyword-policy.test.mjs",
     "test:notification-test-execution": "node --test tests/notification-test-execution.test.mjs",
     "test:postgres": "pnpm --filter @call-now/api test:postgres",
+    "test:postgres:native-auth": "pnpm --filter @call-now/api test:postgres:native-auth",
     "test:postgres:device": "pnpm --filter @call-now/api test:postgres:device",
     "test:postgres:delivery": "pnpm --filter @call-now/api test:postgres:delivery",
     "test:postgres:apns-worker": "pnpm --filter @call-now/api test:postgres:apns-worker",

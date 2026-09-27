@@ -2,88 +2,138 @@ import Foundation
 import UIKit
 import UserNotifications
 
-/// Owns notification permission and APNs device-token registration for this
-/// shell. Nothing here inspects alert content — see
-/// ReceivedAlertsPlaceholderView for the minimal "something arrived" signal
-/// this PR is scoped to (real alert fetch/display is a later PR).
-@MainActor
-final class PushRegistrationCenter: ObservableObject {
-    enum PermissionState: Equatable {
-        case notRequested
-        case requesting
-        case granted
-        case denied
-        case failed(String)
+@MainActor protocol NotificationDeviceControlling {
+  func requestPermission() async throws -> Bool
+  func register()
+  func unregister()
+}
+@MainActor struct NotificationDeviceController: NotificationDeviceControlling {
+  func requestPermission() async throws -> Bool {
+    try await UNUserNotificationCenter.current().requestAuthorization(options: [
+      .alert, .sound, .badge,
+    ])
+  }
+  func register() { UIApplication.shared.registerForRemoteNotifications() }
+  func unregister() { UIApplication.shared.unregisterForRemoteNotifications() }
+}
+@MainActor final class PushRegistrationCenter: ObservableObject {
+  @Published private(set) var enabled = false
+  @Published private(set) var busy = false
+  @Published private(set) var message: String?
+  private let registry: any PushDeviceRegistering
+  private let device: any NotificationDeviceControlling
+  private let defaults: UserDefaults
+  private let installationId: String
+  private var principal: Principal?
+  private var registration: PushDeviceRegistrationResponse?
+  private var waitingForToken = false
+  private var timeout: Task<Void, Never>?
+  private var generation = UUID()
+
+  init(
+    registry: any PushDeviceRegistering, device: (any NotificationDeviceControlling)? = nil,
+    defaults: UserDefaults = .standard
+  ) {
+    self.registry = registry
+    self.device = device ?? NotificationDeviceController()
+    self.defaults = defaults
+    installationId = InstallationIdentifierStore.currentOrCreate(defaults: defaults)
+  }
+  private func key(_ principal: Principal) -> String { "callnow.device.\(principal.scope)" }
+  func bind(_ principal: Principal?) {
+    guard self.principal != principal else { return }
+    generation = UUID()
+    timeout?.cancel()
+    waitingForToken = false
+    busy = false
+    self.principal = principal
+    message = nil
+    registration = principal.flatMap { current in
+      defaults.data(forKey: key(current)).flatMap {
+        try? JSONDecoder().decode(PushDeviceRegistrationResponse.self, from: $0)
+      }
     }
-
-    enum RegistrationState: Equatable {
-        case idle
-        case registering
-        case registered
-        case failed(String)
-    }
-
-    @Published private(set) var permissionState: PermissionState = .notRequested
-    @Published private(set) var registrationState: RegistrationState = .idle
-    @Published private(set) var receivedCount: Int = 0
-
-    private let api: APIClient
-    private let authSession: AuthSession
-    private let installationId: String
-
-    init(api: APIClient, authSession: AuthSession, defaults: UserDefaults = .standard) {
-        self.api = api
-        self.authSession = authSession
-        self.installationId = InstallationIdentifierStore.currentOrCreate(defaults: defaults)
-    }
-
-    func requestPermissionAndRegister() async {
-        guard permissionState == .notRequested else { return }
-        permissionState = .requesting
-        do {
-            let granted = try await UNUserNotificationCenter.current()
-                .requestAuthorization(options: [.alert, .sound, .badge])
-            permissionState = granted ? .granted : .denied
-            guard granted else { return }
-            UIApplication.shared.registerForRemoteNotifications()
-        } catch {
-            permissionState = .failed(error.localizedDescription)
+    enabled = registration?.status == "ACTIVE"
+  }
+  func enable() async {
+    guard !busy, !enabled, principal != nil else { return }
+    busy = true
+    message = nil
+    let operation = generation
+    do {
+      let granted = try await device.requestPermission()
+      guard generation == operation else { return }
+      guard granted else {
+        busy = false
+        message = "通知が許可されていません。iOSの設定から許可してください。履歴は引き続き閲覧できます。"
+        return
+      }
+      waitingForToken = true
+      device.register()
+      timeout = Task { [weak self] in
+        try? await Task.sleep(nanoseconds: 30_000_000_000)
+        guard !Task.isCancelled, let self, self.generation == operation, self.waitingForToken else {
+          return
         }
+        self.waitingForToken = false
+        self.busy = false
+        self.message = "端末トークンを取得できませんでした。履歴は引き続き閲覧できます。"
+      }
+    } catch {
+      busy = false
+      message = "通知の許可を確認できませんでした。"
     }
-
-    /// Called from AppDelegate once APNs hands back a device token. Sends
-    /// exactly one registration attempt — deliberately no automatic retry on
-    /// failure (see docs/ios/step-01-shell-implementation-results.md,
-    /// "送信失敗時の自動リトライは作らない").
-    func didReceiveDeviceToken(_ deviceToken: Data) async {
-        guard case .signedIn = authSession.state else {
-            registrationState = .failed("ログイン後にもう一度お試しください。")
-            return
-        }
-        guard let teamId = authSession.currentTeamId else {
-            registrationState = .failed("チーム情報を取得できませんでした。")
-            return
-        }
-        registrationState = .registering
-        let hexToken = DeviceTokenFormatter.hexString(from: deviceToken)
-        let request = PushDeviceRegistrationRequest(installationId: installationId, deviceToken: hexToken)
-        do {
-            let _: PushDeviceRegistrationResponse = try await api.post(
-                "/api/v1/teams/\(teamId)/push-devices",
-                body: request
-            )
-            registrationState = .registered
-        } catch {
-            registrationState = .failed(error.localizedDescription)
-        }
+  }
+  func didReceiveDeviceToken(_ token: Data) async {
+    // Accept a callback only for an explicit current enable operation, once.
+    guard waitingForToken, let current = principal else { return }
+    waitingForToken = false
+    timeout?.cancel()
+    let operation = generation
+    do {
+      let result = try await registry.register(
+        principal: current, installationId: installationId,
+        token: DeviceTokenFormatter.hexString(from: token))
+      // bind/logout controls are disabled while registering; still persist the
+      // handle to permit revocation if an unexpected lifecycle change occurs.
+      defaults.set(try JSONEncoder().encode(result), forKey: key(current))
+      guard operation == generation else { return }
+      registration = result
+      enabled = result.status == "ACTIVE"
+      message = nil
+    } catch {
+      guard operation == generation else { return }
+      enabled = false
+      message = "端末登録できません。PR06のAPI設定・接続を確認してください。"
     }
-
-    func didFailToRegisterForRemoteNotifications(_ error: Error) {
-        registrationState = .failed(error.localizedDescription)
+    if operation == generation { busy = false }
+  }
+  @discardableResult func disable() async -> Bool {
+    guard !busy else { return false }
+    guard let current = principal, let registration else {
+      enabled = false
+      return true
     }
-
-    /// Minimal receipt signal only — see ReceivedAlertsPlaceholderView.
-    func didReceiveRemoteNotification() {
-        receivedCount += 1
+    busy = true
+    message = nil
+    defer { busy = false }
+    do {
+      try await registry.revoke(principal: current, registration: registration)
+      device.unregister()
+      defaults.removeObject(forKey: key(current))
+      self.registration = nil
+      enabled = false
+      return true
+    } catch {
+      message = "通知OFFをサーバーに反映できませんでした。再試行してください。"
+      return false
     }
+  }
+  func didFailToRegisterForRemoteNotifications(_ error: Error) {
+    guard waitingForToken else { return }
+    timeout?.cancel()
+    waitingForToken = false
+    busy = false
+    message = "端末トークンを取得できませんでした。実機・署名設定の確認が必要です。"
+  }
 }

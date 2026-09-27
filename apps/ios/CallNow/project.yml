@@ -5,6 +5,7 @@ options:
     iOS: "17.0"
 configs:
   Debug: debug
+  Staging: debug
   Release: release
 settings:
   base:
@@ -16,6 +17,10 @@ settings:
     Debug:
       CALLNOW_API_BASE_URL: "http://127.0.0.1:8080"
       CALLNOW_PUBLIC_ORIGIN: "http://127.0.0.1:5500"
+    Staging:
+      CALLNOW_API_BASE_URL: "https://call-now-staging-api-404996456750.asia-northeast1.run.app"
+      CALLNOW_PUBLIC_ORIGIN: "https://call-now-staging-api-404996456750.asia-northeast1.run.app"
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG STAGING"
     Release:
       # Placeholder only: no production domain exists yet. Deliberately an
       # unreachable value so a Release build never silently talks to a real
@@ -30,7 +35,7 @@ targets:
       - path: Sources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.callnow.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.callnow.poultryalert
         PRODUCT_NAME: CallNow
     info:
       path: Generated/Info.plist
@@ -39,6 +44,8 @@ targets:
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
         UILaunchScreen: {}
+        CFBundleURLTypes:
+          - CFBundleURLSchemes: [com.callnow.poultryalert]
         UIBackgroundModes:
           - remote-notification
         CALLNOW_API_BASE_URL: "$(CALLNOW_API_BASE_URL)"
@@ -57,16 +64,43 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: CallNow
+  CallNowUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: Tests/CallNowUITests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: CallNow
 schemes:
   CallNow:
     build:
       targets:
         CallNow: all
         CallNowTests: [test]
+        CallNowUITests: [test]
     test:
       targets:
         - CallNowTests
+        - CallNowUITests
     run:
       config: Debug
     archive:
       config: Release
+  CallNowStaging:
+    build:
+      targets:
+        CallNow: all
+        CallNowTests: [test]
+        CallNowUITests: [test]
+    test:
+      config: Staging
+      targets:
+        - CallNowTests
+        - CallNowUITests
+    run:
+      config: Staging
+    archive:
+      config: Staging

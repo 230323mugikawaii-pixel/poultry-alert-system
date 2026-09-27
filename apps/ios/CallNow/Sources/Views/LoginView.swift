@@ -1,46 +1,46 @@
 import SwiftUI
 
-/// Placeholder design — see prompt scope: only a Google/Microsoft choice is
-/// required here, not a finished login screen.
 struct LoginView: View {
-    @EnvironmentObject private var authSession: AuthSession
-
-    var body: some View {
-        VStack(spacing: 24) {
-            Text("Call Now")
-                .font(.largeTitle.bold())
-
-            if case .failed(let message) = authSession.state {
-                Text(message)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-            }
-
-            VStack(spacing: 12) {
-                Button {
-                    authSession.signIn(with: .google)
-                } label: {
-                    Text("Googleでログイン")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(authSession.state == .signingIn)
-
-                Button {
-                    authSession.signIn(with: .microsoft)
-                } label: {
-                    Text("Microsoftでログイン")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(authSession.state == .signingIn)
-            }
-            .padding(.horizontal, 32)
-
-            if authSession.state == .signingIn {
-                ProgressView("サインイン中…")
-            }
+  @EnvironmentObject private var auth: AuthSession
+  @State private var member = false
+  @State private var loginId = ""
+  @State private var password = ""
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section {
+          Picker("ログイン方法", selection: $member) {
+            Text("OWNER").tag(false)
+            Text("通知メンバー").tag(true)
+          }.pickerStyle(.segmented).accessibilityIdentifier("loginKind")
         }
-        .padding()
+        if member {
+          Section("通知メンバーのログイン") {
+            TextField("Call Now ID", text: $loginId).textInputAutocapitalization(.never)
+              .autocorrectionDisabled().accessibilityIdentifier("memberId")
+            SecureField("パスワード", text: $password).accessibilityIdentifier("memberPassword")
+            Button("メンバーとしてログイン") {
+              let transient = password
+              password = ""
+              Task { await auth.signInMember(id: loginId, password: transient) }
+            }.disabled(auth.busy || loginId.isEmpty || password.isEmpty).accessibilityIdentifier(
+              "memberLogin")
+          }
+        } else {
+          Section("OWNERのログイン") {
+            ForEach(["google", "microsoft"], id: \.self) { provider in
+              Button("\(provider == "google" ? "Google" : "Microsoft")でログイン") {
+                Task { await auth.signIn(provider: provider) }
+              }
+              .disabled(auth.busy || !auth.providers.contains(provider)).accessibilityIdentifier(
+                "\(provider)Login")
+            }
+          }
+        }
+        if auth.busy { ProgressView("ログイン中") }
+        if let message = auth.message { Text(message).foregroundStyle(.secondary) }
+        Section { Text("通知をOFFにしていても、ログイン後に通知履歴を閲覧できます。") }
+      }.navigationTitle("Call Now").task { await auth.loadProviders() }
     }
+  }
 }
