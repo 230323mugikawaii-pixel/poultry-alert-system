@@ -136,7 +136,9 @@ postgres("PR03a real PostgreSQL Outbox dispatcher", () => {
     // Explicitly scoped to the unique disposable DB created above; never shared DBs.
     if (!created || new URL(testUrl).pathname !== `/${name}`)
       throw new Error("PR03a isolation missing");
-    await pool.query("TRUNCATE reliability_outbox, pr03a_fake_receipts");
+    await pool.query(
+      "TRUNCATE notification_deliveries, reliability_outbox, pr03a_fake_receipts"
+    );
   });
   afterAll(async () => {
     for (const process of children) {

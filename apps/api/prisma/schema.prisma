@@ -595,8 +595,9 @@ enum PushRegistrationStatus {
 }
 
 // Separate from the User-only Device and WEB_PUSH/EMAIL NotificationTarget.
-// No delivery/dispatcher relation until the later APNs integration PR.
+// PR07a references only the opaque target/version; no APNs transport yet.
 model DevicePushRegistration {
+  deliveries           NotificationDelivery[]
   targetKey            String                 @id @default(uuid()) @db.Uuid
   teamId               String                 @db.Uuid
   principalKind        PushPrincipalKind
@@ -883,6 +884,7 @@ enum ReliabilityOutboxStatus {
 }
 
 model ReliabilityOutbox {
+  deliveries      NotificationDelivery[]
   id              String                  @id @default(uuid()) @db.Uuid
   eventKey        String                  @unique @db.Char(64)
   kind            ReliabilityOutboxKind
@@ -907,6 +909,40 @@ model ReliabilityOutbox {
   @@index([status, leaseUntil])
   @@index([alertId])
   @@map("reliability_outbox")
+}
+
+enum NotificationDeliveryState {
+  PENDING
+  IN_FLIGHT
+  RETRY_WAIT
+  WAITING_CONFIGURATION
+  PROVIDER_ACCEPTED
+  PERMANENT_FAILURE
+  CANCELLED
+}
+
+// PR07a creates intents only; no APNs worker or provider acceptance.
+model NotificationDelivery {
+  id                 String                    @id @default(uuid()) @db.Uuid
+  outboxId           String                    @db.Uuid
+  targetKey          String                    @db.Uuid
+  targetVersion      Int
+  state              NotificationDeliveryState @default(PENDING)
+  attemptCount       Int                       @default(0)
+  nextAttemptAt      DateTime                  @default(now()) @db.Timestamptz(3)
+  leaseToken         String?                   @db.Uuid
+  leaseGeneration    BigInt                    @default(0)
+  leaseUntil         DateTime?                 @db.Timestamptz(3)
+  apnsRequestId      String?                   @db.Uuid
+  acceptedAt         DateTime?                 @db.Timestamptz(3)
+  lastErrorCode      String?                   @db.VarChar(100)
+  createdAt          DateTime                  @default(now()) @db.Timestamptz(3)
+  outbox             ReliabilityOutbox         @relation(fields: [outboxId], references: [id], onDelete: Restrict)
+  target             DevicePushRegistration    @relation(fields: [targetKey], references: [targetKey], onDelete: Restrict)
+
+  @@unique([outboxId, targetKey, targetVersion])
+  @@index([state, nextAttemptAt])
+  @@map("notification_deliveries")
 }
 
 enum ReliabilityJobKind {

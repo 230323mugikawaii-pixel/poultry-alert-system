@@ -8,6 +8,7 @@ apps/api/src/generated/prisma/
 !.env.example
 *.log
 .DS_Store
+*.p8
 
 # apps/ios/CallNow — XcodeGenで生成する成果物はコミットしない(project.ymlのみ管理)
 apps/ios/CallNow/CallNow.xcodeproj/

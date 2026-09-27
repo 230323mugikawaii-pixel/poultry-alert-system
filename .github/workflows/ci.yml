@@ -61,3 +61,12 @@ jobs:
       - run: pnpm test:postgres:device
         env:
           PR01_TEST_ISOLATION_ACK: disposable-postgres
+      - run: pnpm test:postgres:delivery
+        env:
+          PR01_TEST_ISOLATION_ACK: disposable-postgres
+      - run: pnpm test:postgres:apns-worker
+        env:
+          PR01_TEST_ISOLATION_ACK: disposable-postgres
+      - run: pnpm test:postgres:apns
+        env:
+          PR01_TEST_ISOLATION_ACK: disposable-postgres
