@@ -17,6 +17,7 @@
     "mail:gmail:process-jobs": "tsx src/cli/gmail-process-jobs.ts",
     "start": "node dist/server.js",
     "test": "vitest run",
+    "test:postgres:native-auth": "RUN_NATIVE_AUTH_POSTGRES_TESTS=true vitest run tests/native-auth.postgres.integration.test.ts --maxWorkers=1",
     "test:postgres": "RUN_POSTGRES_TESTS=true vitest run tests/postgres-concurrency.integration.test.ts --maxWorkers=1",
     "test:postgres:device": "RUN_PR06_POSTGRES_TESTS=true vitest run tests/device-push.postgres.integration.test.ts tests/device-push-migration.postgres.integration.test.ts --maxWorkers=1",
     "test:postgres:delivery": "RUN_PR07A_POSTGRES_TESTS=true vitest run tests/notification-delivery.postgres.integration.test.ts tests/notification-delivery-migration.postgres.integration.test.ts --maxWorkers=1",

@@ -7,7 +7,7 @@ import Foundation
 /// which upserts on (teamId, principalKind, principalId, platform,
 /// installationId).
 enum InstallationIdentifierStore {
-    private static let key = "com.callnow.app.installationId"
+    private static let key = "com.callnow.poultryalert.installationId"
 
     static func currentOrCreate(defaults: UserDefaults = .standard) -> String {
         if let existing = defaults.string(forKey: key), !existing.isEmpty {

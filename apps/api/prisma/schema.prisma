@@ -288,6 +288,26 @@ model AuthChallenge {
   @@map("auth_challenges")
 }
 
+// Native handoff metadata only. No session/OAuth token or provider credentials.
+model NativeLoginGrant {
+  id                String    @id @default(uuid()) @db.Uuid
+  stateHash         String    @unique @db.Char(64)
+  bindingHash       String    @db.Char(64)
+  provider          String    @db.VarChar(16)
+  clientState       String    @db.VarChar(128)
+  codeChallenge     String    @db.VarChar(43)
+  codeHash          String?   @unique @db.Char(64)
+  userId            String?   @db.Uuid
+  expiresAt         DateTime  @db.Timestamptz(3)
+  codeExpiresAt     DateTime? @db.Timestamptz(3)
+  callbackClaimedAt DateTime? @db.Timestamptz(3)
+  consumedAt        DateTime? @db.Timestamptz(3)
+  createdAt         DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([expiresAt])
+  @@map("native_login_grants")
+}
+
 model Device {
   id                  String               @id @default(uuid()) @db.Uuid
   userId              String               @db.Uuid

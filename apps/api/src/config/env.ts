@@ -68,6 +68,7 @@ const EnvironmentSchema = Type.Object({
     Type.Literal("shadow"),
     Type.Literal("apns")
   ]),
+  NATIVE_AUTH_MODE: Type.Union([Type.Literal("off"), Type.Literal("enabled")]),
   MOBILE_PUSH_REGISTRY_MODE: Type.Union([
     Type.Literal("off"),
     Type.Literal("shadow")
@@ -195,6 +196,7 @@ export function loadEnvironment(
     MAIL_LEDGER_MODE: source.MAIL_LEDGER_MODE ?? "off",
     MOBILE_PUSH_DELIVERY_MODE: source.MOBILE_PUSH_DELIVERY_MODE ?? "off",
     MOBILE_PUSH_REGISTRY_MODE: source.MOBILE_PUSH_REGISTRY_MODE ?? "off",
+    NATIVE_AUTH_MODE: source.NATIVE_AUTH_MODE ?? "off",
     GMAIL_PUSH_JOB_MODE: source.GMAIL_PUSH_JOB_MODE ?? "off",
     GMAIL_PUBSUB_TOPIC_NAME: source.GMAIL_PUBSUB_TOPIC_NAME ?? "",
     GMAIL_PUBSUB_PUSH_AUDIENCE: source.GMAIL_PUBSUB_PUSH_AUDIENCE ?? "",

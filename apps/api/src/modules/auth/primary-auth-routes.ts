@@ -9,6 +9,8 @@ import type { AuthService } from "./auth-service.js";
 import type { PrimaryIdentityProvider } from "./auth-repository.js";
 import type { PrimaryAuthService } from "./primary-auth-service.js";
 import { setSessionCookie, usesSecureCookies } from "./session-cookie.js";
+import type { NativeAuthService } from "./native-auth-service.js";
+import { nativeCookieName, nativeNoStore } from "./native-auth-routes.js";
 
 const ProviderParams = Type.Object({
   provider: Type.Union([
@@ -33,7 +35,8 @@ export function createPrimaryAuthRoutes(
   primaryAuthService: PrimaryAuthService,
   authService: AuthService,
   securityThrottle: SecurityThrottleService,
-  environment: AppEnvironment
+  environment: AppEnvironment,
+  nativeAuth?: NativeAuthService
 ): FastifyPluginAsyncTypebox {
   return async (app) => {
     if (!app.hasContentTypeParser("application/x-www-form-urlencoded")) {
@@ -178,6 +181,35 @@ export function createPrimaryAuthRoutes(
       values: CallbackValues
     ): Promise<void> => {
       const state = values.state ?? "";
+      if (nativeAuth && provider !== "APPLE") {
+        // Routing lookup is enabled only for the new native feature. A native
+        // callback never creates/revokes the existing browser's web session.
+        try {
+          if (await nativeAuth.owns(state)) {
+            nativeNoStore(reply);
+            const name = nativeCookieName(environment, provider);
+            reply.clearCookie(name, { path: callbackPath(provider) });
+            const callbackUrl = await nativeAuth.callback(
+              provider,
+              state,
+              request.cookies[name] ?? "",
+              values.code,
+              values.error
+            );
+            await reply.redirect(callbackUrl);
+            return;
+          }
+        } catch {
+          nativeNoStore(reply);
+          await reply.status(401).send({
+            error: {
+              code: "NATIVE_GRANT_INVALID",
+              message: "ログインをやり直してください。"
+            }
+          });
+          return;
+        }
+      }
       const cookieName = stateCookieName(environment, provider);
       const cookieState = request.cookies[cookieName] ?? "";
       reply.clearCookie(cookieName, { path: callbackPath(provider) });
