@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { AppError } from "../../lib/app-error.js";
 import type {
   AuthRepository,
+  AuthUserRecord,
   PrimaryIdentityProvider,
   PrimaryIdentityRecord
 } from "./auth-repository.js";
@@ -104,6 +105,40 @@ export class PrimaryAuthService {
     readonly userPayload?: string;
     readonly clientContext: ClientContext;
   }): Promise<PrimaryAuthorizationResult> {
+    const result = await this.completeIdentityAuthorization(input);
+    if (result.intent === "LINK") return result;
+    const login = await this.options.authService.createSessionForVerifiedUser(
+      result.user,
+      input.clientContext
+    );
+    return { intent: "LOGIN", ...login };
+  }
+
+  // Native grants must not mint a browser session before the app proves PKCE.
+  public async completeNativeAuthorization(input: {
+    readonly provider: PrimaryIdentityProvider;
+    readonly state: string;
+    readonly code: string;
+  }): Promise<AuthUserRecord> {
+    const result = await this.completeIdentityAuthorization({
+      ...input,
+      authenticatedUserId: null
+    });
+    if (result.intent !== "LOGIN" || result.user.status !== "ACTIVE")
+      throw invalidPrimaryLoginError();
+    return result.user;
+  }
+
+  private async completeIdentityAuthorization(input: {
+    readonly provider: PrimaryIdentityProvider;
+    readonly state: string;
+    readonly code: string;
+    readonly authenticatedUserId: string | null;
+    readonly userPayload?: string;
+  }): Promise<
+    | { readonly intent: "LOGIN"; readonly user: AuthUserRecord }
+    | { readonly intent: "LINK"; readonly identity: PrimaryIdentityRecord }
+  > {
     if (!isPlausibleState(input.state) || !isPlausibleCode(input.code)) {
       throw invalidPrimaryLoginError();
     }
@@ -157,11 +192,7 @@ export class PrimaryAuthService {
     }
     const user =
       await this.options.repository.resolvePrimaryIdentityUser(identityInput);
-    const login = await this.options.authService.createSessionForVerifiedUser(
-      user,
-      input.clientContext
-    );
-    return { intent: "LOGIN", ...login };
+    return { intent: "LOGIN", user };
   }
 
   public listIdentities(

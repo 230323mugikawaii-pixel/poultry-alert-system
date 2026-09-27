@@ -37,8 +37,11 @@ import { createUserCommunicationRoutes } from "./modules/user-communications/use
 import { createSystemRoutes } from "./routes/system.js";
 import { createDevicePushRoutes } from "./modules/device-push/device-push-routes.js";
 import type { DevicePushRegistry } from "./modules/device-push/device-push-registry.js";
+import type { NativeAuthService } from "./modules/auth/native-auth-service.js";
+import { createNativeAuthRoutes } from "./modules/auth/native-auth-routes.js";
 
 export interface BuildAppOptions {
+  readonly nativeAuthFactory?: () => NativeAuthService;
   readonly devicePushRegistryFactory?: () => DevicePushRegistry;
   readonly gmailJobIntake?: GmailJobIntake;
   readonly environment: AppEnvironment;
@@ -87,6 +90,9 @@ export async function buildApp(
                 "body.refreshToken",
                 "body.authorizationCode",
                 "body.code",
+                "body.code_verifier",
+                "req.body",
+                "res.headers.location",
                 "body.state",
                 "body.user",
                 "body.content"
@@ -192,6 +198,16 @@ export async function buildApp(
 
   await app.register(createSystemRoutes(options.readinessCheck));
 
+  const nativeAuth =
+    options.environment.NATIVE_AUTH_MODE === "enabled"
+      ? options.nativeAuthFactory?.()
+      : undefined;
+  if (options.environment.NATIVE_AUTH_MODE === "enabled") {
+    if (!nativeAuth || !options.primaryAuthService || !options.authService)
+      throw new Error("NATIVE_AUTH_DEPENDENCIES_REQUIRED");
+    await app.register(createNativeAuthRoutes(nativeAuth, options.environment));
+  }
+
   if (options.environment.MOBILE_PUSH_REGISTRY_MODE === "shadow") {
     if (
       !options.devicePushRegistryFactory ||
@@ -262,7 +278,8 @@ export async function buildApp(
         options.primaryAuthService,
         options.authService,
         options.securityThrottleService,
-        options.environment
+        options.environment,
+        nativeAuth
       )
     );
   } else if (options.googleAuthService && options.authService) {
