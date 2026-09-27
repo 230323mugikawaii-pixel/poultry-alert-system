@@ -91,17 +91,44 @@ jobs:
           --quiet
 
       - name: Deploy HTTPS API
-        run: >-
-          gcloud run deploy "${{ vars.API_SERVICE_NAME }}"
-          --project "${{ vars.GCP_PROJECT_ID }}"
-          --region "${{ vars.GCP_REGION }}"
-          --image "$API_IMAGE"
-          --allow-unauthenticated
-          --service-account "${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}"
-          --set-cloudsql-instances "${{ vars.CLOUD_SQL_CONNECTION_NAME }}"
-          --set-env-vars "APP_ENV=${{ inputs.environment }},TRUST_PROXY_HOPS=1,PUBLIC_ORIGIN=${{ vars.PUBLIC_ORIGIN }},COOKIE_NAME=${{ vars.COOKIE_NAME }},GOOGLE_OAUTH_CLIENT_ID=${{ vars.GOOGLE_OAUTH_CLIENT_ID }},GOOGLE_OAUTH_REDIRECT_URI=${{ vars.GOOGLE_OAUTH_REDIRECT_URI }},MICROSOFT_LOGIN_OAUTH_CLIENT_ID=${{ vars.MICROSOFT_LOGIN_OAUTH_CLIENT_ID }},MICROSOFT_LOGIN_OAUTH_REDIRECT_URI=${{ vars.MICROSOFT_LOGIN_OAUTH_REDIRECT_URI }},MICROSOFT_LOGIN_OAUTH_TENANT=${{ vars.MICROSOFT_LOGIN_OAUTH_TENANT }},GMAIL_OAUTH_CLIENT_ID=${{ vars.GMAIL_OAUTH_CLIENT_ID }},GMAIL_OAUTH_REDIRECT_URI=${{ vars.GMAIL_OAUTH_REDIRECT_URI }},MICROSOFT_OAUTH_CLIENT_ID=${{ vars.MICROSOFT_OAUTH_CLIENT_ID }},MICROSOFT_OAUTH_REDIRECT_URI=${{ vars.MICROSOFT_OAUTH_REDIRECT_URI }},MICROSOFT_OAUTH_TENANT=${{ vars.MICROSOFT_OAUTH_TENANT }},MAIL_TOKEN_ENCRYPTION_PROVIDER=gcp-kms,MAIL_TOKEN_ENCRYPTION_KEY_VERSION=${{ vars.MAIL_TOKEN_ENCRYPTION_KEY_VERSION }},MAIL_KMS_KEY_NAME=${{ vars.MAIL_KMS_KEY_NAME }},SMTP_HOST=${{ vars.SMTP_HOST }},SMTP_PORT=${{ vars.SMTP_PORT }},SMTP_SECURE=${{ vars.SMTP_SECURE }},EMAIL_FROM=${{ vars.EMAIL_FROM }}"
-          --set-secrets "DATABASE_URL=${{ vars.DATABASE_URL_SECRET_NAME }}:${{ vars.DATABASE_URL_SECRET_VERSION }},AUTH_TOKEN_PEPPER=${{ vars.AUTH_TOKEN_PEPPER_SECRET_NAME }}:${{ vars.AUTH_PEPPER_SECRET_VERSION }},GOOGLE_OAUTH_CLIENT_SECRET=${{ vars.GOOGLE_OAUTH_CLIENT_SECRET_NAME }}:${{ vars.GOOGLE_OAUTH_CLIENT_SECRET_VERSION }},MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET=${{ vars.MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET_NAME }}:${{ vars.MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET_VERSION }},GMAIL_OAUTH_CLIENT_SECRET=${{ vars.GMAIL_OAUTH_CLIENT_SECRET_NAME }}:${{ vars.GMAIL_OAUTH_CLIENT_SECRET_VERSION }},MICROSOFT_OAUTH_CLIENT_SECRET=${{ vars.MICROSOFT_OAUTH_CLIENT_SECRET_NAME }}:${{ vars.MICROSOFT_OAUTH_CLIENT_SECRET_VERSION }},SMTP_USER=${{ vars.SMTP_USER_SECRET_NAME }}:${{ vars.SMTP_USER_SECRET_VERSION }},SMTP_PASSWORD=${{ vars.SMTP_PASSWORD_SECRET_NAME }}:${{ vars.SMTP_PASSWORD_SECRET_VERSION }}"
-          --min 0
-          --max 10
-          --port 8080
-          --quiet
+        shell: bash
+        env:
+          SMTP_HOST: ${{ vars.SMTP_HOST }}
+          SMTP_PORT: ${{ vars.SMTP_PORT }}
+          SMTP_SECURE: ${{ vars.SMTP_SECURE }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+          SMTP_USER_SECRET_NAME: ${{ vars.SMTP_USER_SECRET_NAME }}
+          SMTP_USER_SECRET_VERSION: ${{ vars.SMTP_USER_SECRET_VERSION }}
+          SMTP_PASSWORD_SECRET_NAME: ${{ vars.SMTP_PASSWORD_SECRET_NAME }}
+          SMTP_PASSWORD_SECRET_VERSION: ${{ vars.SMTP_PASSWORD_SECRET_VERSION }}
+        run: |
+          api_env_vars="APP_ENV=${{ inputs.environment }},TRUST_PROXY_HOPS=1,PUBLIC_ORIGIN=${{ vars.PUBLIC_ORIGIN }},COOKIE_NAME=${{ vars.COOKIE_NAME }},GOOGLE_OAUTH_CLIENT_ID=${{ vars.GOOGLE_OAUTH_CLIENT_ID }},GOOGLE_OAUTH_REDIRECT_URI=${{ vars.GOOGLE_OAUTH_REDIRECT_URI }},MICROSOFT_LOGIN_OAUTH_CLIENT_ID=${{ vars.MICROSOFT_LOGIN_OAUTH_CLIENT_ID }},MICROSOFT_LOGIN_OAUTH_REDIRECT_URI=${{ vars.MICROSOFT_LOGIN_OAUTH_REDIRECT_URI }},MICROSOFT_LOGIN_OAUTH_TENANT=${{ vars.MICROSOFT_LOGIN_OAUTH_TENANT }},GMAIL_OAUTH_CLIENT_ID=${{ vars.GMAIL_OAUTH_CLIENT_ID }},GMAIL_OAUTH_REDIRECT_URI=${{ vars.GMAIL_OAUTH_REDIRECT_URI }},MICROSOFT_OAUTH_CLIENT_ID=${{ vars.MICROSOFT_OAUTH_CLIENT_ID }},MICROSOFT_OAUTH_REDIRECT_URI=${{ vars.MICROSOFT_OAUTH_REDIRECT_URI }},MICROSOFT_OAUTH_TENANT=${{ vars.MICROSOFT_OAUTH_TENANT }},MAIL_TOKEN_ENCRYPTION_PROVIDER=gcp-kms,MAIL_TOKEN_ENCRYPTION_KEY_VERSION=${{ vars.MAIL_TOKEN_ENCRYPTION_KEY_VERSION }},MAIL_KMS_KEY_NAME=${{ vars.MAIL_KMS_KEY_NAME }}"
+          api_secrets="DATABASE_URL=${{ vars.DATABASE_URL_SECRET_NAME }}:${{ vars.DATABASE_URL_SECRET_VERSION }},AUTH_TOKEN_PEPPER=${{ vars.AUTH_TOKEN_PEPPER_SECRET_NAME }}:${{ vars.AUTH_PEPPER_SECRET_VERSION }},GOOGLE_OAUTH_CLIENT_SECRET=${{ vars.GOOGLE_OAUTH_CLIENT_SECRET_NAME }}:${{ vars.GOOGLE_OAUTH_CLIENT_SECRET_VERSION }},MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET=${{ vars.MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET_NAME }}:${{ vars.MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET_VERSION }},GMAIL_OAUTH_CLIENT_SECRET=${{ vars.GMAIL_OAUTH_CLIENT_SECRET_NAME }}:${{ vars.GMAIL_OAUTH_CLIENT_SECRET_VERSION }},MICROSOFT_OAUTH_CLIENT_SECRET=${{ vars.MICROSOFT_OAUTH_CLIENT_SECRET_NAME }}:${{ vars.MICROSOFT_OAUTH_CLIENT_SECRET_VERSION }}"
+          # Preflight requires all SMTP values in production. In staging an
+          # absent value contributes no entry, never an empty Cloud Run setting.
+          # Use shell environment values, not interpolation into executable code.
+          for name in SMTP_HOST SMTP_PORT SMTP_SECURE EMAIL_FROM; do
+            if [[ -n "${!name}" ]]; then
+              api_env_vars+=",${name}=${!name}"
+            fi
+          done
+          for name in SMTP_USER SMTP_PASSWORD; do
+            secret_name="${name}_SECRET_NAME"
+            secret_version="${name}_SECRET_VERSION"
+            if [[ -n "${!secret_name}" && -n "${!secret_version}" ]]; then
+              api_secrets+=",${name}=${!secret_name}:${!secret_version}"
+            fi
+          done
+          gcloud run deploy "${{ vars.API_SERVICE_NAME }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --image "$API_IMAGE" \
+            --allow-unauthenticated \
+            --service-account "${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}" \
+            --set-cloudsql-instances "${{ vars.CLOUD_SQL_CONNECTION_NAME }}" \
+            --set-env-vars "$api_env_vars" \
+            --set-secrets "$api_secrets" \
+            --min 0 \
+            --max 10 \
+            --port 8080 \
+            --quiet

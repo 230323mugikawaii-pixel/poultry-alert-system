@@ -5,6 +5,9 @@
 This is a **code-only** correction to `.github/workflows/deploy.yml`. The secret
 wiring was introduced by PR #46. The resource-name follow-up is based on
 `b12ec8e55000cfc54a5dec2608775c4f9abb15bf` (main with #46 merged).
+The SMTP-only follow-up is based on
+`99f3f952ca95c787c961b83a4021cdd01acf26fd`; fetching and inspecting
+`git log origin/main` confirmed both #46 and #47 are merged.
 The console-side registrations, Secret Manager versions and IAM described in
 [the handoff](./staging-oauth-deploy-handoff.md) are user-provided facts; this task
 does not access or modify those resources or GitHub Environment settings.
@@ -46,8 +49,10 @@ they are not fetched into Actions variables or placed in `--set-env-vars`.
 | Cloud Run API service | Hardcoded `call-now-api` | Required `vars.API_SERVICE_NAME` |
 | Cloud Run migration job (deploy and execute) | Hardcoded `call-now-db-migrate` | Required `vars.MIGRATION_JOB_NAME` in both calls |
 | Metadata validation | None before cloud operations | Offline preflight before cloud authentication/build/deploy |
+| SMTP settings (this follow-up) | Unconditional secret references and plain env entries | Optional in staging; required in production. Unset staging entries are omitted, never sent as empty strings |
 
-Preflight requires both resource names, all nine secret name/version pairs below,
+Preflight requires both resource names, all seven non-SMTP secret name/version
+pairs below (all nine in production),
 both login client IDs, exact HTTPS callback paths and a valid Microsoft login tenant. The documented
 staging registration is single-tenant, so staging requires an explicit tenant
 UUID; `common`/`organizations`/`consumers` are rejected there. Production also
@@ -76,8 +81,63 @@ Values below are names/public IDs from the handoff, not secret payloads.
 | `MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET_NAME` | `MICROSOFT_LOGIN_OAUTH_CLIENT_SECRET_VERSION` | `call-now-staging-microsoft-login-client-secret`, version **1** per handoff |
 | `GMAIL_OAUTH_CLIENT_SECRET_NAME` | `GMAIL_OAUTH_CLIENT_SECRET_VERSION` | Confirm separate Gmail **monitoring** secret; do not use Google login secret |
 | `MICROSOFT_OAUTH_CLIENT_SECRET_NAME` | `MICROSOFT_OAUTH_CLIENT_SECRET_VERSION` | Confirm separate Microsoft **mail monitoring** secret; do not use Microsoft login secret |
-| `SMTP_USER_SECRET_NAME` | `SMTP_USER_SECRET_VERSION` | Confirm staging SMTP user secret name/version |
-| `SMTP_PASSWORD_SECRET_NAME` | `SMTP_PASSWORD_SECRET_VERSION` | Confirm staging SMTP password secret name/version |
+| `SMTP_USER_SECRET_NAME` | `SMTP_USER_SECRET_VERSION` | Optional in staging; if used, confirm the existing name and pinned version. Required in production |
+| `SMTP_PASSWORD_SECRET_NAME` | `SMTP_PASSWORD_SECRET_VERSION` | Optional in staging; if used, confirm the existing name and pinned version. Required in production |
+
+### SMTP-only staging omission contract
+
+The following plain GitHub Environment variables are also optional in staging
+and required in production:
+
+| Variable | Validation when supplied | Omitted staging behavior in the existing API |
+| --- | --- | --- |
+| `SMTP_HOST` | Nonempty host without whitespace, comma or NUL | Defaults to `127.0.0.1` |
+| `SMTP_PORT` | Decimal integer, 1–65535 | Defaults to `1025` |
+| `SMTP_SECURE` | Literal `true` or `false` | Defaults to `false` |
+| `EMAIL_FROM` | At least 3 characters, not whitespace-only; no comma, CR, LF or NUL | Defaults to `Call Now <no-reply@call-now.local>` |
+
+For staging, missing variables and empty strings (GitHub's unset-variable
+representation) are treated as absent. An SMTP secret's **name and version must
+both be absent or both valid**; supplying just one fails preflight. Configured
+secret names retain the existing ID validation and versions must be positive
+integers, never `latest`. Whitespace-only/malformed values are not omission.
+Plain variables can be omitted independently; any supplied value is validated.
+The preflight now explicitly checks the four plain SMTP variables; previously
+they were emitted unconditionally without format checks. Diagnostics still
+contain only field names, not values.
+
+The workflow builds the existing API environment/secret lists, then appends
+only nonempty SMTP settings. SMTP metadata passes via the step's shell
+environment rather than being interpolated into executable shell code. Quoted
+sender display names are preserved; commas are rejected because the existing
+Cloud Run list format uses commas as separators. It does not create defaults,
+fetch secret payloads or infer secret names. With complete production metadata,
+the resulting mappings and deployment options are unchanged.
+
+Source-of-truth recheck on the base commit: `apps/api/src/config/env.ts` already
+supplies these defaults and allows empty `SMTP_USER`/`SMTP_PASSWORD`.
+`SmtpMagicLinkEmailSender` constructs a transport at startup but calls
+`sendMail()` only for an actual magic-link email request. Readiness checks the DB,
+not SMTP. Omitting SMTP is therefore safe for startup/login OAuth **assuming all
+other required application configuration and DB access are valid**. It is not an
+SMTP-disable flag and does not make outbound mail operational: magic-link mail
+would still attempt the configured/default SMTP server and can fail. Do not use
+outbound email tests until SMTP is configured. No application code is changed.
+
+**`GMAIL_OAUTH_*` and `MICROSOFT_OAUTH_*` (mail-monitoring OAuth) are unaffected
+and remain required in staging and production.** Their secret name/version
+pairs remain mandatory; application boot validation and the unconditional
+workflow mappings are unchanged. `GMAIL_PUSH_MONITORING_ENABLED=false` does not
+remove these requirements. KMS requirements also remain unchanged; the shared
+encryption provider is used by mail and device registration. Google/Microsoft
+**login** OAuth settings are untouched. This SMTP-only change does not resolve
+staging's missing mail-monitoring credentials or establish native-login E2E
+readiness.
+
+Manual work (not performed here): leave the two SMTP name/version pairs and
+plain SMTP variables unset in staging while outbound mail is deferred; populate
+valid values when SMTP testing is approved. Production must explicitly supply
+all eight fields. Do not remove or repurpose mail-monitoring/login secret refs.
 
 For production, also set `API_SERVICE_NAME` and `MIGRATION_JOB_NAME` explicitly.
 `call-now-api` / `call-now-db-migrate` are reasonable candidate values based on
@@ -124,12 +184,12 @@ existence, active versions, IAM or that all deployment prerequisites are met.
    Select/integrate the reviewed staging application revision separately before
    claiming native login E2E readiness; this workflow still builds the selected
    Git ref, not a pre-existing staging image.
-3. The existing workflow references Gmail/Microsoft **mail monitoring** and SMTP
-   secrets as well as login. The handoff confirms only the four **login**
-   containers; it does not establish that all other references are available.
-   Verify required resources/settings instead of inventing names or reusing
-   login credentials for mail monitoring. Their optional/staging-disabled
-   deployment policy is not changed here.
+3. Gmail/Microsoft **mail monitoring** credentials remain required in both
+   environments, regardless of whether push monitoring is enabled. Verify those
+   resources/settings instead of inventing names or reusing login credentials.
+   Only SMTP references/settings may now be omitted in staging; production
+   requires them. Missing mail-monitoring credentials still block deployment/
+   application startup. This is not a general staging-disabled mail policy.
 4. The existing migration/API steps still use `GCP_RUNTIME_SERVICE_ACCOUNT`.
    Verify access to each selected DB secret and correct DB privileges. This PR
    does not change service accounts or grant new privileges.
@@ -145,22 +205,27 @@ existence, active versions, IAM or that all deployment prerequisites are met.
   validation at 1/63/64-character boundaries, missing/invalid values, field-only
   diagnostics, Microsoft login vs monitoring
   separation, preflight order, missing/invalid names and versions, callback and
-  tenant validation, and safe CLI failure output. No gcloud or network calls.
+  tenant validation, and safe CLI failure output. SMTP cases cover missing/empty
+  staging values, partial secret pairs, invalid supplied values, required
+  production settings, preserved `false`, and quoted sender names. The actual
+  API shell block runs against a builtin argument recorder with no SDK on PATH;
+  this verifies omission and unchanged production mappings without gcloud or
+  network calls.
 - `apps/api/tests/env.test.ts`: complete single-tenant login tuple, missing
   fields, invalid tenants and HTTPS enforcement with synthetic secret values.
 - `pnpm verify`: includes the new offline deployment regression suite.
 - YAML syntax and `git diff --check`; `apps/ios/` diff must remain empty.
 
-Local results (2026-09-27, resource-name follow-up):
+Local results (2026-09-27, SMTP-only follow-up):
 
 | Check | Measured result |
 | --- | --- |
-| `pnpm test:deploy-config` | **20 PASS** (10 added resource-target cases; original secret/OAuth cases retained) |
+| `pnpm test:deploy-config` | **31 PASS** (11 added SMTP cases; prior 20 resource/secret/OAuth cases retained) |
 | `env.test.ts` | **17 PASS** (unchanged in this follow-up; also included in API total below) |
-| `pnpm verify` | **PASS**: deploy 20, frontend 128, API 293; format/lint/typecheck/build passed |
+| `pnpm verify` | **PASS**: deploy 31, frontend 128, API 293; format/lint/typecheck/build passed |
 | PostgreSQL integration | **118 skipped / not run**, no DB connection or migration requested for this code-only task |
 | YAML syntax / `git diff --check` | PASS |
-| `apps/ios/` changes | None |
+| `apps/api/`, `apps/ios/`, CI workflow changes | None |
 | Cloud deployment / real OAuth / GitHub Actions | **Not run** |
 
 No Actions workflow is dispatched. The commit uses `[skip ci]` so creating the PR

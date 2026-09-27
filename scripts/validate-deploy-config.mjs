@@ -25,6 +25,22 @@ export const secretReferences = [
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const cloudRunResourceName = /^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$/u;
+const smtpSecretNames = new Set([
+  "SMTP_USER_SECRET_NAME",
+  "SMTP_PASSWORD_SECRET_NAME",
+]);
+const isAbsent = (value) => value === undefined || value === "";
+// Match the application's basic SMTP types/ranges and reject list delimiters
+// or header/control injection. Missing staging fields use application defaults;
+// no deployment-side values or Secret Manager versions are invented.
+const smtpVariableValidators = {
+  SMTP_HOST: (value) => /^[^\s,\0]+$/u.test(value),
+  SMTP_PORT: (value) =>
+    /^[0-9]+$/u.test(value) && Number(value) >= 1 && Number(value) <= 65535,
+  SMTP_SECURE: (value) => value === "true" || value === "false",
+  EMAIL_FROM: (value) =>
+    value.length >= 3 && value.trim().length > 0 && !/[,\r\n\0]/u.test(value),
+};
 
 // Offline validation only: no Secret Manager reads, no deploy, no secret output.
 // Return field names, never their contents, even for malformed inputs.
@@ -45,6 +61,14 @@ export function validateDeployVariables(vars, environment) {
   }
   for (const [name, version] of secretReferences) {
     if (
+      environment === "staging" &&
+      smtpSecretNames.has(name) &&
+      isAbsent(vars[name]) &&
+      isAbsent(vars[version])
+    ) {
+      continue;
+    }
+    if (
       typeof vars[name] !== "string" ||
       !/^[a-zA-Z0-9_-]{1,255}$/u.test(vars[name])
     ) {
@@ -56,6 +80,12 @@ export function validateDeployVariables(vars, environment) {
       !/^[1-9][0-9]*$/u.test(vars[version])
     ) {
       invalid.push(version);
+    }
+  }
+  for (const [name, validate] of Object.entries(smtpVariableValidators)) {
+    if (environment === "staging" && isAbsent(vars[name])) continue;
+    if (typeof vars[name] !== "string" || !validate(vars[name])) {
+      invalid.push(name);
     }
   }
   for (const name of [
