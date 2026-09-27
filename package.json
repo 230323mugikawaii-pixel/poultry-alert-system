@@ -15,6 +15,7 @@
     "outbox:dispatch": "pnpm --filter @call-now/api outbox:dispatch",
     "mail:gmail:process-jobs": "pnpm --filter @call-now/api mail:gmail:process-jobs",
     "test": "pnpm --filter @call-now/api test",
+    "test:deploy-config": "node --test tests/deploy-workflow.test.mjs",
     "test:alarm-audio": "node --test tests/alarm-audio.test.mjs tests/alarm-lifecycle.test.mjs tests/alarm-html-audio.test.mjs",
     "test:alert-tab-coordination": "node --test tests/alert-tab-coordination.test.mjs",
     "test:frontend-alerts": "node --test tests/frontend-alerts.test.mjs",
@@ -34,6 +35,6 @@
     "test:postgres:jobs": "pnpm --filter @call-now/api test:postgres:jobs",
     "test:coverage": "pnpm --filter @call-now/api test:coverage",
     "typecheck": "pnpm --filter @call-now/api typecheck",
-    "verify": "pnpm test:keywords && pnpm test:monitoring-keywords && pnpm test:notification-test-execution && pnpm test:alarm-audio && pnpm test:alert-tab-coordination && pnpm test:frontend-auth && pnpm test:frontend-onboarding && pnpm test:frontend-alerts && pnpm test:frontend-communications && pnpm test:frontend-contract-settings && pnpm test:frontend-notification-members && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "verify": "pnpm test:deploy-config && pnpm test:keywords && pnpm test:monitoring-keywords && pnpm test:notification-test-execution && pnpm test:alarm-audio && pnpm test:alert-tab-coordination && pnpm test:frontend-auth && pnpm test:frontend-onboarding && pnpm test:frontend-alerts && pnpm test:frontend-communications && pnpm test:frontend-contract-settings && pnpm test:frontend-notification-members && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   }
 }
