@@ -1,4 +1,5 @@
 import { config as loadDotenv } from "dotenv";
+import { DevicePushRegistry } from "./modules/device-push/device-push-registry.js";
 import { mailReliabilityOptions } from "./modules/mail/reliability/mail-reliability-options.js";
 import { PrismaGmailJobQueue } from "./modules/mail/reliability/prisma-gmail-job-queue.js";
 import { buildApp } from "./app.js";
@@ -256,6 +257,12 @@ const userCommunicationService = new UserCommunicationService(
 );
 const app = await buildApp({
   environment,
+  devicePushRegistryFactory: () =>
+    new DevicePushRegistry(
+      database,
+      tokenEncryption,
+      environment.AUTH_TOKEN_PEPPER
+    ),
   ...(environment.GMAIL_PUSH_JOB_MODE === "durable"
     ? {
         gmailJobIntake: new PrismaGmailJobQueue(
