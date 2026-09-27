@@ -74,7 +74,7 @@ jobs:
 
       - name: Deploy migration job
         run: >-
-          gcloud run jobs deploy call-now-db-migrate
+          gcloud run jobs deploy "${{ vars.MIGRATION_JOB_NAME }}"
           --project "${{ vars.GCP_PROJECT_ID }}"
           --region "${{ vars.GCP_REGION }}"
           --image "$MIGRATION_IMAGE"
@@ -84,7 +84,7 @@ jobs:
           --quiet
       - name: Apply database migrations
         run: >-
-          gcloud run jobs execute call-now-db-migrate
+          gcloud run jobs execute "${{ vars.MIGRATION_JOB_NAME }}"
           --project "${{ vars.GCP_PROJECT_ID }}"
           --region "${{ vars.GCP_REGION }}"
           --wait
@@ -92,7 +92,7 @@ jobs:
 
       - name: Deploy HTTPS API
         run: >-
-          gcloud run deploy call-now-api
+          gcloud run deploy "${{ vars.API_SERVICE_NAME }}"
           --project "${{ vars.GCP_PROJECT_ID }}"
           --region "${{ vars.GCP_REGION }}"
           --image "$API_IMAGE"

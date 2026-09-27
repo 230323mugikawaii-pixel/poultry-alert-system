@@ -24,6 +24,7 @@ export const secretReferences = [
 ];
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+const cloudRunResourceName = /^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$/u;
 
 // Offline validation only: no Secret Manager reads, no deploy, no secret output.
 // Return field names, never their contents, even for malformed inputs.
@@ -34,6 +35,14 @@ export function validateDeployVariables(vars, environment) {
   const invalid = [];
   if (!["staging", "production"].includes(environment))
     invalid.push("DEPLOY_ENVIRONMENT");
+  for (const name of ["API_SERVICE_NAME", "MIGRATION_JOB_NAME"]) {
+    if (
+      typeof vars[name] !== "string" ||
+      !cloudRunResourceName.test(vars[name])
+    ) {
+      invalid.push(name);
+    }
+  }
   for (const [name, version] of secretReferences) {
     if (
       typeof vars[name] !== "string" ||

@@ -2,8 +2,9 @@
 
 ## Scope / design decision
 
-This is a **code-only** correction to `.github/workflows/deploy.yml`, based on
-`ac79ea6500b90d9a7201d3499b95921ff59e0c2e` (main containing the console handoff).
+This is a **code-only** correction to `.github/workflows/deploy.yml`. The secret
+wiring was introduced by PR #46. The resource-name follow-up is based on
+`b12ec8e55000cfc54a5dec2608775c4f9abb15bf` (main with #46 merged).
 The console-side registrations, Secret Manager versions and IAM described in
 [the handoff](./staging-oauth-deploy-handoff.md) are user-provided facts; this task
 does not access or modify those resources or GitHub Environment settings.
@@ -15,6 +16,13 @@ vs `google-login`). A prefix alone would still select nonexistent resources.
 Explicit names allow staging to use its existing resources and production to
 retain the old names without renaming secrets or copying credential values.
 There is no fallback to a production name or `latest` version.
+
+Cloud Run resource targets follow the same explicit-input policy:
+`API_SERVICE_NAME` and `MIGRATION_JOB_NAME` are required in each environment.
+No prefix, environment-derived name, or default is substituted. Job deploy and
+execute use the same `MIGRATION_JOB_NAME`. The Artifact Registry image names
+`call-now-api:${{ github.sha }}` / `call-now-db-migrate:${{ github.sha }}` are
+unchanged; image repository names do not determine deployed resource names.
 
 Migration and API DB references are separately configurable. Set both explicitly;
 do not silently give the API migration credentials. An environment intentionally
@@ -35,15 +43,20 @@ they are not fetched into Actions variables or placed in `--set-env-vars`.
 | Google / Gmail / Microsoft **mail** secret, pepper, SMTP | Hardcoded `call-now-...` names | Environment-specific full names + existing version variable names |
 | API database secret | Hardcoded shared DB name | `DATABASE_URL_SECRET_NAME` + `DATABASE_URL_SECRET_VERSION` |
 | Migration database secret | Same hardcoded DB reference | Explicit `MIGRATION_DATABASE_URL_SECRET_NAME` + `MIGRATION_DATABASE_URL_SECRET_VERSION` |
+| Cloud Run API service | Hardcoded `call-now-api` | Required `vars.API_SERVICE_NAME` |
+| Cloud Run migration job (deploy and execute) | Hardcoded `call-now-db-migrate` | Required `vars.MIGRATION_JOB_NAME` in both calls |
 | Metadata validation | None before cloud operations | Offline preflight before cloud authentication/build/deploy |
 
-Preflight requires all nine name/version pairs below, both login client IDs,
-exact HTTPS callback paths and a valid Microsoft login tenant. The documented
+Preflight requires both resource names, all nine secret name/version pairs below,
+both login client IDs, exact HTTPS callback paths and a valid Microsoft login tenant. The documented
 staging registration is single-tenant, so staging requires an explicit tenant
 UUID; `common`/`organizations`/`consumers` are rejected there. Production also
 accepts the aliases already supported by `env.ts`, when appropriate for its own
 registration. No application parser or authentication behavior is changed.
 Diagnostics name invalid fields only, never supplied values or JSON parse errors.
+Resource names must match the lowercase RFC-1035 label pattern
+`^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$` (1–63 characters). This is syntax validation
+only, not a lookup or confirmation of a real Cloud Run service/job.
 
 ## Manual work: GitHub Environment variables (not set by this PR)
 
@@ -54,6 +67,8 @@ Values below are names/public IDs from the handoff, not secret payloads.
 
 | Name variable | Version variable (positive integer, not `latest`) | staging name/value source |
 | --- | --- | --- |
+| `API_SERVICE_NAME` | — (resource target, not a secret) | **`call-now-staging-api`**, confirmed by the registered redirect-URI host `call-now-staging-api-404996456750.asia-northeast1.run.app` in [the handoff](./staging-oauth-deploy-handoff.md) |
+| `MIGRATION_JOB_NAME` | — (resource target, not a secret) | **NOT CONFIRMED. The user must look up the actual existing staging job name before this workflow is usable. No name is assumed or suggested.** |
 | `MIGRATION_DATABASE_URL_SECRET_NAME` | `MIGRATION_DATABASE_URL_SECRET_VERSION` | Confirm existing **migration-role** DB secret name/version; not supplied by OAuth handoff |
 | `DATABASE_URL_SECRET_NAME` | `DATABASE_URL_SECRET_VERSION` | `call-now-staging-runtime-db-url`; confirm active version |
 | `AUTH_TOKEN_PEPPER_SECRET_NAME` | `AUTH_PEPPER_SECRET_VERSION` | Confirm existing staging auth-pepper secret name/version |
@@ -63,6 +78,14 @@ Values below are names/public IDs from the handoff, not secret payloads.
 | `MICROSOFT_OAUTH_CLIENT_SECRET_NAME` | `MICROSOFT_OAUTH_CLIENT_SECRET_VERSION` | Confirm separate Microsoft **mail monitoring** secret; do not use Microsoft login secret |
 | `SMTP_USER_SECRET_NAME` | `SMTP_USER_SECRET_VERSION` | Confirm staging SMTP user secret name/version |
 | `SMTP_PASSWORD_SECRET_NAME` | `SMTP_PASSWORD_SECRET_VERSION` | Confirm staging SMTP password secret name/version |
+
+For production, also set `API_SERVICE_NAME` and `MIGRATION_JOB_NAME` explicitly.
+`call-now-api` / `call-now-db-migrate` are reasonable candidate values based on
+the previous hardcoded commands, **not confirmed production resource names**.
+Verify them before setting the variables. There is no implicit default in either
+environment. A syntactically valid but wrong resource name is not detected by
+the offline validator; resource existence and callback-host alignment remain
+operator checks before deployment.
 
 In production, select the existing full names explicitly, e.g.
 `call-now-database-url`, `call-now-auth-token-pepper`,
@@ -90,11 +113,12 @@ existence, active versions, IAM or that all deployment prerequisites are met.
 
 ## Important remaining checks before a separately approved deploy
 
-1. This workflow still deploys `call-now-api` / `call-now-db-migrate`; the
-   registered staging callback host is the existing **call-now-staging-api**.
-   Reconcile the service/job target names before running it. Do not accidentally
-   deploy a second service whose URL differs from the registered callback.
-   Target-name changes are intentionally outside this secret/OAuth-wiring PR.
+1. Resource-name **wiring is fixed**, but manual setup is still required:
+   set staging `API_SERVICE_NAME=call-now-staging-api` to match the registered
+   callback host. **Staging `MIGRATION_JOB_NAME` is NOT CONFIRMED** and must be
+   looked up by the user before running the workflow. No cloud lookup was
+   performed by this change. Explicitly configure and verify production's
+   resource names too; syntax validation alone does not confirm existence.
 2. The current main does not include PR #43's native PKCE endpoints. This PR
    does not integrate #43, change `apps/ios/`, or wire `NATIVE_AUTH_MODE`.
    Select/integrate the reviewed staging application revision separately before
@@ -115,8 +139,11 @@ existence, active versions, IAM or that all deployment prerequisites are met.
 
 ## Local checks and stop point
 
-- `pnpm test:deploy-config`: renders all secret mappings for staging and
-  production using synthetic metadata, verifies Microsoft login vs monitoring
+- `pnpm test:deploy-config`: renders all resource targets and secret mappings for
+  staging and production using synthetic metadata (not guessed real job names),
+  verifies shared job deploy/execute target and unchanged image names, resource
+  validation at 1/63/64-character boundaries, missing/invalid values, field-only
+  diagnostics, Microsoft login vs monitoring
   separation, preflight order, missing/invalid names and versions, callback and
   tenant validation, and safe CLI failure output. No gcloud or network calls.
 - `apps/api/tests/env.test.ts`: complete single-tenant login tuple, missing
@@ -124,13 +151,13 @@ existence, active versions, IAM or that all deployment prerequisites are met.
 - `pnpm verify`: includes the new offline deployment regression suite.
 - YAML syntax and `git diff --check`; `apps/ios/` diff must remain empty.
 
-Local results (2026-09-27):
+Local results (2026-09-27, resource-name follow-up):
 
 | Check | Measured result |
 | --- | --- |
-| `pnpm test:deploy-config` | **10 PASS** |
-| `env.test.ts` | **17 PASS** (8 new cases; also included in API total below) |
-| `pnpm verify` | **PASS**: deploy 10, frontend 128, API 293; format/lint/typecheck/build passed |
+| `pnpm test:deploy-config` | **20 PASS** (10 added resource-target cases; original secret/OAuth cases retained) |
+| `env.test.ts` | **17 PASS** (unchanged in this follow-up; also included in API total below) |
+| `pnpm verify` | **PASS**: deploy 20, frontend 128, API 293; format/lint/typecheck/build passed |
 | PostgreSQL integration | **118 skipped / not run**, no DB connection or migration requested for this code-only task |
 | YAML syntax / `git diff --check` | PASS |
 | `apps/ios/` changes | None |
