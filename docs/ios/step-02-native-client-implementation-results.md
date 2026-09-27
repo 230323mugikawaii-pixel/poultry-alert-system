@@ -1,6 +1,7 @@
 # iOS client foundation / native PKCE handoff
 
 実施日: 2026-09-27。レビュー用・本番利用未承認。
+Draft PR: [#43](https://github.com/230323mugikawaii-pixel/poultry-alert-system/pull/43)。
 作業ブランチ: `phase4/ios-native-client-20260927`
 base: PR06 / #37 / `phase3/device-push-registry-20260924`
 （`1d8b72f9a562b04ef95cce3cfb2f54927d5011b0`）。
@@ -85,8 +86,10 @@ PKCE参考: [RFC7636](https://www.rfc-editor.org/rfc/rfc7636)、
 
 ### 実測
 
-- Simulator: Xcode27.0 / XcodeGen2.46.0、iPhone18 Pro / iOS27.0、署名なしbuild PASS。
-- 最終unit/UI run: **31 PASS / 0 FAIL**（unit30・UI1、実行時間55.4秒）。
+- Simulator: Xcode27.0 / XcodeGen2.46.0、iPhone18 Pro / iOS27.0、
+  Debug / Release署名なしbuild PASS。
+- 最終unit/UI run: **31 PASS / 0 FAIL**（unit30・UI1、実行時間50.1秒、
+  実装コミット `637da4ab18ed787477236315d4458c4aa2f9cfde`）。
   PKCE/RFC vector、state/redirect拒否、OWNER交換、member login/logout、
   1操作1POST、通知OFF履歴、stale response拒否、端末ON/OFF失敗・重複callback、
   Origin/cache/Cookie分離、メンバー画面遷移を確認。
@@ -97,7 +100,27 @@ PKCE参考: [RFC7636](https://www.rfc-editor.org/rfc/rfc7636)、
 - `pnpm verify`: **PASS**。Frontend128件、API305件成功、API PostgreSQL122件は
   ローカル未実行としてskip。format/lint/typecheck/build成功。
 - `git diff --check`: PASS。
-- 実PostgreSQL・drift / GitHub CI: PR作成後に実行・追記。
+- 実PostgreSQL17 / GitHub CI: **PASS**。
+  [初回CI 36294806564](https://github.com/230323mugikawaii-pixel/poultry-alert-system/actions/runs/36294806564)
+  は `637da4ab18ed787477236315d4458c4aa2f9cfde` に対して成功。
+  29 migration全適用、driftなし。合成データのup/down/up・既存table不変確認も成功。
+
+| PostgreSQL suite | 成功件数 |
+|---|---:|
+| 既存 concurrency | 30 |
+| ledger / migration | 17 |
+| outbox / migration | 19 |
+| dispatcher | 14 |
+| Gmail jobs / migration | 22 |
+| PR06 device / migration | 16 |
+| native auth / migration / 100並列 | 4 |
+| **計** | **122** |
+
+初回CI後の最終レビューで、既存session認証と同じ `deletedAt=null` 条件を
+コード交換時にも明示し、native PG suiteの最終テストへsoft-deleted user拒否を追加。
+その追加後の実行結果・最新HEADは [PR #43 Checks](https://github.com/230323mugikawaii-pixel/poultry-alert-system/pull/43/checks)
+に記録する（初回CIだけを追加条件の合格証拠にはしない）。
+ローカル追加検査のlint/typecheckと、native+既存認証29テストも成功。
 
 ## 未確認・制約
 

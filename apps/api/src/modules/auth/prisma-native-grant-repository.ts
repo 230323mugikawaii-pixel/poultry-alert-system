@@ -77,7 +77,7 @@ export class PrismaNativeGrantRepository implements NativeGrantRepository {
         where: { codeHash }
       });
       return tx.user.findFirst({
-        where: { id: row.userId!, status: "ACTIVE" },
+        where: { id: row.userId!, status: "ACTIVE", deletedAt: null },
         select: { id: true, email: true, displayName: true, status: true }
       });
     });

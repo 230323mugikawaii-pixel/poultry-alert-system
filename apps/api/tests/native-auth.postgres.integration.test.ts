@@ -191,7 +191,7 @@ postgres("native PKCE durable grants (isolated PostgreSQL)", () => {
       await test.close();
     }
   }, 60000);
-  it("expired or deleted-user grants fail closed without a session", async () => {
+  it("expired, missing and soft-deleted-user grants fail closed without a session", async () => {
     const test = await createDeviceTestDatabase();
     try {
       const f = await seedLedgerFixture(test.db),
@@ -220,6 +220,26 @@ postgres("native PKCE durable grants (isolated PostgreSQL)", () => {
         }
       });
       expect(await repo.consumeCode(row.codeHash!, challenge, now)).toBeNull();
+      const softDeleted = await test.db.nativeLoginGrant.create({
+        data: {
+          stateHash: hash(),
+          bindingHash: hash(),
+          provider: "GOOGLE",
+          clientState: random(),
+          codeChallenge: challenge,
+          codeHash: hash(),
+          userId: f.owner.id,
+          expiresAt: new Date(now.getTime() + 600000),
+          codeExpiresAt: new Date(now.getTime() + 60000)
+        }
+      });
+      await test.db.user.update({
+        where: { id: f.owner.id },
+        data: { deletedAt: now }
+      });
+      expect(
+        await repo.consumeCode(softDeleted.codeHash!, challenge, now)
+      ).toBeNull();
       expect(await test.db.session.count()).toBe(0);
     } finally {
       await test.close();
