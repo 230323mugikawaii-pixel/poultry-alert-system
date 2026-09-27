@@ -26,6 +26,7 @@ try {
       if (existing.rowCount) throw new Error("STAGING_ROLE_EXISTS");
       await pool.query(`CREATE ROLE ${url.username} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '${url.password}'`);
     }
+    await pool.query("GRANT callnow_migrator TO postgres");
     await pool.query(`ALTER DATABASE ${database} OWNER TO callnow_migrator`);
     await pool.query(`REVOKE CONNECT ON DATABASE ${database} FROM PUBLIC`);
     await pool.query(`GRANT CONNECT ON DATABASE ${database} TO callnow_migrator,callnow_runtime,callnow_worker`);
@@ -54,7 +55,9 @@ try {
       (SELECT count(*)::int FROM notification_deliveries) AS deliveries`);
     console.log(JSON.stringify({ stagingOnly: true, ...result.rows[0] }));
   }
-} catch {
+} catch (error) {
+  const sqlState = error && /^[0-9A-Z]{5}$/u.test(error.code) ? error.code : "UNKNOWN";
+  console.error(`STAGING_SQLSTATE_${sqlState}`);
   console.error("STAGING_DATABASE_ADMIN_FAILED; no credentials or raw SQL errors emitted");
   process.exitCode = 1;
 } finally {
