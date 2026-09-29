@@ -43,6 +43,10 @@ targets:
           - remote-notification
         CALLNOW_API_BASE_URL: "$(CALLNOW_API_BASE_URL)"
         CALLNOW_PUBLIC_ORIGIN: "$(CALLNOW_PUBLIC_ORIGIN)"
+        CFBundleURLTypes:
+          - CFBundleURLName: com.callnow.app.auth
+            CFBundleURLSchemes:
+              - com.callnow.app
     entitlements:
       path: Generated/CallNow.entitlements
       properties:

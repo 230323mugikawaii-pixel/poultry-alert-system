@@ -2,27 +2,39 @@ import AuthenticationServices
 import UIKit
 
 /// Drives login against the existing web OAuth endpoints
-/// (`GET /api/v1/auth/:provider/start` → Google/Microsoft → the server's own
-/// `/api/v1/auth/:provider/callback`, see primary-auth-routes.ts).
+/// (`GET /api/v1/auth/:provider/start?client=native` → Google/Microsoft →
+/// the server's own `/api/v1/auth/:provider/callback`, see
+/// primary-auth-routes.ts).
 ///
-/// Design note (see docs/ios/step-01-shell-implementation-results.md for the
-/// full writeup): the backend's OAuth callback redirects to the *web
-/// frontend* origin (PUBLIC_ORIGIN) with a `?primaryAuth=success` query
-/// string. There is no custom URL scheme or Universal Link landing point for
-/// a native client to intercept via ASWebAuthenticationSession's
-/// `callbackURLScheme` — changing that would be a backend/web change, out of
-/// scope for this PR. Instead, this session:
-///  1. Starts a *non-ephemeral* ASWebAuthenticationSession, so the httpOnly
-///     session cookie Fastify sets on the callback lands in the same shared
-///     system cookie storage a Safari tab would use.
-///  2. Polls `GET /api/v1/auth/me` through APIClient, which uses
-///     URLSession.shared and therefore shares that cookie storage. httpOnly
-///     only blocks `document.cookie` access from JavaScript — it does not
-///     stop the cookie from being attached to an ordinary URLSession
-///     request against the same host.
-///  3. Once `/auth/me` succeeds, treats login as complete and cancels the
-///     web authentication session itself, since it will never receive a
-///     matching callback URL to close on its own.
+/// Design note: an earlier version of this class tried to detect login
+/// completion by polling `GET /auth/me`, on the theory that the httpOnly
+/// session cookie Fastify sets on the web callback would already be visible
+/// to APIClient's URLSession.shared once the (non-ephemeral)
+/// ASWebAuthenticationSession finished. That theory was wrong —
+/// ASWebAuthenticationSession renders its web content out-of-process, and
+/// its cookies are never visible to the app's own URLSession/
+/// HTTPCookieStorage no matter how long polling is given to run. Confirmed
+/// by live testing against staging on 2026-09-28: zero /auth/me successes
+/// across 8 real logins, even after extending the poll window from 2 to 5
+/// minutes and trying to manually copy WKWebsiteDataStore cookies into
+/// HTTPCookieStorage.shared.
+///
+/// This version uses the standard native-app OAuth pattern instead (RFC
+/// 8252, "OAuth 2.0 for Native Apps"):
+///  1. `/start` is called with `?client=native`, which tells the backend to
+///     redirect the OAuth callback to this app's own registered URL scheme
+///     (`com.callnow.app://auth-callback`, see project.yml's
+///     CFBundleURLTypes) instead of the web PUBLIC_ORIGIN, carrying a
+///     short-lived one-time exchange `code` query parameter rather than
+///     setting a cookie.
+///  2. ASWebAuthenticationSession's own completion handler receives that
+///     callback URL directly — this is exactly what `callbackURLScheme` is
+///     designed for, so no polling or manual timeout is needed.
+///  3. The app extracts `code` from the callback URL and POSTs it to
+///     `/api/v1/auth/native/exchange` via APIClient — an ordinary
+///     URLSession request the app itself makes, so the session cookie that
+///     response sets *does* land in HTTPCookieStorage.shared correctly,
+///     unlike anything set during the out-of-process web auth session.
 @MainActor
 final class AuthSession: NSObject, ObservableObject {
     enum Provider: String {
@@ -42,7 +54,6 @@ final class AuthSession: NSObject, ObservableObject {
 
     private let api: APIClient
     private var webAuthSession: ASWebAuthenticationSession?
-    private var pollTask: Task<Void, Never>?
 
     init(api: APIClient) {
         self.api = api
@@ -52,82 +63,98 @@ final class AuthSession: NSObject, ObservableObject {
         guard state != .signingIn else { return }
         state = .signingIn
 
-        guard let startURL = URL(
-            string: AppEnvironment.apiBaseURL.absoluteString + "/api/v1/auth/\(provider.rawValue)/start"
-        ) else {
+        guard
+            var components = URLComponents(
+                string: AppEnvironment.apiBaseURL.absoluteString
+                    + "/api/v1/auth/\(provider.rawValue)/start"
+            )
+        else {
+            state = .failed("接続先の設定を確認してください。")
+            return
+        }
+        components.queryItems = [URLQueryItem(name: "client", value: "native")]
+        guard let startURL = components.url else {
             state = .failed("接続先の設定を確認してください。")
             return
         }
 
-        // callbackURLScheme is a required initializer parameter but is never
-        // actually matched by this flow — see the class doc comment above.
-        // Completion is instead detected by polling below, and this session
-        // is cancelled once that succeeds.
+        // Must match project.yml's CFBundleURLTypes > CFBundleURLSchemes
+        // entry exactly, or the OS will never route the callback into the
+        // completion handler below.
         let session = ASWebAuthenticationSession(
             url: startURL,
             callbackURLScheme: "com.callnow.app"
-        ) { [weak self] _, error in
+        ) { [weak self] callbackURL, error in
             Task { @MainActor in
-                self?.handleWebAuthenticationCompletion(error: error)
+                await self?.handleWebAuthenticationCompletion(
+                    callbackURL: callbackURL,
+                    error: error
+                )
             }
         }
         session.presentationContextProvider = self
         session.prefersEphemeralWebBrowserSession = false
         webAuthSession = session
         session.start()
-
-        pollTask?.cancel()
-        pollTask = Task { [weak self] in
-            await self?.pollForCompletedLogin()
-        }
     }
 
     func signOut() {
-        pollTask?.cancel()
         webAuthSession?.cancel()
         webAuthSession = nil
         currentTeamId = nil
         state = .signedOut
     }
 
-    private func pollForCompletedLogin() async {
-        // The web callback completes almost immediately once the user
-        // approves on Google/Microsoft's side. Polling once a second for up
-        // to two minutes comfortably covers that without hammering the API;
-        // a 401 while the browser flow is still in progress is expected and
-        // is not surfaced as an error.
-        for _ in 0..<120 {
-            if Task.isCancelled { return }
-            if let user = try? await api.get("/api/v1/auth/me") as CurrentUserResponse {
-                await finishLogin(user: user.user)
-                return
-            }
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-        }
-        if state == .signingIn {
-            state = .failed("ログインがタイムアウトしました。もう一度お試しください。")
-        }
-    }
-
-    private func finishLogin(user: CurrentUser) async {
-        currentTeamId = (try? await api.get("/api/v1/teams/current") as CurrentTeamResponse)?.team.id
-        // A failed team lookup here isn't fatal to showing the user as
-        // signed in — push registration will simply report an error until
-        // retried (see PushRegistrationCenter.didReceiveDeviceToken).
-        state = .signedIn(user)
-        webAuthSession?.cancel()
+    private func handleWebAuthenticationCompletion(
+        callbackURL: URL?,
+        error: Error?
+    ) async {
         webAuthSession = nil
+        guard state == .signingIn else { return }
+
+        if let error {
+            let nsError = error as NSError
+            let isUserCancelled = nsError.domain == ASWebAuthenticationSessionError.errorDomain
+                && nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue
+            state = isUserCancelled
+                ? .signedOut
+                : .failed("ログインに失敗しました。もう一度お試しください。")
+            return
+        }
+
+        guard
+            let callbackURL,
+            let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
+            components.queryItems?.first(where: { $0.name == "result" })?.value == "success",
+            let code = components.queryItems?.first(where: { $0.name == "code" })?.value
+        else {
+            state = .failed("ログインに失敗しました。もう一度お試しください。")
+            return
+        }
+
+        await exchangeCodeForSession(code)
     }
 
-    private func handleWebAuthenticationCompletion(error: Error?) {
-        guard let error else { return }
-        let nsError = error as NSError
-        let isUserCancelled = nsError.domain == ASWebAuthenticationSessionError.errorDomain
-            && nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue
-        guard isUserCancelled, state == .signingIn else { return }
-        pollTask?.cancel()
-        state = .signedOut
+    private func exchangeCodeForSession(_ code: String) async {
+        do {
+            let response: CurrentUserResponse = try await api.post(
+                "/api/v1/auth/native/exchange",
+                body: NativeExchangeRequest(code: code)
+            )
+            // A failed team lookup here isn't fatal to showing the user as
+            // signed in — push registration will simply report an error
+            // until retried (see PushRegistrationCenter.didReceiveDeviceToken).
+            currentTeamId = (try? await api.get("/api/v1/teams/current") as CurrentTeamResponse)?.team.id
+            state = .signedIn(response.user)
+        } catch {
+            state = .failed("ログインに失敗しました。もう一度お試しください。")
+        }
     }
+}
+
+/// Body for POST /api/v1/auth/native/exchange (primary-auth-routes.ts).
+private struct NativeExchangeRequest: Encodable {
+    let code: String
 }
 
 extension AuthSession: ASWebAuthenticationPresentationContextProviding {
