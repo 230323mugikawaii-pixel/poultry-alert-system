@@ -124,15 +124,45 @@ final class AuthSession: NSObject, ObservableObject {
 
         guard
             let callbackURL,
-            let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
+            let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)
+        else {
+            state = .failed(Self.errorMessage(for: nil))
+            return
+        }
+
+        guard
             components.queryItems?.first(where: { $0.name == "result" })?.value == "success",
             let code = components.queryItems?.first(where: { $0.name == "code" })?.value
         else {
-            state = .failed("ログインに失敗しました。もう一度お試しください。")
+            let errorCode = components.queryItems?.first(where: { $0.name == "errorCode" })?.value
+            state = .failed(Self.errorMessage(for: errorCode))
             return
         }
 
         await exchangeCodeForSession(code)
+    }
+
+    /// Maps the backend's AppError code — passed through the native
+    /// callback's `errorCode` query param, see primary-auth-routes.ts's
+    /// nativeCallbackUrl — to the same user-facing message the web flow
+    /// shows, instead of a generic "try again" that hides an actionable
+    /// cause (most commonly: an account with this email already exists via
+    /// another login method).
+    private static func errorMessage(for errorCode: String?) -> String {
+        switch errorCode {
+        case "LOGIN_IDENTITY_LINK_REQUIRED":
+            return "同じメールアドレスの利用者が既に存在します。以前使ったログイン方法でサインインしてから、この方法を追加してください。"
+        case "LOGIN_IDENTITY_REVOKED":
+            return "このログイン方法は解除されています。別の方法でログインしてください。"
+        case "LOGIN_IDENTITY_ALREADY_IN_USE":
+            return "このログイン方法はすでに別のCall Nowアカウントに接続されています。"
+        case "LOGIN_PROVIDER_ALREADY_LINKED":
+            return "このログイン方法はすでに別のアカウントで追加されています。"
+        case "LOGIN_PROVIDER_NOT_CONFIGURED":
+            return "このログイン方法は現在準備中です。"
+        default:
+            return "ログインに失敗しました。もう一度お試しください。"
+        }
     }
 
     private func exchangeCodeForSession(_ code: String) async {

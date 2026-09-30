@@ -360,7 +360,9 @@ export function createPrimaryAuthRoutes(
           error instanceof AppError ? error.code : "PRIMARY_LOGIN_FAILED";
         request.log.warn({ code, provider }, "Primary login callback failed");
         if (isNative) {
-          await reply.redirect(nativeCallbackUrl("error", provider));
+          await reply.redirect(
+            nativeCallbackUrl("error", provider, undefined, code)
+          );
           return;
         }
         await reply.redirect(
@@ -528,12 +530,18 @@ function frontendResultUrl(
 function nativeCallbackUrl(
   result: "success" | "error",
   provider: PrimaryIdentityProvider,
-  code?: string
+  code?: string,
+  errorCode?: string
 ): string {
   const url = new URL(`${NATIVE_CALLBACK_SCHEME}://auth-callback`);
   url.searchParams.set("result", result);
   url.searchParams.set("loginProvider", provider);
   if (code) url.searchParams.set("code", code);
+  // Surfaced to the app so it can show a specific, actionable message
+  // (e.g. LOGIN_IDENTITY_LINK_REQUIRED) instead of a generic failure —
+  // see AuthSession.swift's errorMessage(for:). Safe to expose: these are
+  // machine-readable AppError codes, never secrets or internal detail.
+  if (errorCode) url.searchParams.set("errorCode", errorCode);
   return url.toString();
 }
 
