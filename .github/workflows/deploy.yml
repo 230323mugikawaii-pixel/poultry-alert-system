@@ -79,7 +79,7 @@ jobs:
           --region "${{ vars.GCP_REGION }}"
           --image "$MIGRATION_IMAGE"
           --set-cloudsql-instances "${{ vars.CLOUD_SQL_CONNECTION_NAME }}"
-          --update-secrets "DATABASE_URL=${{ vars.MIGRATION_DATABASE_URL_SECRET_NAME }}:${{ vars.MIGRATION_DATABASE_URL_SECRET_VERSION }}"
+          --set-secrets "DATABASE_URL=${{ vars.MIGRATION_DATABASE_URL_SECRET_NAME }}:${{ vars.MIGRATION_DATABASE_URL_SECRET_VERSION }}"
           --service-account "${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}"
           --quiet
       - name: Apply database migrations
@@ -126,8 +126,8 @@ jobs:
             --allow-unauthenticated \
             --service-account "${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}" \
             --set-cloudsql-instances "${{ vars.CLOUD_SQL_CONNECTION_NAME }}" \
-            --update-env-vars "$api_env_vars" \
-            --update-secrets "$api_secrets" \
+            --set-env-vars "$api_env_vars" \
+            --set-secrets "$api_secrets" \
             --min 0 \
             --max 10 \
             --port 8080 \

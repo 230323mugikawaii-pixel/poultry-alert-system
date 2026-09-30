@@ -10,11 +10,14 @@ struct LoginView: View {
             Text("Call Now")
                 .font(.largeTitle.bold())
 
-            if case .failed(let message) = authSession.state {
-                Text(message)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
+            Group {
+                if case .failed(let message) = authSession.state {
+                    Text(message)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                }
             }
+            .frame(minHeight: 40)
 
             VStack(spacing: 12) {
                 Button {
@@ -37,9 +40,12 @@ struct LoginView: View {
             }
             .padding(.horizontal, 32)
 
-            if authSession.state == .signingIn {
-                ProgressView("サインイン中…")
+            Group {
+                if authSession.state == .signingIn {
+                    ProgressView("サインイン中…")
+                }
             }
+            .frame(height: 24)
         }
         .padding()
     }
