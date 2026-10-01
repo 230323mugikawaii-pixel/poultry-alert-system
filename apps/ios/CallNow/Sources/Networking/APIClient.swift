@@ -1,11 +1,8 @@
 import Foundation
 
 /// Talks to the existing Call Now API. Deliberately does not read, store, or
-/// attach the session cookie itself — it reuses the shared cookie storage
-/// (URLSession.shared / HTTPCookieStorage.shared) that AuthSession's
-/// non-ephemeral ASWebAuthenticationSession already populated, exactly like
-/// a browser tab would. httpOnly only blocks JavaScript's `document.cookie`;
-/// it does not stop native URLSession requests from attaching the cookie.
+/// attach the session cookie itself. The native/exchange POST populates
+/// URLSession's cookie store; ASWebAuthenticationSession uses a separate store.
 final class APIClient {
     private let session: URLSession
     private let decoder: JSONDecoder
@@ -63,6 +60,10 @@ final class APIClient {
             throw APIError.transport
         }
         guard (200..<300).contains(http.statusCode) else {
+            if let failure = try? decoder.decode(APIErrorEnvelope.self, from: data),
+               failure.error.code.range(of: "^[A-Z][A-Z0-9_]{0,99}$", options: .regularExpression) != nil {
+                throw APIError.codedServer(status: http.statusCode, code: failure.error.code)
+            }
             throw APIError.server(status: http.statusCode)
         }
         if Response.self == EmptyResponse.self {
@@ -79,3 +80,8 @@ final class APIClient {
 
 private struct EmptyBody: Encodable {}
 struct EmptyResponse: Decodable {}
+
+private struct APIErrorEnvelope: Decodable {
+    struct Failure: Decodable { let code: String }
+    let error: Failure
+}

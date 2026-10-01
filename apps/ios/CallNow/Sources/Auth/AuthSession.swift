@@ -148,7 +148,7 @@ final class AuthSession: NSObject, ObservableObject {
     /// shows, instead of a generic "try again" that hides an actionable
     /// cause (most commonly: an account with this email already exists via
     /// another login method).
-    private static func errorMessage(for errorCode: String?) -> String {
+    static func errorMessage(for errorCode: String?) -> String {
         switch errorCode {
         case "LOGIN_IDENTITY_LINK_REQUIRED":
             return "同じメールアドレスの利用者が既に存在します。以前使ったログイン方法でサインインしてから、この方法を追加してください。"
@@ -160,6 +160,8 @@ final class AuthSession: NSObject, ObservableObject {
             return "このログイン方法はすでに別のアカウントで追加されています。"
         case "LOGIN_PROVIDER_NOT_CONFIGURED":
             return "このログイン方法は現在準備中です。"
+        case "PRIMARY_LOGIN_INVALID_OR_EXPIRED", "NATIVE_LINK_PKCE_REQUIRED":
+            return "認証が無効または期限切れです。もう一度最初からお試しください。"
         default:
             return "ログインに失敗しました。もう一度お試しください。"
         }

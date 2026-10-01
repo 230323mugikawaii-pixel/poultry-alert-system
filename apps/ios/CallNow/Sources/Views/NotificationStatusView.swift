@@ -3,6 +3,7 @@ import SwiftUI
 struct NotificationStatusView: View {
     @EnvironmentObject private var authSession: AuthSession
     @EnvironmentObject private var pushRegistrationCenter: PushRegistrationCenter
+    @State private var showsLinkedAccounts = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -15,12 +16,16 @@ struct NotificationStatusView: View {
 
             ReceivedAlertsPlaceholderView(count: pushRegistrationCenter.receivedCount)
 
+            Button("ログイン方法を管理") { showsLinkedAccounts = true }
+                .buttonStyle(.bordered)
+
             Button("ログアウト") {
                 authSession.signOut()
             }
             .buttonStyle(.bordered)
         }
         .padding()
+        .sheet(isPresented: $showsLinkedAccounts) { LinkedAccountsView() }
         .task {
             await pushRegistrationCenter.requestPermissionAndRegister()
         }
