@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { AppError } from "../../lib/app-error.js";
 import type {
   AuthRepository,
+  NativeLinkTicket,
   PrimaryIdentityProvider,
   PrimaryIdentityRecord
 } from "./auth-repository.js";
@@ -57,6 +58,7 @@ export class PrimaryAuthService {
     readonly provider: PrimaryIdentityProvider;
     readonly intent: "LOGIN" | "LINK";
     readonly authenticatedUserId: string | null;
+    readonly nativeLink?: true;
   }): Promise<{
     readonly state: string;
     readonly authorizationUrl: string;
@@ -83,7 +85,8 @@ export class PrimaryAuthService {
       secretHash: this.hashSecret(state),
       codeVerifier,
       nonce,
-      expiresAt
+      expiresAt,
+      ...(input.nativeLink ? { nativeLink: true as const } : {})
     });
     return {
       state,
@@ -104,6 +107,182 @@ export class PrimaryAuthService {
     readonly userPayload?: string;
     readonly clientContext: ClientContext;
   }): Promise<PrimaryAuthorizationResult> {
+    const { challenge, identityInput } = await this.verifyAuthorization(
+      input,
+      false
+    );
+    if (challenge.intent === "LINK") {
+      if (!challenge.userId || challenge.userId !== input.authenticatedUserId) {
+        throw invalidPrimaryLoginError();
+      }
+      return {
+        intent: "LINK",
+        identity: await this.options.repository.linkPrimaryIdentity(
+          challenge.userId,
+          identityInput
+        )
+      };
+    }
+    const user =
+      await this.options.repository.resolvePrimaryIdentityUser(identityInput);
+    const login = await this.options.authService.createSessionForVerifiedUser(
+      user,
+      input.clientContext
+    );
+    return { intent: "LOGIN", ...login };
+  }
+
+  // Native LINK is deliberately separate from LOGIN. Browser proof alone never
+  // links an account; only the initiating app session plus S256 can finalize it.
+  public async startNativeLink(input: {
+    provider: PrimaryIdentityProvider;
+    userId: string;
+    sessionId: string;
+    codeChallenge: string;
+  }): Promise<string> {
+    if (
+      input.provider === "APPLE" ||
+      !/^[A-Za-z0-9_-]{43}$/u.test(input.codeChallenge)
+    )
+      throw invalidPrimaryLoginError();
+    this.requireProvider(input.provider);
+    return this.issueNativeLinkTicket({ ...input, stage: "HANDOFF" });
+  }
+
+  public async openNativeLink(
+    provider: PrimaryIdentityProvider,
+    handoff: string
+  ) {
+    const ticket = await this.consumeNativeLinkTicket(
+      provider,
+      "HANDOFF",
+      handoff
+    );
+    const authorization = await this.createAuthorizationRequest({
+      provider,
+      intent: "LINK",
+      authenticatedUserId: ticket.userId,
+      nativeLink: true
+    });
+    await this.options.repository.createNativeLinkTicket({
+      ...ticket,
+      stage: "CALLBACK",
+      secretHash: this.nativeLinkHash("CALLBACK", authorization.state),
+      expiresAt: authorization.expiresAt
+    });
+    return authorization;
+  }
+
+  public async verifyNativeLinkCallback(
+    provider: PrimaryIdentityProvider,
+    state: string,
+    code: string
+  ): Promise<string> {
+    const ticket = await this.consumeNativeLinkTicket(
+      provider,
+      "CALLBACK",
+      state
+    );
+    const { identityInput } = await this.verifyAuthorization(
+      {
+        provider,
+        state,
+        code,
+        authenticatedUserId: ticket.userId
+      },
+      true
+    );
+    const identity = {
+      provider: identityInput.provider,
+      providerSubject: identityInput.providerSubject,
+      email: identityInput.email,
+      displayName: identityInput.displayName,
+      emailVerified: identityInput.emailVerified
+    };
+    return this.issueNativeLinkTicket({
+      ...ticket,
+      stage: "FINALIZE",
+      identity
+    });
+  }
+
+  public async finalizeNativeLink(input: {
+    provider: PrimaryIdentityProvider;
+    userId: string;
+    sessionId: string;
+    code: string;
+    codeVerifier: string;
+  }): Promise<PrimaryIdentityRecord> {
+    if (!/^[A-Za-z0-9._~-]{43,128}$/u.test(input.codeVerifier))
+      throw invalidPrimaryLoginError();
+    const ticket = await this.consumeNativeLinkTicket(
+      input.provider,
+      "FINALIZE",
+      input.code,
+      {
+        userId: input.userId,
+        sessionId: input.sessionId,
+        codeChallenge: createHash("sha256")
+          .update(input.codeVerifier, "ascii")
+          .digest("base64url")
+      }
+    );
+    if (!ticket.identity) throw invalidPrimaryLoginError();
+    // Existing repository enforces subject ownership/provider uniqueness; never
+    // merges by email. Consumption is fail-closed: retry from start on DB failure.
+    return this.options.repository.linkPrimaryIdentity(ticket.userId, {
+      ...ticket.identity,
+      now: this.now()
+    });
+  }
+
+  private async issueNativeLinkTicket(
+    ticket: NativeLinkTicket
+  ): Promise<string> {
+    const code = randomBytes(32).toString("base64url");
+    await this.options.repository.createNativeLinkTicket({
+      ...ticket,
+      secretHash: this.nativeLinkHash(ticket.stage, code),
+      expiresAt: new Date(this.now().getTime() + 120_000)
+    });
+    return code;
+  }
+
+  private async consumeNativeLinkTicket(
+    provider: PrimaryIdentityProvider,
+    stage: NativeLinkTicket["stage"],
+    code: string,
+    binding?: Pick<NativeLinkTicket, "userId" | "sessionId" | "codeChallenge">
+  ): Promise<NativeLinkTicket> {
+    if (!/^[A-Za-z0-9_-]{43}$/u.test(code)) throw invalidPrimaryLoginError();
+    const ticket = await this.options.repository.consumeNativeLinkTicket({
+      provider,
+      stage,
+      secretHash: this.nativeLinkHash(stage, code),
+      now: this.now(),
+      ...(binding ? { binding } : {})
+    });
+    if (!ticket) throw invalidPrimaryLoginError();
+    return ticket;
+  }
+
+  private nativeLinkHash(
+    stage: NativeLinkTicket["stage"],
+    value: string
+  ): string {
+    return this.hashSecret(`native-link-v1:${stage}:${value}`);
+  }
+
+  private async verifyAuthorization(
+    input: {
+      provider: PrimaryIdentityProvider;
+      state: string;
+      code: string;
+      authenticatedUserId: string | null;
+      userPayload?: string;
+    },
+    nativeLink: boolean
+  ) {
     if (!isPlausibleState(input.state) || !isPlausibleCode(input.code)) {
       throw invalidPrimaryLoginError();
     }
@@ -114,7 +293,11 @@ export class PrimaryAuthService {
         input.authenticatedUserId,
         this.now()
       );
-    if (!challenge) {
+    if (
+      !challenge ||
+      Boolean(challenge.nativeLink) !== nativeLink ||
+      (nativeLink && challenge.intent !== "LINK")
+    ) {
       throw invalidPrimaryLoginError();
     }
     let profile;
@@ -143,25 +326,7 @@ export class PrimaryAuthService {
       emailVerified: profile.emailVerified,
       now: this.now()
     };
-    if (challenge.intent === "LINK") {
-      if (!challenge.userId || challenge.userId !== input.authenticatedUserId) {
-        throw invalidPrimaryLoginError();
-      }
-      return {
-        intent: "LINK",
-        identity: await this.options.repository.linkPrimaryIdentity(
-          challenge.userId,
-          identityInput
-        )
-      };
-    }
-    const user =
-      await this.options.repository.resolvePrimaryIdentityUser(identityInput);
-    const login = await this.options.authService.createSessionForVerifiedUser(
-      user,
-      input.clientContext
-    );
-    return { intent: "LOGIN", ...login };
+    return { challenge, identityInput };
   }
 
   public listIdentities(

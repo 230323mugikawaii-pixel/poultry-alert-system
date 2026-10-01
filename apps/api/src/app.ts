@@ -87,6 +87,9 @@ export async function buildApp(
                 "body.refreshToken",
                 "body.authorizationCode",
                 "body.code",
+                "body.codeVerifier",
+                "req.body.codeVerifier",
+                "query.handoff",
                 "body.state",
                 "body.user",
                 "body.content"

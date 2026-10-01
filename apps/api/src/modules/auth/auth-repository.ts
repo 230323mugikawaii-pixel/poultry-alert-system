@@ -48,6 +48,7 @@ export interface CreatePrimaryOAuthChallengeInput {
   readonly codeVerifier: string;
   readonly nonce: string;
   readonly expiresAt: Date;
+  readonly nativeLink?: true;
 }
 
 export interface PrimaryOAuthChallengeRecord {
@@ -56,6 +57,28 @@ export interface PrimaryOAuthChallengeRecord {
   readonly userId: string | null;
   readonly codeVerifier: string;
   readonly nonce: string;
+  readonly nativeLink?: true;
+}
+
+/** Separate, versioned namespace in AuthChallenge; never a login session. */
+export interface NativeLinkTicket {
+  readonly provider: PrimaryIdentityProvider;
+  readonly userId: string;
+  readonly sessionId: string;
+  readonly codeChallenge: string;
+  readonly stage: "HANDOFF" | "CALLBACK" | "FINALIZE";
+  readonly identity?: Omit<ResolvePrimaryIdentityInput, "now">;
+}
+
+export interface ConsumeNativeLinkTicketInput {
+  readonly secretHash: string;
+  readonly provider: PrimaryIdentityProvider;
+  readonly stage: NativeLinkTicket["stage"];
+  readonly now: Date;
+  readonly binding?: Pick<
+    NativeLinkTicket,
+    "userId" | "sessionId" | "codeChallenge"
+  >;
 }
 
 export interface ResolvePrimaryIdentityInput {
@@ -86,6 +109,15 @@ export interface CreateSessionInput {
 }
 
 export interface AuthRepository {
+  createNativeLinkTicket(
+    input: NativeLinkTicket & {
+      readonly secretHash: string;
+      readonly expiresAt: Date;
+    }
+  ): Promise<void>;
+  consumeNativeLinkTicket(
+    input: ConsumeNativeLinkTicketInput
+  ): Promise<NativeLinkTicket | null>;
   createMagicLinkChallenge(input: CreateMagicLinkChallengeInput): Promise<void>;
   createGoogleOAuthChallenge(
     input: CreateGoogleOAuthChallengeInput

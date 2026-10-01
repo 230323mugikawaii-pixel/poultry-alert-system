@@ -1,6 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { FastifyPluginAsyncTypebox } from "@fastify/type-provider-typebox";
 import { Type } from "@sinclair/typebox";
+import { Value } from "@sinclair/typebox/value";
 import type { FastifyReply } from "fastify";
 import type { AppEnvironment } from "../../config/env.js";
 import { AppError } from "../../lib/app-error.js";
@@ -50,7 +51,9 @@ const StartQuery = Type.Object({
   // redirect to NATIVE_CALLBACK_SCHEME with an exchange code instead of the
   // web PUBLIC_ORIGIN redirect. Anything else (including absent) is treated
   // as the existing web flow.
-  client: Type.Optional(Type.Union([Type.Literal("web"), Type.Literal("native")]))
+  client: Type.Optional(
+    Type.Union([Type.Literal("web"), Type.Literal("native")])
+  )
 });
 const CallbackQuery = Type.Object({
   code: Type.Optional(Type.String({ maxLength: 4096 })),
@@ -65,6 +68,14 @@ const AppleCallbackBody = Type.Object({
 });
 const NativeExchangeBody = Type.Object({
   code: Type.String({ minLength: 20, maxLength: 200 })
+});
+const NativeLinkStartBody = Type.Object({
+  codeChallenge: Type.String({ pattern: "^[A-Za-z0-9_-]{43}$" }),
+  codeChallengeMethod: Type.Literal("S256")
+});
+const NativeLinkFinalizeBody = Type.Object({
+  code: Type.String({ pattern: "^[A-Za-z0-9_-]{43}$" }),
+  codeVerifier: Type.String({ pattern: "^[A-Za-z0-9._~-]{43,128}$" })
 });
 const NativeUserResponse = Type.Object({
   user: Type.Object({
@@ -123,7 +134,8 @@ export function createPrimaryAuthRoutes(
       }))
     }));
 
-    app.get("/api/v1/auth/identities", async (request) => {
+    app.get("/api/v1/auth/identities", async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
       const userId = await authenticateUserId(
         request.cookies[environment.COOKIE_NAME],
         authService
@@ -174,6 +186,10 @@ export function createPrimaryAuthRoutes(
         setStateCookie(reply, environment, provider, authorization.state);
         if (request.query.client === "native") {
           setNativeFlagCookie(reply, environment, provider);
+        } else {
+          reply.clearCookie(nativeCookieName(environment, provider), {
+            path: callbackPath(provider)
+          });
         }
         await reply.redirect(authorization.authorizationUrl);
       }
@@ -183,7 +199,10 @@ export function createPrimaryAuthRoutes(
       "/api/v1/auth/identities/:provider/link/start",
       {
         config: { rateLimit: { max: 10, timeWindow: "15 minutes" } },
-        schema: { params: ProviderParams }
+        schema: {
+          params: ProviderParams,
+          querystring: StartQuery
+        }
       },
       async (request, reply) => {
         requireSameOrigin(request.headers.origin, environment);
@@ -192,6 +211,49 @@ export function createPrimaryAuthRoutes(
           request.cookies[environment.COOKIE_NAME],
           authService
         );
+        if (request.query.client === "native") {
+          if (!Value.Check(NativeLinkStartBody, request.body))
+            throw new AppError(
+              "NATIVE_LINK_PKCE_REQUIRED",
+              "連携を最初からやり直してください。",
+              400
+            );
+          await securityThrottle.consume([
+            throttleRule("primary_link_start_global", ["all"], 1_000, 1, 5),
+            throttleRule(
+              `primary_link_start_${provider.toLowerCase()}_user`,
+              [userId],
+              10,
+              15,
+              15
+            )
+          ]);
+          const authenticated = await authService.authenticate(
+            request.cookies[environment.COOKIE_NAME]!
+          );
+          const handoff = await primaryAuthService.startNativeLink({
+            provider,
+            userId,
+            sessionId: authenticated.session.id,
+            codeChallenge: request.body.codeChallenge
+          });
+          // Bootstrap on the trusted configured API origin, not the provider or
+          // an untrusted Host. Cookies must be set in the browser's own store.
+          const redirectUri =
+            provider === "MICROSOFT"
+              ? environment.MICROSOFT_LOGIN_OAUTH_REDIRECT_URI
+              : environment.GOOGLE_OAUTH_REDIRECT_URI;
+          const url = new URL(
+            `/api/v1/auth/identities/${request.params.provider}/link/browser`,
+            redirectUri
+          );
+          url.searchParams.set("handoff", handoff);
+          reply
+            .header("Cache-Control", "no-store")
+            .header("Referrer-Policy", "no-referrer");
+          await reply.send({ authorizationUrl: url.toString() });
+          return;
+        }
         if (
           primaryAuthService.getProviderAvailability(provider) !== "AVAILABLE"
         ) {
@@ -219,7 +281,72 @@ export function createPrimaryAuthRoutes(
             authenticatedUserId: userId
           });
         setStateCookie(reply, environment, provider, authorization.state);
+        reply.clearCookie(nativeCookieName(environment, provider), {
+          path: callbackPath(provider)
+        });
         await reply.status(303).redirect(authorization.authorizationUrl);
+      }
+    );
+
+    app.get(
+      "/api/v1/auth/identities/:provider/link/browser",
+      {
+        config: { rateLimit: { max: 20, timeWindow: "15 minutes" } },
+        schema: {
+          params: ProviderParams,
+          querystring: Type.Object({
+            handoff: Type.String({ pattern: "^[A-Za-z0-9_-]{43}$" })
+          })
+        }
+      },
+      async (request, reply) => {
+        reply
+          .header("Cache-Control", "no-store")
+          .header("Referrer-Policy", "no-referrer");
+        const provider = readProvider(request.params.provider);
+        try {
+          const authorization = await primaryAuthService.openNativeLink(
+            provider,
+            request.query.handoff
+          );
+          setStateCookie(reply, environment, provider, authorization.state);
+          setNativeFlagCookie(reply, environment, provider, "link");
+          await reply.redirect(authorization.authorizationUrl);
+        } catch {
+          await reply.redirect(
+            nativeCallbackUrl(
+              "error",
+              provider,
+              undefined,
+              "PRIMARY_LOGIN_INVALID_OR_EXPIRED"
+            )
+          );
+        }
+      }
+    );
+
+    app.post(
+      "/api/v1/auth/identities/:provider/link/finalize",
+      {
+        config: { rateLimit: { max: 20, timeWindow: "15 minutes" } },
+        schema: { params: ProviderParams, body: NativeLinkFinalizeBody }
+      },
+      async (request, reply) => {
+        requireSameOrigin(request.headers.origin, environment);
+        const token = request.cookies[environment.COOKIE_NAME];
+        if (!token)
+          throw new AppError("UNAUTHENTICATED", "ログインが必要です。", 401);
+        const authenticated = await authService.authenticate(token);
+        const identity = await primaryAuthService.finalizeNativeLink({
+          provider: readProvider(request.params.provider),
+          userId: authenticated.user.id,
+          sessionId: authenticated.session.id,
+          ...request.body
+        });
+        reply.header("Cache-Control", "no-store");
+        await reply.send({
+          identity: { provider: identity.provider, email: identity.email }
+        });
       }
     );
 
@@ -244,7 +371,10 @@ export function createPrimaryAuthRoutes(
       "/api/v1/auth/native/exchange",
       {
         config: { rateLimit: { max: 20, timeWindow: "15 minutes" } },
-        schema: { body: NativeExchangeBody, response: { 200: NativeUserResponse } }
+        schema: {
+          body: NativeExchangeBody,
+          response: { 200: NativeUserResponse }
+        }
       },
       async (request, reply) => {
         requireSameOrigin(request.headers.origin, environment);
@@ -283,7 +413,12 @@ export function createPrimaryAuthRoutes(
       const cookieState = request.cookies[cookieName] ?? "";
       reply.clearCookie(cookieName, { path: callbackPath(provider) });
       const nativeFlagCookieName = nativeCookieName(environment, provider);
-      const isNative = request.cookies[nativeFlagCookieName] === "1";
+      const isNativeLink = request.cookies[nativeFlagCookieName] === "link";
+      const isNative =
+        isNativeLink || request.cookies[nativeFlagCookieName] === "1";
+      reply
+        .header("Cache-Control", "no-store")
+        .header("Referrer-Policy", "no-referrer");
       reply.clearCookie(nativeFlagCookieName, { path: callbackPath(provider) });
       const currentUserId = await optionalAuthenticatedUserId(
         request.cookies[environment.COOKIE_NAME],
@@ -327,6 +462,17 @@ export function createPrimaryAuthRoutes(
             15
           )
         ]);
+        if (isNativeLink) {
+          const code = await primaryAuthService.verifyNativeLinkCallback(
+            provider,
+            state,
+            values.code
+          );
+          await reply.redirect(
+            nativeCallbackUrl("link_pending", provider, code)
+          );
+          return;
+        }
         const result = await primaryAuthService.completeAuthorization({
           provider,
           state,
@@ -472,9 +618,10 @@ function setStateCookie(
 function setNativeFlagCookie(
   reply: { setCookie(name: string, value: string, options: object): unknown },
   environment: AppEnvironment,
-  provider: PrimaryIdentityProvider
+  provider: PrimaryIdentityProvider,
+  value: "1" | "link" = "1"
 ): void {
-  reply.setCookie(nativeCookieName(environment, provider), "1", {
+  reply.setCookie(nativeCookieName(environment, provider), value, {
     httpOnly: true,
     secure: provider === "APPLE" ? true : usesSecureCookies(environment),
     sameSite: provider === "APPLE" ? "none" : "lax",
@@ -528,7 +675,7 @@ function frontendResultUrl(
 }
 
 function nativeCallbackUrl(
-  result: "success" | "error",
+  result: "success" | "error" | "link_pending",
   provider: PrimaryIdentityProvider,
   code?: string,
   errorCode?: string

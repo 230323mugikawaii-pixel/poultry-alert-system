@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   afterAll,
   beforeAll,
@@ -344,6 +344,157 @@ postgresDescribe("PostgreSQL concurrent invitation redemption", () => {
       body.mockRestore();
       await Promise.all(observations);
     }
+  });
+
+  it("persists native LINK across service instances and consumes finalization once under concurrency", async () => {
+    const repository = new PrismaAuthRepository(database);
+    const authService = new AuthService({
+      repository,
+      emailSender: { sendMagicLink: async () => undefined },
+      publicOrigin: "https://acceptance.call-now.example",
+      tokenPepper: testPepper,
+      magicLinkTtlMinutes: 15,
+      sessionIdleDays: 30,
+      sessionAbsoluteDays: 90,
+      maxActiveSessions: 5
+    });
+    // This fake models the external identity provider, not a server-local store.
+    // Its nonce bookkeeping must be shared while the Call Now services are not.
+    const providerAdapters = [
+      new PostgresPrimaryOAuthProvider(
+        "GOOGLE",
+        "native-google-subject",
+        "native@example.com"
+      ),
+      new PostgresPrimaryOAuthProvider(
+        "MICROSOFT",
+        "native-ms-subject",
+        "native@example.com"
+      )
+    ];
+    const makeService = () =>
+      new PrimaryAuthService({
+        repository: new PrismaAuthRepository(database),
+        authService,
+        providerAdapters,
+        tokenPepper: testPepper,
+        stateTtlMinutes: { GOOGLE: 10, MICROSOFT: 10, APPLE: 10 }
+      });
+    const first = makeService();
+    const second = makeService();
+    const login = await completePrimaryLogin(first, "GOOGLE");
+    const codeVerifier = "v".repeat(43);
+    const handoff = await first.startNativeLink({
+      provider: "MICROSOFT",
+      userId: login.user.id,
+      sessionId: login.session.id,
+      codeChallenge: createHash("sha256")
+        .update(codeVerifier)
+        .digest("base64url")
+    });
+    const opened = await second.openNativeLink("MICROSOFT", handoff);
+    await expect(
+      first.openNativeLink("MICROSOFT", handoff)
+    ).rejects.toMatchObject({ code: "PRIMARY_LOGIN_INVALID_OR_EXPIRED" });
+    const code = await first.verifyNativeLinkCallback(
+      "MICROSOFT",
+      opened.state,
+      "postgres-primary-code"
+    );
+    expect(
+      await database.externalIdentity.count({
+        where: { userId: login.user.id }
+      })
+    ).toBe(1);
+    const input = {
+      provider: "MICROSOFT" as const,
+      userId: login.user.id,
+      sessionId: login.session.id,
+      code,
+      codeVerifier
+    };
+    await expect(
+      second.finalizeNativeLink({ ...input, codeVerifier: "w".repeat(43) })
+    ).rejects.toMatchObject({ code: "PRIMARY_LOGIN_INVALID_OR_EXPIRED" });
+    const results = await Promise.allSettled([
+      first.finalizeNativeLink(input),
+      second.finalizeNativeLink(input)
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(
+      await database.externalIdentity.count({
+        where: { userId: login.user.id }
+      })
+    ).toBe(2);
+    expect(
+      await database.session.count({ where: { userId: login.user.id } })
+    ).toBe(1);
+    const challenges = await database.authChallenge.findMany({
+      where: { userId: login.user.id }
+    });
+    const serialized = JSON.stringify(challenges);
+    for (const secret of [
+      handoff,
+      code,
+      codeVerifier,
+      "postgres-primary-code",
+      login.sessionToken
+    ]) {
+      expect(serialized.includes(secret)).toBe(false);
+    }
+    const relogin = await completePrimaryLogin(second, "MICROSOFT");
+    expect(relogin.user.id).toBe(login.user.id);
+  });
+
+  it("rejects expired and unbound native LINK tickets without consuming a live finalization", async () => {
+    const repository = new PrismaAuthRepository(database);
+    const user = await database.user.create({
+      data: { email: "native-ticket@example.com", displayName: "Synthetic" }
+    });
+    const now = new Date();
+    const input = {
+      provider: "GOOGLE" as const,
+      stage: "FINALIZE" as const,
+      userId: user.id,
+      sessionId: randomUUID(),
+      codeChallenge: "a".repeat(43),
+      secretHash: "b".repeat(64),
+      expiresAt: new Date(now.getTime() + 120_000),
+      identity: {
+        provider: "GOOGLE" as const,
+        providerSubject: "synthetic",
+        email: user.email,
+        displayName: null,
+        emailVerified: true
+      }
+    };
+    await repository.createNativeLinkTicket(input);
+    const consume = {
+      provider: input.provider,
+      stage: input.stage,
+      secretHash: input.secretHash,
+      now
+    };
+    expect(await repository.consumeNativeLinkTicket(consume)).toBeNull();
+    expect(
+      await repository.consumeNativeLinkTicket({
+        ...consume,
+        binding: { ...input, sessionId: randomUUID() }
+      })
+    ).toBeNull();
+    expect(
+      await repository.consumeNativeLinkTicket({
+        ...consume,
+        now: new Date(now.getTime() + 120_000),
+        binding: input
+      })
+    ).toBeNull();
+    expect(
+      await repository.consumeNativeLinkTicket({ ...consume, binding: input })
+    ).not.toBeNull();
+    expect(
+      await repository.consumeNativeLinkTicket({ ...consume, binding: input })
+    ).toBeNull();
   });
 
   it("persists a Google identity and creates a one-use Phase 1 session", async () => {

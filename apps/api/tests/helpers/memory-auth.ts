@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { AppError } from "../../src/lib/app-error.js";
+import { matchesNativeLinkTicket } from "../../src/modules/auth/native-link-ticket.js";
 import type {
   AuthRepository,
+  NativeLinkTicket,
+  ConsumeNativeLinkTicketInput,
   AuthSessionRecord,
   AuthUserRecord,
   CreateGoogleOAuthChallengeInput,
@@ -51,6 +54,30 @@ interface StoredPrimaryIdentity extends PrimaryIdentityRecord {
 }
 
 export class MemoryAuthRepository implements AuthRepository {
+  public readonly nativeLinkTickets: (NativeLinkTicket & {
+    secretHash: string;
+    expiresAt: Date;
+    consumed: boolean;
+  })[] = [];
+  public async createNativeLinkTicket(
+    input: NativeLinkTicket & { secretHash: string; expiresAt: Date }
+  ): Promise<void> {
+    this.nativeLinkTickets.push({ ...input, consumed: false });
+  }
+  public async consumeNativeLinkTicket(
+    input: ConsumeNativeLinkTicketInput
+  ): Promise<NativeLinkTicket | null> {
+    const ticket = this.nativeLinkTickets.find(
+      (row) =>
+        row.secretHash === input.secretHash &&
+        !row.consumed &&
+        row.expiresAt > input.now &&
+        matchesNativeLinkTicket(row, input)
+    );
+    if (!ticket) return null;
+    ticket.consumed = true;
+    return ticket;
+  }
   public readonly challenges: StoredChallenge[] = [];
   public readonly googleChallenges: StoredGoogleChallenge[] = [];
   public readonly primaryChallenges: StoredPrimaryChallenge[] = [];
@@ -153,7 +180,8 @@ export class MemoryAuthRepository implements AuthRepository {
       intent: challenge.intent,
       userId: challenge.userId,
       codeVerifier: challenge.codeVerifier,
-      nonce: challenge.nonce
+      nonce: challenge.nonce,
+      ...(challenge.nativeLink ? { nativeLink: true as const } : {})
     };
   }
 

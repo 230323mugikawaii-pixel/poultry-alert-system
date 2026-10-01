@@ -2,8 +2,14 @@ import { Prisma } from "../../generated/prisma/client.js";
 import type { DatabaseClient } from "../../db/client.js";
 import { retrySerializableTransaction } from "../../db/transaction-retry.js";
 import { AppError } from "../../lib/app-error.js";
+import {
+  matchesNativeLinkTicket,
+  readNativeLinkTicket
+} from "./native-link-ticket.js";
 import type {
   AuthRepository,
+  NativeLinkTicket,
+  ConsumeNativeLinkTicketInput,
   AuthSessionRecord,
   AuthUserRecord,
   CreateGoogleOAuthChallengeInput,
@@ -19,6 +25,73 @@ import type {
 
 export class PrismaAuthRepository implements AuthRepository {
   public constructor(private readonly database: DatabaseClient) {}
+
+  public async createNativeLinkTicket(
+    input: NativeLinkTicket & {
+      readonly secretHash: string;
+      readonly expiresAt: Date;
+    }
+  ): Promise<void> {
+    await this.database.authChallenge.create({
+      data: {
+        userId: input.userId,
+        kind: primaryChallengeKind(input.provider),
+        secretHash: input.secretHash,
+        expiresAt: input.expiresAt,
+        maxAttempts: 1,
+        payload: {
+          nativeLinkTicket: 1,
+          provider: input.provider,
+          stage: input.stage,
+          sessionId: input.sessionId,
+          codeChallenge: input.codeChallenge,
+          ...(input.identity ? { identity: { ...input.identity } } : {})
+        }
+      }
+    });
+  }
+
+  public consumeNativeLinkTicket(
+    input: ConsumeNativeLinkTicketInput
+  ): Promise<NativeLinkTicket | null> {
+    return retrySerializableTransaction(
+      () =>
+        this.database.$transaction(
+          async (transaction) => {
+            const row = await transaction.authChallenge.findUnique({
+              where: { secretHash: input.secretHash }
+            });
+            if (
+              !row ||
+              row.kind !== primaryChallengeKind(input.provider) ||
+              row.consumedAt ||
+              row.expiresAt <= input.now ||
+              row.attemptCount >= row.maxAttempts
+            )
+              return null;
+            const ticket = readNativeLinkTicket(row.payload, row.userId);
+            if (!ticket || !matchesNativeLinkTicket(ticket, input)) return null;
+            const consumed = await transaction.authChallenge.updateMany({
+              where: {
+                id: row.id,
+                consumedAt: null,
+                expiresAt: { gt: input.now },
+                attemptCount: { lt: row.maxAttempts }
+              },
+              data: { consumedAt: input.now, attemptCount: { increment: 1 } }
+            });
+            return consumed.count === 1 ? ticket : null;
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
+      () =>
+        new AppError(
+          "PRIMARY_LOGIN_CONFLICT",
+          "連携処理が競合しました。もう一度お試しください。",
+          409
+        )
+    );
+  }
 
   public async createMagicLinkChallenge(
     input: CreateMagicLinkChallengeInput
@@ -212,7 +285,8 @@ export class PrismaAuthRepository implements AuthRepository {
           provider: input.provider,
           intent: input.intent,
           codeVerifier: input.codeVerifier,
-          nonce: input.nonce
+          nonce: input.nonce,
+          ...(input.nativeLink ? { nativeLink: true } : {})
         },
         expiresAt: input.expiresAt,
         maxAttempts: 1
@@ -747,7 +821,13 @@ function readPrimaryChallenge(
   ) {
     return null;
   }
-  return { provider, intent, codeVerifier, nonce };
+  return {
+    provider,
+    intent,
+    codeVerifier,
+    nonce,
+    ...(value.nativeLink === true ? { nativeLink: true as const } : {})
+  };
 }
 
 function primaryChallengeKind(
