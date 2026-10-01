@@ -98,7 +98,7 @@ All iOS paths above are under `apps/ios/CallNow/`. This report is the only new d
 
 ## Not yet verified / stop point
 
-- **No staging deployment**; owner approval is required before executing `apps/deploy-manual-staging.sh`.
+- At this implementation checkpoint, staging was not deployed; owner approval was required before executing `scripts/deploy-manual-staging.sh`. The subsequent approved deployment is recorded in [the staging checkpoint](native-identity-link-staging-results.md).
 - Real Google login → Microsoft linking → logout → Microsoft login to the same user/Team remains unverified. Simulator tests use fakes; they are not provider E2E evidence.
 - Human Google/Microsoft authentication/consent will be needed after an approved staging deployment and staging-configured app build.
 - Existing LOGIN's process-local `native/exchange` storage remains unchanged and retains its prior multi-instance/restart limitation. The new LINK tickets do not share that limitation.
