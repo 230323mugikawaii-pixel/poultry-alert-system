@@ -1,6 +1,7 @@
 import Foundation
 
-/// Mirrors GET /api/v1/teams/current (apps/api/src/modules/teams/team-routes.ts).
+/// Mirrors the `{ team }` shape shared by GET /api/v1/teams/current and
+/// POST /api/v1/teams/bootstrap (apps/api/src/modules/teams/team-routes.ts).
 /// Only the fields this shell needs are declared; JSONDecoder ignores the
 /// rest of the response (seats, subscription, keywords, ...) without error.
 struct CurrentTeamResponse: Decodable {

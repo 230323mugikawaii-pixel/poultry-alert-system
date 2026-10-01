@@ -171,10 +171,18 @@ final class AuthSession: NSObject, ObservableObject {
                 "/api/v1/auth/native/exchange",
                 body: NativeExchangeRequest(code: code)
             )
-            // A failed team lookup here isn't fatal to showing the user as
+            // POST /teams/bootstrap, not GET /teams/current: a brand-new
+            // account has no team yet, and nothing earlier in the login flow
+            // provisions one. bootstrap is idempotent — ensureInitialTeamForUser
+            // returns the existing team when the user already has one (see
+            // team-service.ts) — so it's safe to call on every login, new or
+            // returning. A failure here isn't fatal to showing the user as
             // signed in — push registration will simply report an error
             // until retried (see PushRegistrationCenter.didReceiveDeviceToken).
-            currentTeamId = (try? await api.get("/api/v1/teams/current") as CurrentTeamResponse)?.team.id
+            currentTeamId = (try? await api.post(
+                "/api/v1/teams/bootstrap",
+                body: TeamBootstrapRequest()
+            ) as CurrentTeamResponse)?.team.id
             state = .signedIn(response.user)
         } catch {
             state = .failed("ログインに失敗しました。もう一度お試しください。")
@@ -186,6 +194,11 @@ final class AuthSession: NSObject, ObservableObject {
 private struct NativeExchangeRequest: Encodable {
     let code: String
 }
+
+/// Body for POST /api/v1/teams/bootstrap (team-routes.ts). No fields are
+/// required here — this shell doesn't collect initial keywords during
+/// onboarding, it just needs a team to exist.
+private struct TeamBootstrapRequest: Encodable {}
 
 extension AuthSession: ASWebAuthenticationPresentationContextProviding {
     nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
